@@ -5,16 +5,20 @@
 
 #include <functional>
 #include <numeric>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#else
+#endif
+
 #include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/zeros_native.h>
-#endif
 
 namespace at::native {
 
@@ -180,7 +184,16 @@ SparseTensor _coalesce_sparse_mps(const SparseTensor& self) {
     }
   });
 
-  SparseTensor result = _sparse_coo_tensor_unsafe_symint(out_indices, out_values, self.sym_sizes())._coalesced_(true);
+  Tensor tensor = at::native::_sparse_coo_tensor_unsafe_symint(
+      out_indices,
+      out_values,
+      self.sym_sizes(),
+      std::optional<ScalarType>(values.scalar_type()),
+      std::optional<Layout>(self.layout()),
+      std::optional<Device>(self.device()),
+      std::nullopt,
+      /*is_coalesced=*/true);
+  SparseTensor result = tensor._coalesced_(true);
   return result;
 }
 
@@ -239,30 +252,18 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_mps)
       "_convert_indices_from_csr_to_coo: expected MPS tensors");
 
   TORCH_CHECK(
-      crow_indices.scalar_type() == kLong,
-      "_convert_indices_from_csr_to_coo: crow_indices must be int64");
-  TORCH_CHECK(
-      col_indices.scalar_type() == (out_int32 ? kInt : kLong),
-      "_convert_indices_from_csr_to_coo: col_indices dtype mismatch");
+      result.scalar_type() == (out_int32 ? kInt : kLong),
+      "_convert_indices_from_csr_to_coo: output dtype mismatch");
 
   if (result.numel() == 0) {
+    result.zero_();
     return;
   }
 
+  int64_t rows_per_batch = crow_indices.size(-1) - 1;
   TORCH_CHECK(
-      crow_indices.dim() >= 1,
-      "_convert_indices_from_csr_to_coo: expected batched crow_indices");
-
-  const int64_t rows_per_batch = crow_indices.size(-1) - 1;
-  TORCH_CHECK(rows_per_batch >= 0, "_convert_indices_from_csr_to_coo: invalid crow_indices shape");
-
-  auto batch_shape = crow_indices.sizes().slice(0, crow_indices.dim() - 1);
-  const int64_t batch_dim = std::accumulate(
-      batch_shape.begin(), batch_shape.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
-
-  TORCH_CHECK(
-      result.sizes().equals({batch_dim, 2, col_indices.numel() / batch_dim}),
-      "_convert_indices_from_csr_to_coo: unexpected output shape");
+      rows_per_batch >= 0,
+      "_convert_indices_from_csr_to_coo: invalid crow_indices shape");
 
   mps::csr::expand_csr_rows_to_coo_out(
       crow_indices,

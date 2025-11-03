@@ -9,7 +9,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#else
+#endif
+
 #include <ATen/ops/_coalesce_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/cat.h>
@@ -24,7 +25,6 @@
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/copy_sparse_to_sparse.h>
 #include <ATen/ops/mul.h>
-#endif
 
 namespace at::native {
 

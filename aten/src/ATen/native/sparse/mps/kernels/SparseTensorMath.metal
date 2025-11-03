@@ -17,20 +17,6 @@ inline uint lower_bound_i64(device const long* arr, uint lo, uint hi, long key) 
   return l;
 }
 
-inline uint upper_bound_i64(device const long* arr, uint lo, uint hi, long key) {
-  uint l = lo, r = hi;
-  while (l < r) {
-    uint m = (l + r) >> 1;
-    long v = arr[m];
-    if (v <= key) {
-      l = m + 1;
-    } else {
-      r = m;
-    }
-  }
-  return l;
-}
-
 kernel void build_row_ptr_from_sorted_rows_by_batch(
     device const long* rows        [[buffer(0)]],
     device const long* batch_ptr   [[buffer(1)]],
@@ -59,60 +45,6 @@ kernel void build_row_ptr_from_sorted_rows_by_batch(
     row_ptr[out_base + (ulong)i] = (long)pos;
   }
 }
-
-template <typename index_t>
-kernel void expand_csr_rows_to_coo_kernel(
-    device const long* crow_indices [[buffer(0)]],
-    device index_t*    row_indices  [[buffer(1)]],
-    constant uint3&    dims         [[buffer(2)]],
-    uint3              tid          [[thread_position_in_grid]])
-{
-  const uint rows_per_batch = dims.x;
-  const uint nnz_per_batch  = dims.y;
-  const uint batch_count    = dims.z;
-
-  const uint nnz_idx = tid.x;
-  const uint batch   = tid.y;
-
-  if (batch >= batch_count || nnz_idx >= nnz_per_batch) {
-    return;
-  }
-
-  const ulong base = (ulong)batch * (ulong)(rows_per_batch + 1);
-  const device long* crow = crow_indices + base;
-
-  uint lo = 0;
-  uint hi = rows_per_batch;
-  while (lo < hi) {
-    uint mid = (lo + hi) >> 1;
-    long start = crow[mid];
-    long end = crow[mid + 1];
-    if ((long)nnz_idx < start) {
-      hi = mid;
-    } else if ((long)nnz_idx >= end) {
-      lo = mid + 1;
-    } else {
-      lo = mid;
-      break;
-    }
-  }
-
-  const ulong out_index = (ulong)batch * (ulong)nnz_per_batch + (ulong)nnz_idx;
-  row_indices[out_index] = static_cast<index_t>(lo);
-}
-
-template [[host_name("expand_csr_rows_to_coo_i32")]] kernel void expand_csr_rows_to_coo_kernel<int>(
-    device const long* crow_indices [[buffer(0)]],
-    device int*        row_indices  [[buffer(1)]],
-    constant uint3&    dims         [[buffer(2)]],
-    uint3              tid          [[thread_position_in_grid]]);
-
-template [[host_name("expand_csr_rows_to_coo_i64")]] kernel void expand_csr_rows_to_coo_kernel<long>(
-    device const long* crow_indices [[buffer(0)]],
-    device long*       row_indices  [[buffer(1)]],
-    constant uint3&    dims         [[buffer(2)]],
-    uint3              tid          [[thread_position_in_grid]]);
-
 
 template <typename T>
 kernel void spmm_bmm_coo_rows_grouped(

@@ -1,21 +1,37 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/mps/CSRIndexUtils.h>
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+
+#include <ATen/TensorOperators.h>
+
+#include <ATen/ops/_validate_compressed_sparse_indices.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/cumsum_native.h>
+#include <ATen/ops/cumsum.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/floor_divide.h>
+#include <ATen/ops/remainder.h>
+#include <ATen/ops/scatter_native.h>
+#include <ATen/ops/zeros_native.h>
 
 #include <algorithm>
 #include <array>
 #include <functional>
 #include <numeric>
 #include <string>
+#include <vector>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/empty_native.h>
-#include <ATen/ops/zeros_native.h>
-#endif
+namespace at {
+void _validate_compressed_sparse_indices(
+    bool is_crow,
+    const Tensor& compressed_idx,
+    const Tensor& plain_idx,
+    int64_t cdim,
+    int64_t dim,
+    int64_t nnz);
+} // namespace at
 
 namespace at::native::mps::csr {
 
@@ -26,13 +42,15 @@ static auto& metal_lib() {
   return at::native::mps::MetalShaderLibrary::getBundledLibrary();
 }
 #else
-#include <ATen/native/sparse/mps/Coalesce_metallib.h>
+#include <ATen/native/mps/SparseTensorMath_metallib.h>
 static auto& metal_lib() {
   return at::native::mps::MetalShaderLibrary::getBundledLibrary();
 }
 #endif
 
 } // namespace
+
+using namespace mps;
 
 void build_batch_ptr_mps_out(
     const Tensor& batch_indices,
@@ -63,7 +81,7 @@ void build_batch_ptr_mps_out(
   //                  │  └─────── batch1 starts at index 3
   //                  └────────── batch0 starts at index 0
 
-  auto* stream = at::native::mps::getCurrentMPSStream();
+  auto* stream = getCurrentMPSStream();
   const int64_t nnz = batch_indices.numel();
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -79,7 +97,7 @@ void build_batch_ptr_mps_out(
       MTLSize grid = MTLSizeMake(Q, 1, 1);
       MTLSize tgs = MTLSizeMake(tgW, 1, 1);
 
-      at::native::mps::mtl_setArgs(
+      mtl_setArgs(
           enc,
           batch_indices,
           batch_ptr,
@@ -129,7 +147,7 @@ void build_row_ptr_per_batch_mps_out(
   //   row_ptr   -> [0, 2, 3, 3, 4,   0, 1, 1, 3, 3]
   //                  row_ptr[0]          row_ptr[1]
 
-  auto* stream = at::native::mps::getCurrentMPSStream();
+  auto* stream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -145,7 +163,7 @@ void build_row_ptr_per_batch_mps_out(
       MTLSize grid = MTLSizeMake(Qx, Qy, 1);
       MTLSize tgs = MTLSizeMake(tgW, 1, 1);
 
-      at::native::mps::mtl_setArgs(
+      mtl_setArgs(
           enc,
           rows,
           batch_ptr,
@@ -167,52 +185,6 @@ Tensor build_row_ptr_per_batch_mps(
   build_row_ptr_per_batch_mps_out(rows, batch_ptr, batch_count, rows_per_batch, row_ptr);
   return row_ptr;
 }
-
-namespace {
-
-Tensor build_coo_row_indices(
-    const Tensor& crow_indices,
-    int64_t rows_per_batch,
-    int64_t nnz_per_batch,
-    bool out_int32) {
-  const auto batch_dim = crow_indices.size(0);
-  auto options = crow_indices.options().dtype(out_int32 ? at::kInt : at::kLong);
-  Tensor row_indices = at::empty({batch_dim, nnz_per_batch}, options);
-
-  auto* stream = at::native::mps::getCurrentMPSStream();
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      const std::string func = out_int32
-          ? "expand_csr_rows_to_coo_i32"
-          : "expand_csr_rows_to_coo_i64";
-      auto pso = metal_lib().getPipelineStateForFunc(func);
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
-
-      const uint32_t tew = pso.threadExecutionWidth;
-      const uint32_t Qx = static_cast<uint32_t>(nnz_per_batch);
-      const uint32_t Qy = static_cast<uint32_t>(batch_dim);
-      const uint32_t tgW = std::min<uint32_t>(Qx, tew);
-
-      MTLSize grid = MTLSizeMake(Qx, Qy, 1);
-      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
-
-      at::native::mps::mtl_setArgs(
-          enc,
-          crow_indices,
-          row_indices,
-          std::array<uint32_t, 3>{static_cast<uint32_t>(rows_per_batch),
-                                   static_cast<uint32_t>(nnz_per_batch),
-                                   static_cast<uint32_t>(batch_dim)});
-      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
-    }
-  });
-
-  return row_indices;
-}
-
-} // namespace
 
 void expand_csr_rows_to_coo_out(
     const Tensor& crow_indices,
@@ -244,31 +216,75 @@ void expand_csr_rows_to_coo_out(
       "expand_csr_rows_to_coo: crow_indices last dimension must equal rows_per_batch + 1");
 
   auto batch_shape = crow_indices.sizes().slice(0, crow_indices.dim() - 1);
-  const int64_t batch_dim = std::accumulate(
+  const int64_t batch_size = std::accumulate(
       batch_shape.begin(), batch_shape.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
 
   TORCH_CHECK(
-      col_indices.numel() % batch_dim == 0,
+      col_indices.numel() % batch_size == 0,
       "expand_csr_rows_to_coo: col_indices elements must be divisible by batch count");
-  const int64_t nnz_per_batch = col_indices.numel() / batch_dim;
+  const int64_t nnz_per_batch = col_indices.numel() / batch_size;
+
+  const int64_t batch_ndim = static_cast<int64_t>(batch_shape.size());
+  const int64_t expected_rows = batch_ndim + 2;
+  const int64_t total_nnz = col_indices.numel();
 
   TORCH_CHECK(
-      coo_indices.dim() == 3 &&
-      coo_indices.size(0) == batch_dim &&
-      coo_indices.size(1) == 2 &&
-      coo_indices.size(2) == nnz_per_batch,
-      "expand_csr_rows_to_coo: output must have shape [batch, 2, nnz]");
+      coo_indices.dim() == 2 &&
+      coo_indices.size(0) == expected_rows &&
+      coo_indices.size(1) == total_nnz,
+      "expand_csr_rows_to_coo: output must have shape [",
+      expected_rows,
+      ", ",
+      total_nnz,
+      "]");
 
-  Tensor crow_flat = crow_indices.reshape({batch_dim, rows_plus_one}).contiguous();
-  Tensor rows = build_coo_row_indices(crow_flat, rows_per_batch, nnz_per_batch, out_int32);
-  Tensor cols = col_indices.reshape({batch_dim, nnz_per_batch}).contiguous();
+  Tensor crow_flat = crow_indices.reshape({batch_size, rows_plus_one}).contiguous();
+  Tensor starts = crow_flat.slice(/*dim=*/1, /*start=*/0, /*end=*/rows_plus_one - 1);
+
+  auto options_long = crow_indices.options().dtype(at::kLong);
+  Tensor indicator = at::zeros({batch_size, nnz_per_batch}, options_long);
+  if (rows_per_batch > 0 && nnz_per_batch > 0) {
+    indicator.scatter_(1, starts, 1);
+  }
+
+  Tensor rows_flat = (at::cumsum(indicator, 1) - 1).reshape({total_nnz});
+  Tensor cols_flat = col_indices.reshape({total_nnz}).contiguous();
+
+  Tensor linear_matrix = at::arange(batch_size, options_long).unsqueeze(1).expand({batch_size, nnz_per_batch});
+  Tensor linear_flat = linear_matrix.reshape({total_nnz});
+
+  std::vector<int64_t> strides(batch_ndim);
+  int64_t stride_acc = 1;
+  for (int64_t i = batch_ndim - 1; i >= 0; --i) {
+    strides[i] = stride_acc;
+    stride_acc *= batch_shape[i];
+  }
+
+  for (int64_t dim_idx = 0; dim_idx < batch_ndim; ++dim_idx) {
+    int64_t size = batch_shape[dim_idx];
+    if (size == 1) {
+      coo_indices.select(0, dim_idx).zero_();
+      continue;
+    }
+    int64_t stride = strides[dim_idx];
+    Tensor coord = at::floor_divide(linear_flat, stride);
+    coord = at::remainder(coord, size);
+    coo_indices.select(0, dim_idx).copy_(coord.to(coo_indices.scalar_type()));
+  }
+
+  auto assign_row = [&](int64_t idx, const Tensor& src) {
+    Tensor tmp = src.scalar_type() == coo_indices.scalar_type()
+        ? src
+        : src.to(coo_indices.scalar_type());
+    coo_indices.select(0, idx).copy_(tmp);
+  };
 
   if (transpose) {
-    coo_indices.select(1, 0).copy_(cols);
-    coo_indices.select(1, 1).copy_(rows);
+    assign_row(batch_ndim, cols_flat);
+    assign_row(batch_ndim + 1, rows_flat);
   } else {
-    coo_indices.select(1, 0).copy_(rows);
-    coo_indices.select(1, 1).copy_(cols);
+    assign_row(batch_ndim, rows_flat);
+    assign_row(batch_ndim + 1, cols_flat);
   }
 }
 
@@ -281,10 +297,13 @@ Tensor expand_csr_rows_to_coo(
   auto batch_shape = crow_indices.sizes().slice(0, crow_indices.dim() - 1);
   const int64_t batch_dim = std::accumulate(
       batch_shape.begin(), batch_shape.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
-  const int64_t nnz_per_batch = batch_dim > 0 ? col_indices.numel() / std::max<int64_t>(batch_dim, 1) : 0;
+  const int64_t total_nnz = col_indices.numel();
+  const int64_t nnz_per_batch = batch_dim > 0 ? total_nnz / std::max<int64_t>(batch_dim, int64_t{1}) : 0;
+  const int64_t batch_ndim = static_cast<int64_t>(batch_shape.size());
+  const int64_t expected_rows = batch_ndim + 2;
   auto options = crow_indices.options().dtype(out_int32 ? at::kInt : at::kLong);
-  Tensor coo_indices = at::empty({batch_dim, 2, nnz_per_batch}, options);
-  if (col_indices.numel() == 0) {
+  Tensor coo_indices = at::empty({expected_rows, total_nnz}, options);
+  if (total_nnz == 0) {
     coo_indices.zero_();
     return coo_indices;
   }
@@ -299,5 +318,27 @@ Tensor expand_csr_rows_to_coo(
 }
 
 } // namespace at::native::mps::csr
+
+namespace at::native {
+
+void _validate_compressed_sparse_indices_mps(
+    const bool is_crow,
+    const Tensor& cidx,
+    const Tensor& idx,
+    const int64_t cdim,
+    const int64_t dim,
+    const int64_t nnz) {
+  auto cidx_cpu = cidx.cpu();
+  auto idx_cpu = idx.cpu();
+  at::_validate_compressed_sparse_indices(
+      is_crow,
+      cidx_cpu,
+      idx_cpu,
+      cdim,
+      dim,
+      nnz);
+}
+
+} // namespace at::native
 
 

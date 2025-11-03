@@ -829,6 +829,28 @@ class TestMPS(TestCaseMPS):
         res_cpu = x_cpu.exp()
         self.assertEqual(res, res_cpu)
 
+    def test_sparse_csr_tensor_factory(self):
+        crow_indices = torch.tensor([0, 2, 3], dtype=torch.int64, device="mps")
+        col_indices = torch.tensor([0, 1, 0], dtype=torch.int64, device="mps")
+        values = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device="mps")
+
+        csr = torch.sparse_csr_tensor(
+            crow_indices,
+            col_indices,
+            values,
+            size=(2, 2),
+            device="mps",
+        )
+
+        self.assertEqual(csr.device.type, "mps")
+        self.assertEqual(csr.layout, torch.sparse_csr)
+        self.assertEqual(csr.crow_indices().device.type, "mps")
+        self.assertEqual(csr.col_indices().device.type, "mps")
+        self.assertEqual(csr.values().device.type, "mps")
+
+        expected_dense = torch.tensor([[1.0, 2.0], [3.0, 0.0]], device="mps")
+        self.assertEqual(csr.to_dense(), expected_dense)
+
     def _testLeakyRelu(self, np_features, negative_slope, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
         mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()

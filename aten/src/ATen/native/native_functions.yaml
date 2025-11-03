@@ -3083,6 +3083,7 @@
   dispatch:
     CPU: _validate_compressed_sparse_indices_cpu
     CUDA: _validate_compressed_sparse_indices_cuda
+    MPS: _validate_compressed_sparse_indices_mps
 
 - func: _cufft_get_plan_cache_size(DeviceIndex device_index) -> int
 
@@ -7596,7 +7597,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseMeta: values_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: values_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrMPS: values_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: values_nested
     CompositeExplicitAutograd: values_default
   device_check: NoCheck
@@ -7605,7 +7606,7 @@
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: crow_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrMPS: crow_indices_sparse_csr
     CompositeExplicitAutograd: crow_indices_default
   device_check: NoCheck
   device_guard: False
@@ -7613,7 +7614,7 @@
 - func: col_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: col_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrMPS: col_indices_sparse_csr
     CompositeExplicitAutograd: col_indices_default
   device_check: NoCheck
   device_guard: False

@@ -1,6 +1,10 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <cstdint>
+
+namespace at {
+class Tensor;
+}
 
 namespace at::native::mps::csr {
 
@@ -36,13 +40,13 @@ void build_row_ptr_per_batch_mps_out(
     int64_t rows_per_batch,
     const Tensor& row_ptr);
 
-// Expands batched CSR (crow_indices/col_indices) back to batched COO indices
-// when the compressed dimension corresponds to rows. Returns a tensor of shape
-// [batch_count, 2, nnz_per_batch] containing row/col pairs. The inputs must be
-// contiguous MPS tensors with matching batch shapes, `rows_per_batch + 1`
-// entries in crow_indices for each batch, and nnz_per_batch entries in
-// col_indices. The resulting COO indices can be reshaped or flattened by the
-// caller as needed.
+// Expands batched CSR (crow_indices/col_indices) back to COO indices when the
+// compressed dimension corresponds to rows. The output layout matches the
+// COO-style convention used by CPU/CUDA implementations, i.e. a tensor of shape
+// [batch_ndim + 2, total_nnz], where the leading `batch_ndim` rows encode the
+// broadcast batch coordinates, followed by the row (or column, if `transpose`
+// is true) indices and finally the column (or row) indices. All tensors must
+// reside on the MPS device.
 Tensor expand_csr_rows_to_coo(
     const Tensor& crow_indices,
     const Tensor& col_indices,
@@ -59,5 +63,17 @@ void expand_csr_rows_to_coo_out(
     const Tensor& coo_indices);
 
 } // namespace at::native::mps::csr
+
+namespace at::native {
+
+void _validate_compressed_sparse_indices_mps(
+    bool is_crow,
+    const Tensor& compressed_idx,
+    const Tensor& plain_idx,
+    int64_t cdim,
+    int64_t dim,
+    int64_t nnz);
+
+} // namespace at::native
 
 
