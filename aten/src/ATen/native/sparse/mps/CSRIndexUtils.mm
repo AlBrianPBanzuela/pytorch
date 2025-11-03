@@ -1,19 +1,25 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/mps/CSRIndexUtils.h>
 
-#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
 
 #include <ATen/TensorOperators.h>
 
 #include <ATen/ops/_validate_compressed_sparse_indices.h>
 #include <ATen/ops/arange.h>
+#include <ATen/ops/diff.h>
 #include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/cumsum.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/floor_divide.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/repeat_interleave.h>
+#include <ATen/ops/repeat_interleave_native.h>
 #include <ATen/ops/remainder.h>
 #include <ATen/ops/scatter_native.h>
+#include <ATen/ops/scatter_reduce.h>
+#include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_native.h>
 
 #include <algorithm>
@@ -34,23 +40,6 @@ void _validate_compressed_sparse_indices(
 } // namespace at
 
 namespace at::native::mps::csr {
-
-namespace {
-
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& metal_lib() {
-  return at::native::mps::MetalShaderLibrary::getBundledLibrary();
-}
-#else
-#include <ATen/native/mps/SparseTensorMath_metallib.h>
-static auto& metal_lib() {
-  return at::native::mps::MetalShaderLibrary::getBundledLibrary();
-}
-#endif
-
-} // namespace
-
-using namespace mps;
 
 void build_batch_ptr_mps_out(
     const Tensor& batch_indices,
@@ -81,36 +70,27 @@ void build_batch_ptr_mps_out(
   //                  │  └─────── batch1 starts at index 3
   //                  └────────── batch0 starts at index 0
 
-  auto* stream = getCurrentMPSStream();
-  const int64_t nnz = batch_indices.numel();
+  batch_ptr.zero_();
 
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto pso = metal_lib().getPipelineStateForFunc("build_batch_ptr_from_sorted_batches");
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
+  if (batch_count == 0 || batch_indices.numel() == 0) {
+    return;
+  }
 
-      const uint32_t tew = pso.threadExecutionWidth;
-      const uint32_t Q = static_cast<uint32_t>(batch_count + 1);
-      const uint32_t tgW = std::min<uint32_t>(Q, tew);
+  auto options = batch_ptr.options();
+  Tensor counts = at::empty({batch_count}, options);
+  counts.zero_();
+  Tensor ones = at::empty(batch_indices.sizes(), options);
+  ones.fill_(1);
+  counts.scatter_add_(0, batch_indices, ones);
 
-      MTLSize grid = MTLSizeMake(Q, 1, 1);
-      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
-
-      mtl_setArgs(
-          enc,
-          batch_indices,
-          batch_ptr,
-          std::array<uint32_t, 2>{static_cast<uint32_t>(nnz),
-                                   static_cast<uint32_t>(batch_count)});
-      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
-    }
-  });
+  Tensor prefix = at::cumsum(counts, /*dim=*/0);
+  batch_ptr.slice(/*dim=*/0, /*start=*/1, /*end=*/batch_count + 1).copy_(prefix);
 }
 
 Tensor build_batch_ptr_mps(const Tensor& batch_indices, int64_t batch_count) {
   auto options = batch_indices.options().dtype(at::kLong);
-  Tensor batch_ptr = at::zeros({batch_count + 1}, options);
+  Tensor batch_ptr = at::empty({batch_count + 1}, options);
+  batch_ptr.zero_();
   build_batch_ptr_mps_out(batch_indices, batch_count, batch_ptr);
   return batch_ptr;
 }
@@ -147,32 +127,33 @@ void build_row_ptr_per_batch_mps_out(
   //   row_ptr   -> [0, 2, 3, 3, 4,   0, 1, 1, 3, 3]
   //                  row_ptr[0]          row_ptr[1]
 
-  auto* stream = getCurrentMPSStream();
+  row_ptr.zero_();
 
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto pso = metal_lib().getPipelineStateForFunc("build_row_ptr_from_sorted_rows_by_batch");
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
+  const auto nnz = rows.numel();
+  if (nnz == 0 || rows_per_batch == 0 || batch_count == 0) {
+    return;
+  }
 
-      const uint32_t tew = pso.threadExecutionWidth;
-      const uint32_t Qx = static_cast<uint32_t>(rows_per_batch + 1);
-      const uint32_t Qy = static_cast<uint32_t>(batch_count);
-      const uint32_t tgW = std::min<uint32_t>(Qx, tew);
+  Tensor batch_lengths = at::diff(batch_ptr);
+  TORCH_INTERNAL_ASSERT(batch_lengths.numel() == batch_count);
 
-      MTLSize grid = MTLSizeMake(Qx, Qy, 1);
-      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
+  Tensor batch_ids = at::_ops::repeat_interleave_self_Tensor::call(
+      at::arange(batch_count, rows.options()),
+      batch_lengths.to(rows.scalar_type()),
+      /*dim=*/0,
+      ::std::optional<int64_t>{});
 
-      mtl_setArgs(
-          enc,
-          rows,
-          batch_ptr,
-          row_ptr,
-          std::array<uint32_t, 2>{static_cast<uint32_t>(rows_per_batch),
-                                   static_cast<uint32_t>(batch_count)});
-      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
-    }
-  });
+  Tensor flat_indices = batch_ids * rows_per_batch + rows;
+  Tensor counts_flat = at::empty({batch_count * rows_per_batch}, row_ptr.options());
+  counts_flat.zero_();
+  Tensor ones_flat = at::empty(rows.sizes(), row_ptr.options());
+  ones_flat.fill_(1);
+  counts_flat.scatter_add_(0, flat_indices, ones_flat);
+
+  Tensor counts = counts_flat.view({batch_count, rows_per_batch});
+  Tensor row_ptr_view = row_ptr.view({batch_count, rows_per_batch + 1});
+  row_ptr_view.slice(/*dim=*/1, /*start=*/1, /*end=*/rows_per_batch + 1).copy_(
+      at::cumsum(counts, /*dim=*/1));
 }
 
 Tensor build_row_ptr_per_batch_mps(
@@ -242,7 +223,8 @@ void expand_csr_rows_to_coo_out(
   Tensor starts = crow_flat.slice(/*dim=*/1, /*start=*/0, /*end=*/rows_plus_one - 1);
 
   auto options_long = crow_indices.options().dtype(at::kLong);
-  Tensor indicator = at::zeros({batch_size, nnz_per_batch}, options_long);
+  Tensor indicator = at::empty({batch_size, nnz_per_batch}, options_long);
+  indicator.zero_();
   if (rows_per_batch > 0 && nnz_per_batch > 0) {
     indicator.scatter_(1, starts, 1);
   }

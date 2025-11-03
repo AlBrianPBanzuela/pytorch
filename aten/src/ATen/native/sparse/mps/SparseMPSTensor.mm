@@ -6,6 +6,7 @@
 #include <functional>
 #include <numeric>
 #include <optional>
+#include <c10/util/OptionalArrayRef.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -275,3 +276,10 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_mps)
 }
 
 } // namespace at::native
+
+namespace at {
+namespace {
+
+
+} // anonymous namespace
+} // namespace at

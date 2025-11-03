@@ -851,6 +851,11 @@ class TestMPS(TestCaseMPS):
         expected_dense = torch.tensor([[1.0, 2.0], [3.0, 0.0]], device="mps")
         self.assertEqual(csr.to_dense(), expected_dense)
 
+        # Ensure CSR round-trip remains on the CSR path (avoid COO conversion).
+        csr_roundtrip = csr.to_sparse_csr()
+        self.assertEqual(csr_roundtrip.layout, torch.sparse_csr)
+        self.assertEqual(csr_roundtrip.to_dense(), expected_dense)
+
     def _testLeakyRelu(self, np_features, negative_slope, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
         mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
