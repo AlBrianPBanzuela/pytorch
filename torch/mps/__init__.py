@@ -167,6 +167,29 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+def load_safetensors(filename: str) -> dict[str, Tensor]:
+    r"""Loads tensors from a safetensors file with optimized parallel I/O directly to MPS device.
+
+    Args:
+        filename (str): Path to the safetensors file.
+
+    Returns:
+        dict[str, Tensor]: Dictionary mapping tensor names to MPS tensors.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("requires safetensors file")
+        >>> state_dict = torch.mps.load_safetensors("model.safetensors")
+        >>> model.load_state_dict(state_dict)
+    """
+    if not hasattr(torch._C, "_mps_load_safetensors"):
+        raise RuntimeError(
+            "MPS safetensors loading is not available. "
+            "Ensure PyTorch was built with MPS support."
+        )
+    return torch._C._mps_load_safetensors(filename)
+
+
 from . import profiler
 from .event import Event
 
@@ -175,6 +198,7 @@ __all__ = [
     "compile_shader",
     "device_count",
     "get_rng_state",
+    "load_safetensors",
     "manual_seed",
     "seed",
     "set_rng_state",

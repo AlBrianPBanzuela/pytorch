@@ -38,6 +38,7 @@ class IMPSAllocator : public c10::Allocator {
   virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(
       const void* ptr) const = 0;
+  virtual void* getWritableSharedBufferPtr(const void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
 };

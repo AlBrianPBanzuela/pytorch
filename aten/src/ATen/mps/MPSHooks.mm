@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSBulkLoad.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/mps/MPSHooks.h>
@@ -154,6 +155,10 @@ bool MPSHooks::isPinnedPtr(const void* data) const {
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
   return at::mps::getIMPSAllocator();
+}
+
+std::unordered_map<std::string, at::Tensor> MPSHooks::loadSafetensors(const std::string& filename) const {
+  return at::mps::mps_load_safetensors(filename);
 }
 
 using at::MPSHooksRegistry;

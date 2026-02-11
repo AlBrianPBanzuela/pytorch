@@ -56,6 +56,10 @@ struct MPSHooks : public at::MPSHooksInterface {
   double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id)
       const override;
 
+  // MPSBulkLoad interface
+  std::unordered_map<std::string, at::Tensor> loadSafetensors(
+      const std::string& filename) const override;
+
   bool isBuilt() const override {
     return true;
   }

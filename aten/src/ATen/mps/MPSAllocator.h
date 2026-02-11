@@ -294,6 +294,8 @@ class MPSHeapAllocatorImpl {
   // returns a CPU-mapping of the input buffer and its retainCount,
   // if only it has Shared storage-mode and allocated on MPSAllocator
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* buffer);
+  // returns a writable CPU pointer to the shared buffer for direct writes (bulk loading)
+  void* getWritableSharedBufferPtr(const void* buffer);
   // records events for a list of MTLBuffers (list is used to lock the mutex once)
   // returns true if records any event (given if passed buffers exist and are shared-storage)
   bool recordEvents(c10::ArrayRef<const void*> buffers);
