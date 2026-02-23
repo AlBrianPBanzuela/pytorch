@@ -2050,7 +2050,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # Generate and process configs
         if (torch.version.hip is not None) and config.origami:
             try:
-                import origami  # type: ignore
+                import origami
             except ImportError:
                 raise ImportError("Origami not imported")
 
