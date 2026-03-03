@@ -181,7 +181,10 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
 
     # ==================== FP8 TESTS ====================
 
-    @unittest.skipUnless(_fa4_fp8_dependencies_available(), "FA4 FP8 backend unavailable (requires SM100)")
+    @unittest.skipUnless(
+        _fa4_fp8_dependencies_available(),
+        "FA4 FP8 backend unavailable (requires SM100)",
+    )
     @parametrize("batch", [1, 2])
     @parametrize("seq_len", [512, 1024])
     @parametrize("heads", [4, 8])
@@ -228,7 +231,10 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
         self.assertFalse(torch.isnan(out).any())
         self.assertTrue(torch.isfinite(out).all())
 
-    @unittest.skipUnless(_fa4_fp8_dependencies_available(), "FA4 FP8 backend unavailable (requires SM100)")
+    @unittest.skipUnless(
+        _fa4_fp8_dependencies_available(),
+        "FA4 FP8 backend unavailable (requires SM100)",
+    )
     @parametrize("is_causal", [False, True])
     def test_fp8_forward_correctness(self, device, is_causal):
         """Test FP8 forward numerical correctness against bf16 reference."""
@@ -286,7 +292,10 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
             f"FP8 error {error:.4f} exceeds tolerance",
         )
 
-    @unittest.skipUnless(_fa4_fp8_dependencies_available(), "FA4 FP8 backend unavailable (requires SM100)")
+    @unittest.skipUnless(
+        _fa4_fp8_dependencies_available(),
+        "FA4 FP8 backend unavailable (requires SM100)",
+    )
     def test_fp8_forward_with_descale(self, device):
         """Test FP8 forward with non-trivial descale values."""
         shape = SdpaShape(2, 4, 256, 64)
@@ -334,7 +343,10 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
         self.assertFalse(torch.isnan(out).any())
         self.assertTrue(torch.isfinite(out).all())
 
-    @unittest.skipUnless(_fa4_fp8_dependencies_available(), "FA4 FP8 backend unavailable (requires SM100)")
+    @unittest.skipUnless(
+        _fa4_fp8_dependencies_available(),
+        "FA4 FP8 backend unavailable (requires SM100)",
+    )
     def test_fp8_backward_not_supported(self, device):
         """Test that FP8 backward raises appropriate error."""
         shape = SdpaShape(2, 4, 256, 64)
@@ -383,7 +395,10 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
                 "Expected warning about FP8 backward not being supported",
             )
 
-    @unittest.skipUnless(_fa4_fp8_dependencies_available(), "FA4 FP8 backend unavailable (requires SM100)")
+    @unittest.skipUnless(
+        _fa4_fp8_dependencies_available(),
+        "FA4 FP8 backend unavailable (requires SM100)",
+    )
     @parametrize("is_causal", [False, True])
     def test_compiled_fp8_forward(self, device, is_causal):
         """Test that FP8 forward works with torch.compile."""

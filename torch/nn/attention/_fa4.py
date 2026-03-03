@@ -161,7 +161,12 @@ def _fa4_forward_support_error(
             return "seqused_k must be int32"
         if not seqused_k.is_cuda:
             return "seqused_k must be CUDA"
-    supported_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2, torch.float16, torch.bfloat16)
+    supported_dtypes = (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float16,
+        torch.bfloat16,
+    )
     if not all(t.dtype in supported_dtypes for t in {query, key, value}):
         return f"inputs must be one of {supported_dtypes}"
     if len({t.dtype for t in {query, key, value}}) != 1:
@@ -487,7 +492,11 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     # Pre-allocate output with query's strides (BHSD layout), then create
     # a BSHD view for the kernel. This ensures the returned output has
     # the same memory layout as the input query.
-    out_dtype = torch.bfloat16 if query.dtype in (torch.float8_e4m3fn, torch.float8_e5m2) else query.dtype
+    out_dtype = (
+        torch.bfloat16
+        if query.dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+        else query.dtype
+    )
     out_bhsd = torch.empty_like(query, dtype=out_dtype)
     out_bshd = out_bhsd.transpose(1, 2)
 
