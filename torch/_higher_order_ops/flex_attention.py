@@ -1449,3 +1449,358 @@ def flex_attention_backward_fake_tensor_mode(
 flex_attention_backward.py_autograd_impl(
     autograd_not_implemented(flex_attention_backward, deferred_error=True)
 )
+
+
+# ---------------------------- CreateBlockMask HOP ----------------------------
+
+
+def _extract_tensor_closure_vars(fn: Callable) -> tuple[Callable, tuple]:
+    """Extract tensor free variables from fn's closure.
+
+    Returns (new_fn, tensors) where new_fn accepts the original positional
+    args followed by the extracted tensors, and tensors is the tuple of
+    extracted tensor values.
+
+    During make_fx tracing the extra args become graph-input placeholders
+    instead of being baked into the subgraph as constants.
+    """
+    import types
+
+    closure = getattr(fn, "__closure__", None)
+    if closure is None:
+        return fn, ()
+
+    freevars = fn.__code__.co_freevars
+    tensor_indices: list[int] = []
+    tensors: list[Tensor] = []
+
+    for i, cell in enumerate(closure):
+        try:
+            val = cell.cell_contents
+        except ValueError:
+            continue
+        if isinstance(val, torch.Tensor):
+            tensor_indices.append(i)
+            tensors.append(val)
+
+    if not tensors:
+        return fn, ()
+
+    _fn = fn
+    _indices = tensor_indices
+    _n_orig = fn.__code__.co_argcount
+
+    def _make_cell(val: object) -> object:
+        x = val
+        def _inner():
+            return x
+        return _inner.__closure__[0]  # type: ignore[index]
+
+    def modified_fn(*args):
+        orig_args = args[:_n_orig]
+        extra_tensors = args[_n_orig:]
+        new_closure = list(_fn.__closure__)  # type: ignore[arg-type]
+        for idx, t in zip(_indices, extra_tensors):
+            new_closure[idx] = _make_cell(t)
+        rebuilt = types.FunctionType(
+            _fn.__code__,
+            _fn.__globals__,
+            _fn.__name__,
+            _fn.__defaults__,
+            tuple(new_closure),
+        )
+        return rebuilt(*orig_args)
+
+    return modified_fn, tuple(tensors)
+
+
+class CreateBlockMaskHOP(HigherOrderOperator):
+    """HOP for create_block_mask that traces mask_mod and lifts its closure tensors.
+
+    Returns a tuple of 8 tensors (the BlockMask tensor attributes):
+      (kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices,
+       q_num_blocks, q_indices, full_q_num_blocks, full_q_indices)
+
+    The caller reconstructs the BlockMask from these tensors plus the known
+    constants (seq_lengths, BLOCK_SIZE) and the mask_mod subgraph.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("create_block_mask", cacheable=True)
+
+    def __call__(
+        self,
+        mask_mod: Callable,
+        B: int,
+        H: int,
+        Q_LEN: int,
+        KV_LEN: int,
+        device: str = "cpu",
+        BLOCK_SIZE: tuple[int, int] = (128, 128),
+        mask_mod_closure_tensors: tuple = (),
+    ) -> tuple:
+        # Extract closure tensors so they flow through the dispatch stack as
+        # explicit positional args (functionalize/fake/proxy properly unwrap them).
+        # Under Dynamo, speculate_subgraph handles lifting instead.
+        if not mask_mod_closure_tensors:
+            mask_mod, mask_mod_closure_tensors = _extract_tensor_closure_vars(
+                mask_mod
+            )
+        validate_subgraph_args_types(mask_mod_closure_tensors)
+        return super().__call__(
+            mask_mod,
+            B,
+            H,
+            Q_LEN,
+            KV_LEN,
+            device,
+            BLOCK_SIZE,
+            mask_mod_closure_tensors,
+        )
+
+
+create_block_mask_hop = CreateBlockMaskHOP()
+
+
+def _create_block_mask_tensors(
+    mask_mod: Callable,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device: str = "cpu",
+    BLOCK_SIZE: tuple[int, int] = (128, 128),
+    mask_mod_closure_tensors: tuple = (),
+) -> tuple:
+    """Compute create_block_mask and return the 8 BlockMask tensor attrs as a tuple."""
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+    from torch.nn.attention.flex_attention import (
+        _convert_mask_to_block_mask,
+        _create_sparse_block_from_block_mask,
+        BlockMask,
+    )
+
+    # Rebind lifted closure tensors to produce the standard 4-arg mask_mod.
+    if mask_mod_closure_tensors:
+        _fn = mask_mod
+        _ct = mask_mod_closure_tensors
+
+        def mod(b, h, q_idx, kv_idx):
+            return _fn(b, h, q_idx, kv_idx, *_ct)
+    else:
+        mod = mask_mod
+
+    # Broadcast index tensors to [B, H, Q_LEN, KV_LEN] via stride-0 expand
+    # (no memory overhead). This avoids vmap which creates BatchedTensors
+    # incompatible with FakeTensorMode during AOTAutograd proxy tracing.
+    b_idx = torch.arange(B, device=device).view(B, 1, 1, 1).expand(B, H, Q_LEN, KV_LEN)
+    h_idx = torch.arange(H, device=device).view(1, H, 1, 1).expand(B, H, Q_LEN, KV_LEN)
+    q_idx = torch.arange(Q_LEN, device=device).view(1, 1, Q_LEN, 1).expand(B, H, Q_LEN, KV_LEN)
+    kv_idx = (
+        torch.arange(KV_LEN, device=device)
+        .view(1, 1, 1, KV_LEN)
+        .expand(B, H, Q_LEN, KV_LEN)
+    )
+
+    with TransformGetItemToIndex():
+        mask_tensor = mod(b_idx, h_idx, q_idx, kv_idx)
+
+    Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
+        mask_tensor,
+        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+        separate_full_blocks=True,
+    )
+    bm = _create_sparse_block_from_block_mask(
+        (partial_block_mask, full_block_mask),
+        mod,
+        (Q_LEN, KV_LEN),
+        Q_BLOCK_SIZE,
+        KV_BLOCK_SIZE,
+    )
+    return tuple(getattr(bm, attr) for attr in BlockMask._TENSOR_ATTRS)
+
+
+@create_block_mask_hop.py_impl(DispatchKey.CompositeExplicitAutograd)
+def create_block_mask_dense(
+    mask_mod: Callable,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device: str = "cpu",
+    BLOCK_SIZE: tuple[int, int] = (128, 128),
+    mask_mod_closure_tensors: tuple = (),
+) -> tuple:
+    return _create_block_mask_tensors(
+        mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE, mask_mod_closure_tensors
+    )
+
+
+@create_block_mask_hop.py_impl(ProxyTorchDispatchMode)
+def create_block_mask_proxy_torch_dispatch_mode(
+    mode: ProxyTorchDispatchMode,
+    mask_mod: Callable,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device: str = "cpu",
+    BLOCK_SIZE: tuple[int, int] = (128, 128),
+    mask_mod_closure_tensors: tuple = (),
+):
+    return trace_create_block_mask(
+        mode, mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE,
+        mask_mod_closure_tensors,
+    )
+
+
+def trace_create_block_mask(
+    proxy_mode: ProxyTorchDispatchMode,
+    mask_mod: Callable,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device: str = "cpu",
+    BLOCK_SIZE: tuple[int, int] = (128, 128),
+    mask_mod_closure_tensors: tuple = (),
+):
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+    example_out = create_block_mask_hop(
+        mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE,
+        mask_mod_closure_tensors,
+    )
+
+    # Trace mask_mod with scalar example values (b, h, q_idx, kv_idx)
+    any_tensor = None
+    for buf in mask_mod_closure_tensors:
+        if isinstance(buf, torch.Tensor):
+            any_tensor = buf
+            break
+
+    if any_tensor is not None:
+        example_vals = [
+            any_tensor.new_zeros((), dtype=torch.int) for _ in range(4)
+        ]
+    else:
+        example_vals = [
+            torch.zeros((), dtype=torch.int, device=device) for _ in range(4)
+        ]
+
+    with TransformGetItemToIndex():
+        mask_graph = reenter_make_fx(mask_mod)(
+            *example_vals, *mask_mod_closure_tensors
+        )
+
+    if not isinstance(proxy_mode.tracer, torch.fx.Tracer):
+        raise AssertionError(
+            f"expected proxy_mode.tracer to be torch.fx.Tracer, "
+            f"got {type(proxy_mode.tracer)}"
+        )
+
+    qualname = proxy_mode.tracer.get_fresh_qualname("flex_create_block_mask")
+    proxy_mode.tracer.root.register_module(qualname, mask_graph)
+
+    node_args = (
+        mask_graph,
+        B, H, Q_LEN, KV_LEN,
+        device, BLOCK_SIZE,
+        mask_mod_closure_tensors,
+    )
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
+    with torch.fx.experimental.proxy_tensor.set_original_aten_op(
+        create_block_mask_hop
+    ):
+        out_proxy = proxy_mode.tracer.create_proxy(
+            "call_function", create_block_mask_hop, proxy_args, {}
+        )
+    return track_tensor_tree(
+        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer,
+    )
+
+
+@register_fake(create_block_mask_hop)
+def create_block_mask_fake_impl(
+    mask_mod: Callable,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device: str = "cpu",
+    BLOCK_SIZE: tuple[int, int] = (128, 128),
+    mask_mod_closure_tensors: tuple = (),
+) -> tuple:
+    from torch.nn.attention.flex_attention import _round_up_to_multiple
+
+    Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+    num_q_blocks = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE) // Q_BLOCK_SIZE
+    num_kv_blocks = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE) // KV_BLOCK_SIZE
+
+    # Shape: [B, H, num_q_blocks] for num_blocks, [B, H, num_q_blocks, num_kv_blocks] for indices
+    kv_num_blocks = torch.empty(B, H, num_q_blocks, dtype=torch.int32, device=device)
+    kv_indices = torch.empty(
+        B, H, num_q_blocks, num_kv_blocks, dtype=torch.int32, device=device
+    )
+    full_kv_num_blocks = torch.empty(
+        B, H, num_q_blocks, dtype=torch.int32, device=device
+    )
+    full_kv_indices = torch.empty(
+        B, H, num_q_blocks, num_kv_blocks, dtype=torch.int32, device=device
+    )
+    q_num_blocks = torch.empty(B, H, num_kv_blocks, dtype=torch.int32, device=device)
+    q_indices = torch.empty(
+        B, H, num_kv_blocks, num_q_blocks, dtype=torch.int32, device=device
+    )
+    full_q_num_blocks = torch.empty(
+        B, H, num_kv_blocks, dtype=torch.int32, device=device
+    )
+    full_q_indices = torch.empty(
+        B, H, num_kv_blocks, num_q_blocks, dtype=torch.int32, device=device
+    )
+    return (
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    )
+
+
+@create_block_mask_hop.py_functionalize_impl
+def create_block_mask_functionalize(
+    ctx: torch._subclasses.functional_tensor.BaseFunctionalizeAPI,
+    mask_mod: Callable,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device: str = "cpu",
+    BLOCK_SIZE: tuple[int, int] = (128, 128),
+    mask_mod_closure_tensors: tuple = (),
+):
+    unwrapped = ctx.unwrap_tensors(mask_mod_closure_tensors)
+    if not isinstance(unwrapped, tuple):
+        raise AssertionError(
+            f"expected unwrapped mask_mod_closure_tensors to be tuple, "
+            f"got {type(unwrapped)}"
+        )
+    with ctx.redispatch_to_next():
+        functional_mask_mod = ctx.functionalize(mask_mod)
+        out = create_block_mask_hop(
+            functional_mask_mod,
+            B, H, Q_LEN, KV_LEN,
+            device, BLOCK_SIZE,
+            unwrapped,
+        )
+    return ctx.wrap_tensors(out)
+
+
+create_block_mask_hop.py_autograd_impl(
+    autograd_not_implemented(create_block_mask_hop, deferred_error=True)
+)

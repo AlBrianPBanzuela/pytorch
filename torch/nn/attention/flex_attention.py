@@ -1274,6 +1274,35 @@ def create_block_mask(
             mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
         )
 
+    # Under make_fx tracing, use the HOP so create_block_mask appears as a
+    # single node with mask_mod traced as a subgraph. Under Dynamo
+    # (torch.compile), the inline path is used instead because flex_attention
+    # already traces mask_mod as a subgraph, and the HOP's FakeTensor outputs
+    # conflict with flex_attention's nested torch.compile architecture.
+    # is_dynamo_compiling() check must come first to short-circuit before
+    # get_proxy_mode() which Dynamo can't trace through.
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    if not torch.compiler.is_dynamo_compiling() and get_proxy_mode() is not None:
+        from torch._higher_order_ops.flex_attention import create_block_mask_hop
+
+        tensors = create_block_mask_hop(
+            mask_mod,
+            B,
+            H,
+            Q_LEN,
+            KV_LEN,
+            str(device),
+            (Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+        )
+        kwargs = dict(zip(BlockMask._TENSOR_ATTRS, tensors))
+        return BlockMask(
+            seq_lengths=(Q_LEN, KV_LEN),
+            BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+            mask_mod=mask_mod,
+            **kwargs,
+        )
+
     mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device)
     partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
         mask_tensor,
