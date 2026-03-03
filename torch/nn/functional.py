@@ -3733,7 +3733,8 @@ def linear_cross_entropy(
             :class:`~torch.nn.functional.LinearCrossEntropyOptions`
             for more details. Enabling chunking will decrease the
             memory usage.  To enable reference implementation of
-            ``linear_cross_entropy``, use `options=None`. Default: ``None``.
+            ``linear_cross_entropy``, use `options=None`. Default:
+            ``None``.
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in_features)`.
         - Linear weight: :math:`(C, d_1, ..., d_K, in_features)`.
