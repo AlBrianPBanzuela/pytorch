@@ -11140,7 +11140,7 @@ get_out().sum().backward()
                     self.assertEqual(future.result()(), tensor.grad)
                 self.assertIsNotNone(tensor.grad)
 
-    def test_layer_norm_double_backward_does_not_support_third_order(self):
+    def test_layer_norm_errors_on_third_order_grad(self):
         x = torch.randn(2, 4, requires_grad=True)
         y = torch.nn.functional.layer_norm(x, (4,))
         (g,) = torch.autograd.grad(y.sum(), x, create_graph=True)
