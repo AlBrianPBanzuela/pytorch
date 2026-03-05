@@ -205,6 +205,11 @@ class FSDPParamGroup:
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
         self.gradient_divide_factor: float | None = None
+        # Whether to include zero gradients for parameters that did not
+        # receive a gradient in backward (e.g. due to conditional parameter
+        # usage across ranks). This ensures all ranks participate in the same
+        # reduce-scatter collectives, avoiding collective mismatch errors.
+        self.reduce_scatter_unused_params: bool = False
         # Whether reduce-scatter and all-reduce should be issued using only
         # summations, potentially with separate pre-/post-scaling.
         self.force_sum_reduction_for_comms: bool = False
@@ -549,22 +554,12 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
-                else:
-                    fsdp_params_without_grad.append(fsdp_param)
-
-            # For parameters without gradients, add zero gradients
-            # with dtype matching the existing gradients to ensure uniform dtype
-            if fsdp_params_without_grad and unsharded_grads:
-                grad_dtype = unsharded_grads[0].dtype
-                for fsdp_param in fsdp_params_without_grad:
+                elif self.reduce_scatter_unused_params:
                     fsdp_params_with_grad.append(fsdp_param)
-                    zero_grad = torch.zeros_like(
-                        fsdp_param.unsharded_param,
-                        dtype=grad_dtype,
-                        device=fsdp_param.unsharded_param.device,
+                    grad_dtype = self._reduce_dtype or fsdp_param.unsharded_param.dtype
+                    unsharded_grads.append(
+                        torch.zeros_like(fsdp_param.unsharded_param, dtype=grad_dtype)
                     )
-                    unsharded_grads.append(zero_grad)
-
             if self.reshard_after_backward:
                 self.reshard()
         # Wait on prior module's RS states (assumes backward fires groups
