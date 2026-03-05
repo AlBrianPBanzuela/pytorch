@@ -3736,6 +3736,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # enforces that all warps have already read the data.
         is_inplace = name in self.args.inplace_buffers
         is_broadcasted = self.is_broadcasted(original_index)
+        is_scalar = is_sympy_integer_like(original_index)
         if is_inplace and is_broadcasted:
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
@@ -3754,6 +3755,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # With broadcast:
             # tl.store(out_ptr0 + (tl.full([1, 1], 0, tl.int32).broadcast_to((XBLOCK,1)), tmp4, xmask)
             indexing_str = indexing.index_str
+            is_scalar = is_scalar or indexing_str.startswith(
+                "tl.full([1, 1], 0, tl.int"
+            )
             if is_sympy_integer_like(index):
                 if self.is_combo_kernel:
                     # In combo kernels, broadcast pointer to match mask shape
@@ -3763,7 +3767,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ):
                     value_shape = ", ".join(map(str, value.shape))
                     indexing_str += f".broadcast_to({value_shape})"
-            line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
+            store_mask = indexing.mask_str
+            if self.is_combo_kernel and is_scalar:
+                store_mask = (
+                    "pid_offset == 0"
+                    if store_mask == "None"
+                    else f"{store_mask} & (pid_offset == 0)"
+                )
+            value_expr = value
+            if (
+                self.is_combo_kernel
+                and is_scalar
+                and value.shape is not None
+                and not all(str(x) == "1" for x in value.shape)
+            ):
+                if indexing.mask_str == "None":
+                    value_expr = f"tl.sum({value}, axis=0)"
+                else:
+                    value_expr = (
+                        f"tl.sum(tl.where({indexing.mask_str}, {value}, 0.0), axis=0)"
+                    )
+            line = f"tl.store({var} + ({indexing_str}), {value_expr}, {store_mask})"
         elif mode == "atomic_add":
             self.atomic_add_found = True
             indexing_str = indexing.index_str
@@ -4629,6 +4653,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             assert isinstance(indexing, IndexingOptions)
 
             indexing_str = indexing.index_str
+            is_scalar = is_sympy_integer_like(index) or indexing_str.startswith(
+                "tl.full([1, 1], 0, tl.int"
+            )
             if (
                 is_sympy_integer_like(index)
                 and value.shape is not None
@@ -4636,11 +4663,31 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 value_shape = ", ".join(map(str, value.shape))
                 indexing_str += f".broadcast_to({value_shape})"
+            store_mask = indexing.mask_str
+            if self.is_combo_kernel and is_scalar:
+                store_mask = (
+                    "pid_offset == 0"
+                    if store_mask == "None"
+                    else f"{store_mask} & (pid_offset == 0)"
+                )
+            value_expr = value
+            if (
+                self.is_combo_kernel
+                and is_scalar
+                and value.shape is not None
+                and not all(str(x) == "1" for x in value.shape)
+            ):
+                if indexing.mask_str == "None":
+                    value_expr = f"tl.sum({value}, axis=0)"
+                else:
+                    value_expr = (
+                        f"tl.sum(tl.where({indexing.mask_str}, {value}, 0.0), axis=0)"
+                    )
 
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
-                    f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})",
+                    f"tl.store({var} + ({indexing_str}), {value_expr}, {store_mask})",
                 )
             )
 

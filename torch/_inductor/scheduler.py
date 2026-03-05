@@ -1982,7 +1982,20 @@ class FusedSchedulerNode(BaseSchedulerNode):
         super().__init__(scheduler)
         init_group_node(self, scheduler, snodes)
         self.users: list[NodeUser] = []
-        self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
+        def is_scalar_node(node: BaseSchedulerNode) -> bool:
+            _, (numel, rnumel) = node.group
+            return numel == 1 and rnumel == 1
+
+        if any(n.is_foreach() for n in snodes):
+            self.group = max(
+                snodes,
+                key=lambda x: (
+                    int(x.is_reduction()),
+                    int(not is_scalar_node(x)),
+                ),
+            ).group
+        else:
+            self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
 
     @cache_on_self
     def get_name(self) -> str:

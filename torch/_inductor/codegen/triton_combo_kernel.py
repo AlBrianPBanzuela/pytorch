@@ -357,6 +357,7 @@ class ComboKernel(Kernel):
                     code.splice("local_pid = pid")
                 else:
                     code.splice(f"local_pid = pid - num_blocks_{num - 1}")
+                code.splice("pid_offset = local_pid")
 
                 # Compute x/y indices from flattened local_pid
                 if kernel.y_tree_list[num]:

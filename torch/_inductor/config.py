@@ -894,6 +894,9 @@ combo_kernel_max_num_args = 250
 combo_kernel_per_subkernel_blocks = False
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# Enable fusion of scalar foreach nodes into large foreach kernels.
+# Keep off by default for safety; enable explicitly for experimentation/perf testing.
+combo_kernel_fuse_scalar_foreach = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True

@@ -1306,6 +1306,13 @@ class SIMDScheduling(BaseScheduling):
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
+        def _is_scalar(node):
+            _, (node_numel, node_rnumel) = node.group
+            return node_numel == 1 and node_rnumel == 1
+
+        def _contains_scalar_node(node):
+            return any(_is_scalar(n) for n in node.get_nodes())
+
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
             node2, scheduler.ForeachKernelSchedulerNode
         ):
@@ -1367,17 +1374,33 @@ class SIMDScheduling(BaseScheduling):
 
             return reduction_can_fuse
 
+        if config.combo_kernel_fuse_scalar_foreach and (
+            node1.is_foreach() or node2.is_foreach()
+        ):
+            if node1.is_reduction() != node2.is_reduction() and (
+                _contains_scalar_node(node1) or _contains_scalar_node(node2)
+            ):
+                why("disallow scalar+reduction fusion in foreach sequence")
+                return False
+
         if not node1.is_reduction() and not node2.is_reduction():
+            is_scalar1 = _is_scalar(node1)
+            is_scalar2 = _is_scalar(node2)
             if not (numel1 == numel2 and rnumel1 == rnumel2):
                 if not node2.is_template():
-                    why(
-                        "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
-                        numel1,
-                        numel2,
-                        rnumel1,
-                        rnumel2,
-                    )
-                    return False
+                    if not (
+                        config.combo_kernel_fuse_scalar_foreach
+                        and (node1.is_foreach() or node2.is_foreach())
+                        and (is_scalar1 != is_scalar2)
+                    ):
+                        why(
+                            "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
+                            numel1,
+                            numel2,
+                            rnumel1,
+                            rnumel2,
+                        )
+                        return False
                 else:
                     # prologue fusion input sizes differ from output group
                     # fuse so long as this node matches the group of existing prologue nodes
@@ -1476,8 +1499,15 @@ class SIMDScheduling(BaseScheduling):
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
-            return (node_numel == numel and node_rnumel == rnumel) or (
-                node_numel == numel * rnumel and node_rnumel == 1
+            return (
+                (node_numel == numel and node_rnumel == rnumel)
+                or (node_numel == numel * rnumel and node_rnumel == 1)
+                or (
+                    config.combo_kernel_fuse_scalar_foreach
+                    and n.is_foreach()
+                    and node_numel == 1
+                    and node_rnumel == 1
+                )
             )
 
         def fits_outside_reduction(n):
@@ -2372,8 +2402,24 @@ class SIMDScheduling(BaseScheduling):
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         node_schedule_map: dict[Any, NodeInfo] = {}
+        def is_scalar_node(node):
+            _, (node_numel, node_rnumel) = node.group
+            return node_numel == 1 and node_rnumel == 1
+
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
-            _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+            has_foreach_node = any(n.is_foreach() for n in nodes)
+            if has_foreach_node:
+                _, (numel, rnumel) = max(
+                    nodes,
+                    key=lambda x: (
+                        int(x.is_reduction()),
+                        int(not is_scalar_node(x)),
+                    ),
+                ).group
+            else:
+                _, (numel, rnumel) = max(
+                    nodes, key=lambda x: int(x.is_reduction())
+                ).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             tiling = self.select_tiling(node_schedule, numel, rnumel)
             features = SIMDKernelFeatures(node_schedule, numel, rnumel)

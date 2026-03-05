@@ -343,6 +343,110 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu
+    def test_scalar_foreach_reduction_barrier_not_fused(self):
+        # Regression: a scalar-producing foreach should not be fused across a
+        # following reduction barrier when scalar fusion is enabled.
+        def fn_scalar_barrier(a0, a1, b0):
+            scalar = torch._foreach_add([a0], [a1])[0]
+            reduced = b0.sum()
+            y = torch._foreach_add([b0], [scalar + reduced])[0]
+            return scalar, reduced, y
+
+        args = (
+            torch.randn((), device=GPU_TYPE),
+            torch.randn((), device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
+        )
+
+        with torch._inductor.config.patch(
+            combo_kernels=True, combo_kernel_fuse_scalar_foreach=False
+        ):
+            torch._inductor.metrics.reset()
+            self.check_model_gpu(fn_scalar_barrier, args, reference_in_float=False)
+            kernel_count = torch._inductor.metrics.generated_kernel_count
+
+        with torch._inductor.config.patch(
+            combo_kernels=True, combo_kernel_fuse_scalar_foreach=True
+        ):
+            torch._inductor.metrics.reset()
+            self.check_model_gpu(fn_scalar_barrier, args, reference_in_float=False)
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count,
+                kernel_count,
+            )
+
+    @requires_gpu
+    def test_scalar_foreach_alias_like_inplace_stability(self):
+        # Regression: scalar-foreach outputs used by mutated aliases should keep the
+        # existing dependency chain and avoid accidental scalar fusion shortcuts.
+        def fn_scalar_alias(a0, a1, b0):
+            scalar = torch._foreach_add([a0], [a1])[0]
+            mutable = b0.clone()
+            mutable.mul_(scalar)
+            y = torch._foreach_add([mutable], [scalar])[0]
+            return y, scalar
+
+        args = (
+            torch.randn((), device=GPU_TYPE),
+            torch.randn((), device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        )
+
+        with torch._inductor.config.patch(
+            combo_kernels=True, combo_kernel_fuse_scalar_foreach=False
+        ):
+            torch._inductor.metrics.reset()
+            self.check_model_gpu(
+                fn_scalar_alias, args, reference_in_float=False, check_lowp=False
+            )
+            kernel_count = torch._inductor.metrics.generated_kernel_count
+
+        with torch._inductor.config.patch(
+            combo_kernels=True, combo_kernel_fuse_scalar_foreach=True
+        ):
+            torch._inductor.metrics.reset()
+            self.check_model_gpu(
+                fn_scalar_alias, args, reference_in_float=False, check_lowp=False
+            )
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count,
+                kernel_count,
+            )
+
+    @requires_gpu
+    def test_scalar_foreach_to_mixed_size_foreach_consumer(self):
+        # Regression: mixed-size foreach consumers should remain stable when fed by
+        # a scalar-foreach producer.
+        def fn_scalar_mixed_size(a0, a1, b0, b1):
+            scalar = torch._foreach_add([a0], [a1])[0]
+            y = torch._foreach_mul([b0, b1], [scalar, scalar])
+            return y
+
+        args = (
+            torch.randn((), device=GPU_TYPE),
+            torch.randn((), device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(8, 8, device=GPU_TYPE),
+        )
+
+        with torch._inductor.config.patch(
+            combo_kernels=True, combo_kernel_fuse_scalar_foreach=False
+        ):
+            torch._inductor.metrics.reset()
+            self.check_model_gpu(fn_scalar_mixed_size, args, reference_in_float=False)
+            kernel_count = torch._inductor.metrics.generated_kernel_count
+
+        with torch._inductor.config.patch(
+            combo_kernels=True, combo_kernel_fuse_scalar_foreach=True
+        ):
+            torch._inductor.metrics.reset()
+            self.check_model_gpu(fn_scalar_mixed_size, args, reference_in_float=False)
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count,
+                kernel_count,
+            )
+
+    @requires_gpu
     @scalar_bin_ops
     def test_broadcasting(self, op):
         def fn(a0, a1, b0, b1):
