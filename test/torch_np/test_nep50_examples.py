@@ -3,8 +3,8 @@
 """Test examples for NEP 50."""
 
 import itertools
-from unittest import skipIf as skipif, SkipTest
 import sys
+from unittest import skipIf as skipif, SkipTest
 
 
 try:
