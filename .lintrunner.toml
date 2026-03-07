@@ -1699,6 +1699,8 @@ code = 'TEST_DEVICE_BIAS'
 command = [
     'python3',
     'tools/linter/adapters/test_device_bias_linter.py',
+    '--allowlist',
+    'tools/linter/allowlists/test_device_bias.txt',
     '--',
     '@{{PATHSFILE}}',
 ]
@@ -1708,6 +1710,11 @@ include_patterns = [
 exclude_patterns = [
     # CPython tests
     'test/dynamo/cpython/**',
+    # Device-specific tests
+    'test/xpu/**',
+    'test/**/test_cuda*.py',
+    'test/**/test_mps*.py',
+    'test/**/test_xpu*.py',
 ]
 
 # 'header_only_linter' reports on properly testing header-only APIs.
