@@ -1954,27 +1954,21 @@ def cat(inputs, dim=0):
             cat_node = V.current_node
             if cat_node is None:
                 return False
-            # For aten.cat nodes, args[0] is a list of input FX nodes.
-            # For other nodes (e.g., constant_pad_nd calling cat internally),
-            # we need to walk the args to find all FX input nodes.
+            # aten.cat's FX node format: cat(input_list, dim)
+            # args[0] is always a list of input FX nodes
             fx_args = cat_node.args[0]
-            if isinstance(fx_args, (list, tuple)):
-                input_nodes = fx_args
-            else:
-                # Collect all FX node args (e.g., when called from _pad_as_cat,
-                # V.current_node is constant_pad_nd whose args are (x, padding, fill_value))
-                input_nodes = [
-                    arg for arg in cat_node.args
-                    if isinstance(arg, torch.fx.Node)
-                ]
+            if not isinstance(fx_args, (list, tuple)):
+                return False
             return any(
                 hasattr(arg, "users") and len(arg.users) > 1
-                for arg in input_nodes
+                for arg in fx_args
             )
 
-        horizontal_fuse_cat = all(
-            should_lower_cat_input(inp) for inp in inputs
-        ) and not any(can_fuse_reduction(t) for t in inputs) and not any_input_has_multi_consumers()
+        horizontal_fuse_cat = (
+            all(should_lower_cat_input(inp) for inp in inputs)
+            and not any(can_fuse_reduction(t) for t in inputs)
+            and not any_input_has_multi_consumers()
+        )
         if fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction):
             return pointwise_cat(inputs, dim)
 
@@ -4648,8 +4642,8 @@ def _pad_as_cat(
     pre-allocate + realize-into-slice zero-copy mechanism.
 
     Only supports right-pad on a single dimension. Only fires when x has
-    multiple consumers (where ConcatKernel avoids duplicate computation)
-    or when x can realize into a slice without copy.
+    multiple consumers, where ConcatKernel avoids duplicate computation
+    that pointwise_cat would cause by inlining the input.
     """
     sizes = x.get_size()
     ndim = len(sizes)
@@ -4680,11 +4674,9 @@ def _pad_as_cat(
     pad_node = V.current_node
     if pad_node is None:
         return None
-    input_nodes = [
-        arg for arg in pad_node.args
-        if isinstance(arg, torch.fx.Node)
-    ]
-    if not any(len(arg.users) > 1 for arg in input_nodes):
+    # pad_node.args is (x, padding, fill_value); only check the tensor input (args[0])
+    input_node = pad_node.args[0]
+    if not (isinstance(input_node, torch.fx.Node) and len(input_node.users) > 1):
         return None
 
     # Build the fill tensor for the padding region
@@ -4715,11 +4707,9 @@ def constant_pad_nd(x, padding, fill_value=0):
             return out
             # fall through if can not inplace the padding
 
-    # Rewrite right-pad as cat(x, fill_tensor) to leverage ConcatKernel's
+    # Rewrite right-pad as ConcatKernel([x, fill_tensor]) directly to leverage
     # pre-allocate + realize-into-slice mechanism. This avoids an intermediate
     # buffer and copy when x is an unrealized Pointwise with multiple consumers.
-    # We call the cat() lowering (not ConcatKernel directly) so it can choose
-    # pointwise_cat for single-consumer cases and ConcatKernel for multi-consumer.
     out = _pad_as_cat(x, padding, fill_value)
     if out is not None:
         return out
