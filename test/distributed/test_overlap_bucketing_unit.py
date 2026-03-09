@@ -1609,8 +1609,9 @@ class TestForeachImprov(InductorTestCase):
                     0,
                 )
             graph_str = str(traced.graph)
-            # Should use cat(out=), not _foreach_copy_
+            # Should use cat + copy_, not _foreach_copy_
             self.assertIn("cat", graph_str)
+            self.assertIn("copy_", graph_str)
             self.assertNotIn("_foreach_copy_", graph_str)
 
     @unittest.skipIf(not HAS_GPU, "Requires GPU")
