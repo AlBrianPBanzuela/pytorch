@@ -718,9 +718,14 @@ class _CaptureAtenOp(torch.utils._python_dispatch.TorchDispatchMode):
 
 def get_aten_op_for_sample(
     op: Callable[..., Any], sample: SampleInput, op_name: str = ""
-) -> tuple[OpOverload | None, tuple[Any, ...], dict[str, Any]]:
+) -> tuple[OpOverload | None, tuple[Any, ...], dict[str, Any], int]:
     """
     Determine the actual aten op that will be dispatched for a given sample.
+
+    Returns (aten_op, args, kwargs, num_supported_aten_ops) where
+    num_supported_aten_ops is the count of distinct supported aten ops seen
+    in the trace. A value != 1 means the sample doesn't map 1:1 to a single
+    supported aten op.
     """
     with _CaptureAtenOp(op_name) as capture:
         try:
@@ -731,6 +736,14 @@ def get_aten_op_for_sample(
         except Exception:
             pass
 
+    num_supported = len(
+        {
+            str(cap_op)
+            for cap_op, _, _ in capture.all_ops
+            if _has_dtensor_support(cap_op)
+        }
+    )
+
     if capture.best_match is not None:
         captured_op = capture.best_match
         captured_args = capture.best_match_args
@@ -738,9 +751,9 @@ def get_aten_op_for_sample(
     elif capture.all_ops:
         captured_op, captured_args, captured_kwargs = capture.all_ops[0]
     else:
-        return None, (), {}
+        return None, (), {}, 0
 
-    return captured_op, captured_args, captured_kwargs
+    return captured_op, captured_args, captured_kwargs, num_supported
 
 
 def query_single_dim_strategy(
@@ -1374,7 +1387,7 @@ def _discover_aten_op(
             tensors = extract_tensors_from_sample(sample)
             if not tensors or any(0 in t.shape for _, t in tensors):
                 continue
-            aten_op, _, _ = get_aten_op_for_sample(opinfo.op, sample, opinfo.name)
+            aten_op, _, _, _ = get_aten_op_for_sample(opinfo.op, sample, opinfo.name)
             if aten_op is not None:
                 return aten_op
     return None
@@ -1487,21 +1500,14 @@ def compare_operator(
                 skip_reasons["op raised exception"] += 1
                 continue
 
-            # Skip samples that don't map 1:1 to a single supported aten op.
-            # Ops like inner (permute, view, mm, view) decompose into multiple
-            # aten calls — validating the high-level sample against one captured
-            # op produces wrong results.
-            with _CaptureAtenOp() as _probe:
-                try:
-                    _run_op_on_sample(op, sample)
-                except Exception:
-                    pass
-            _supported = {
-                str(cap_op)
-                for cap_op, _, _ in _probe.all_ops
-                if _has_dtensor_support(cap_op)
-            }
-            if len(_supported) != 1:
+            # Get the aten op for this sample. num_supported tells us if
+            # the sample maps 1:1 to a single supported aten op — ops like
+            # inner (permute, view, mm, view) decompose into multiple aten
+            # calls and validating against one captured op gives wrong results.
+            aten_op, captured_args, captured_kwargs, num_supported = (
+                get_aten_op_for_sample(op, sample, opinfo.name)
+            )
+            if num_supported != 1:
                 total_samples -= 1
                 skip_reasons["non-1:1 aten mapping"] += 1
                 continue
@@ -1529,10 +1535,6 @@ def compare_operator(
             # Use first output for enumerating placement options (DTensor applies
             # the same placement to all outputs of multi-output ops)
             output_placement_options = get_1d_output_placements_for_tensor(first_gt)
-
-            aten_op, captured_args, captured_kwargs = get_aten_op_for_sample(
-                op, sample, opinfo.name
-            )
             # Verify tensor arity matches between captured aten call and sample
             num_captured_tensors = sum(
                 1 for a in captured_args if isinstance(a, torch.Tensor)
