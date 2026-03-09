@@ -2202,10 +2202,14 @@ class GraphModule(torch.nn.Module):
         return "\n".join(annotations)
 
     def test_pre_mode_decomp_has_sac_ignored_ops(self):
+        SAVE_OPS = {
+            torch.ops.aten.sin.default,
+            torch.ops.aten.add.Tensor,
+            torch.ops.aten.cos.default,
+        }
+
         def policy_fn(ctx, func, *args, **kwargs):
-            if func == torch.ops.aten.sin.default:
-                return CheckpointPolicy.MUST_RECOMPUTE
-            if func == torch.ops.aten.add.Tensor:
+            if func in SAVE_OPS:
                 return CheckpointPolicy.MUST_SAVE
             return CheckpointPolicy.PREFER_RECOMPUTE
 
@@ -2219,21 +2223,19 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(
             self._get_sac_annotations(op_with_detach, policy_fn),
             """\
-sin: aten.sin.default -> MUST_RECOMPUTE
+sin: aten.sin.default -> MUST_SAVE
 detach_1: aten.detach.default -> PREFER_RECOMPUTE
 add: aten.add.Tensor -> MUST_SAVE
-cos: aten.cos.default -> PREFER_RECOMPUTE""",
+cos: aten.cos.default -> MUST_SAVE""",
         )
 
     def test_post_mode_decomp(self):
         from torch._inductor.compile_fx import select_decomp_table
 
         def policy_fn(ctx, func, *args, **kwargs):
-            if func == torch.ops.aten.sin.default:
+            if func == torch.ops.aten.silu.default:
                 return CheckpointPolicy.MUST_SAVE
-            if func == torch.ops.aten.cos.default:
-                return CheckpointPolicy.MUST_RECOMPUTE
-            return CheckpointPolicy.PREFER_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
 
         def fn(x):
             x = x.sin()
@@ -2244,20 +2246,18 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         self.assertExpectedInline(
             self._get_sac_annotations(fn, policy_fn, decompositions=select_decomp_table),
             """\
-sin: aten.sin.default -> MUST_SAVE
-neg: aten.neg.default -> PREFER_SAVE
-exp: aten.exp.default -> PREFER_SAVE
-add: aten.add.Tensor -> PREFER_SAVE
-div: aten.div.Tensor -> PREFER_SAVE
-cos: aten.cos.default -> MUST_RECOMPUTE""",
+sin: aten.sin.default -> PREFER_RECOMPUTE
+neg: aten.neg.default -> MUST_SAVE
+exp: aten.exp.default -> MUST_SAVE
+add: aten.add.Tensor -> MUST_SAVE
+div: aten.div.Tensor -> MUST_SAVE
+cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
 
     def test_multi_output_op(self):
         def policy_fn(ctx, func, *args, **kwargs):
             if func == torch.ops.aten.topk.default:
                 return CheckpointPolicy.MUST_SAVE
-            if func == torch.ops.aten.sin.default:
-                return CheckpointPolicy.MUST_RECOMPUTE
             return CheckpointPolicy.PREFER_RECOMPUTE
 
         def fn(x):
@@ -2270,7 +2270,7 @@ cos: aten.cos.default -> MUST_RECOMPUTE""",
         self.assertExpectedInline(
             self._get_sac_annotations(fn, policy_fn),
             """\
-sin: aten.sin.default -> MUST_RECOMPUTE
+sin: aten.sin.default -> PREFER_RECOMPUTE
 topk: aten.topk.default -> MUST_SAVE
 getitem: <built-in function getitem> -> MUST_SAVE
 getitem_1: <built-in function getitem> -> MUST_SAVE
