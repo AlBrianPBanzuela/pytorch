@@ -5510,8 +5510,14 @@ def linspace(
 
     # Native CUDA/CPU kernels compute step in scalar_t; match that by
     # converting start/end to the target dtype before computing step.
-    start = torch.tensor(start, dtype=dtype_red, device=device)
-    end = torch.tensor(end, dtype=dtype_red, device=device)
+    if isinstance(start, TensorLikeType):
+        start = _maybe_convert_to_dtype(start, dtype_red)
+    else:
+        start = torch.full((), start, dtype=dtype_red, device=device)
+    if isinstance(end, TensorLikeType):
+        end = _maybe_convert_to_dtype(end, dtype_red)
+    else:
+        end = torch.full((), end, dtype=dtype_red, device=device)
     step = (end - start) / (steps - 1)
 
     # pyrefly: ignore [no-matching-overload]
