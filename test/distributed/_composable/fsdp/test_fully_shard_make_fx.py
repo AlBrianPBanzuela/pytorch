@@ -2,8 +2,8 @@
 """
 Standalone test for make_fx tracing of FSDP2-wrapped models.
 
-Uses a local clone of sixlib's minimal_tracer (trace_module) which lifts
-params as graph inputs via stateless._reparametrize_module.
+Uses minimal_tracer (trace_module) which lifts FSDP sharded param data
+as graph inputs for make_fx tracing.
 
 Usage:
     torchrun --nproc_per_node=2 test_fully_shard_make_fx.py

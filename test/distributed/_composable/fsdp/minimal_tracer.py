@@ -5,7 +5,7 @@ Minimal make_fx based tracer with:
 - Tensor subclass input/output support (e.g., DTensor)
 - Fake mode tracing
 
-Cloned from sixlib/sixlib/minimal_tracer.py for FSDP2 tracing experiments.
+Minimal tracer for FSDP2 tracing experiments.
 """
 
 import itertools
