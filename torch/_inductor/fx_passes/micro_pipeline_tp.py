@@ -611,6 +611,89 @@ def _insert_fused_all_gather_matmul(
         raise AssertionError(f"Unexpected matmul match type: {mm_type}")
 
 
+def _should_fuse_async_tp(
+    shard_node: torch.fx.Node,
+    matmuls: list[_Matmul],
+) -> bool:
+    """
+    Use the AutoHeuristic decision tree to decide whether to fuse all_gather
+    with matmul for async TP. Returns True if fusion should proceed, False
+    otherwise.
+
+    Falls back to the hardcoded `K_shard < 1024` rule if:
+    - async_tp_fuse is not in config.autoheuristic_use, or
+    - no matching learned heuristic is found (unsupported GPU), or
+    - the heuristic returns None (unsure).
+    """
+    ah_name = "async_tp_fuse"
+    if ah_name not in config.autoheuristic_use:
+        # Fallback to hardcoded rule
+        return _get_tensor(shard_node).shape[-1] >= 1024
+
+    from torch._inductor.autoheuristic.autoheuristic_utils import (
+        AHContext,
+        AHMetadata,
+    )
+    from torch._inductor.autoheuristic.learned_heuristic_controller import (
+        LearnedHeuristicController,
+    )
+    from torch._inductor.utils import get_gpu_shared_memory
+
+    shard_tensor = _get_tensor(shard_node)
+    # M = first dim of shard (batch/seq_len), K_shard = last dim of shard
+    # K = K_shard * world_size (full contraction dim, but we use K_shard
+    # as the feature since that's what the shard node has)
+    # N = last dim of B (output dim)
+    m = shard_tensor.shape[0]
+    k = shard_tensor.shape[-1]  # K_shard
+    # Use the first matmul to get N dimension
+    b_tensor = _get_tensor(matmuls[0].B_node)
+    n = b_tensor.shape[-1]
+
+    arith_intensity = _compute_mm_arithmetic_intensity(m, n, k)
+
+    context = AHContext()
+    context.add_feature("m", m)
+    context.add_feature("k", k)
+    context.add_feature("n", n)
+    context.add_feature("arith_intensity", arith_intensity)
+    context.add_feature("m_times_k", m * k)
+    context.add_feature("m_times_n", m * n)
+    context.add_feature("k_times_n", k * n)
+
+    device = torch.cuda.current_device()
+    device_capa = torch.cuda.get_device_capability(device)
+    shared_memory = get_gpu_shared_memory()
+
+    metadata = AHMetadata(
+        shared_memory=shared_memory,
+        device_capa=device_capa,
+        choices=["fuse", "no_fuse"],
+        name=ah_name,
+    )
+
+    controller = LearnedHeuristicController(metadata=metadata, context=context)
+    decision = controller.get_decision()
+
+    if decision is None:
+        # Heuristic is unsure or no matching heuristic found — default to no_fuse
+        log.debug(
+            "AutoHeuristic async_tp_fuse: unsure for (m=%d, k=%d, n=%d), defaulting to no_fuse",
+            m,
+            k,
+            n,
+        )
+        return False
+    log.debug(
+        "AutoHeuristic async_tp_fuse: decision=%s for (m=%d, k=%d, n=%d)",
+        decision,
+        m,
+        k,
+        n,
+    )
+    return decision == "fuse"
+
+
 def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     """
     Fused the pattern
@@ -651,10 +734,6 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
 
     filter_matmul = None
     if _is_last_dim(_get_tensor(shard_node), gather_dim):
-        # Decomposed mms should not be too small
-        if _get_tensor(shard_node).shape[-1] < 1024:
-            return
-
         # scaled_mm is not supported yet for last dim
         def _filter_out_scaled_matmul(matmul: _Matmul):
             return not isinstance(matmul, _ScaledMatmul)
@@ -684,6 +763,11 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
 
     if filter_matmul and not filter_matmul(matmuls[0]):
         return
+
+    # Use AutoHeuristic to decide whether to fuse when gathering on last dim
+    if _is_last_dim(_get_tensor(shard_node), gather_dim):
+        if not _should_fuse_async_tp(shard_node, matmuls):
+            return
 
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
