@@ -147,7 +147,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
     _currently_capturing_graphs.emplace(capture_id_, this);
   }
-
 }
 
 void CUDAGraph::capture_end() {
@@ -166,9 +165,11 @@ void CUDAGraph::capture_end() {
     _currently_capturing_graphs.erase(capture_id_);
   }
 
-  // End pool allocation before checking the error so captures_underway
-  // is cleaned up even if cudaStreamEndCapture failed (e.g. due to an
-  // illegal operation during capture).
+  // End pool allocation before checking the capture error. This ensures
+  // captures_underway is cleaned up even if cudaStreamEndCapture failed
+  // (e.g. due to an illegal operation during capture). These calls are
+  // safe regardless of whether the capture succeeded — they simply
+  // remove the pool routing entry added by beginAllocateToPool.
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
 
