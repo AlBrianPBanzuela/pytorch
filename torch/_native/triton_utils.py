@@ -1,5 +1,6 @@
 import functools
 import logging
+from packaging.version import Version
 
 from .common_utils import (
     _available_version,
@@ -18,7 +19,7 @@ _TRITON_MINIMUM_VERSION_MINOR = 6
 
 
 @functools.cache
-def _check_runtime_available() -> tuple[bool, tuple[int, int, int] | None]:
+def _check_runtime_available() -> [bool, Version | None]:
     """
     Check if triton is available
 
@@ -44,7 +45,7 @@ def runtime_available() -> bool:
     return available
 
 
-def runtime_version() -> None | tuple[int, int, int]:
+def runtime_version() -> None | Version:
     _, version = _check_runtime_available()
     return version
 
@@ -56,8 +57,8 @@ def _version_is_sufficient() -> bool:
     if check_native_version_skip():
         return True
     # Either exact version, or same major
-    major_ok = version[0] == _TRITON_REQUIRED_VERSION_MAJOR
-    minor_ok = version[1] >= _TRITON_MINIMUM_VERSION_MINOR
+    major_ok = version.major == _TRITON_REQUIRED_VERSION_MAJOR
+    minor_ok = version.minor >= _TRITON_MINIMUM_VERSION_MINOR
     return major_ok and minor_ok
 
 
