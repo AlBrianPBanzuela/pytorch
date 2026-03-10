@@ -59,18 +59,11 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
-std::optional<c10::MaybeOwned<Tensor>> inline maybe_prepare_matrix_with_layout(
-    const Tensor& t,
-    bool make_row_major_like) {
-  int64_t ld = make_row_major_like ? 0 : 1;
-  IntArrayRef strides = t.strides();
-  IntArrayRef sizes = t.sizes();
-  if (strides[1 - ld] == 1 && strides[ld] >= std::max<int64_t>(1, sizes[1 - ld])) {
-    return c10::MaybeOwned<Tensor>::borrowed(t);
-  } else {
-    // No compliance, it is best to copy bias into result
-    return std::nullopt;
-  }
+bool inline ld_complies(const Tensor& t, bool is_row_major_like) {
+  int64_t ld = is_row_major_like ? 0 : 1;
+  const auto strides = t.strides();
+  const auto sizes = t.sizes();
+  return strides[1 - ld] == 1 && strides[ld] >= std::max<int64_t>(1, sizes[1 - ld]);
 }
 
 } // namespace
@@ -155,7 +148,7 @@ struct cublasCommonArgs {
     k = sizes_a[transpose_result ? 0 : 1];
     n = sizes_b[transpose_result ? 0 : 1];
 
-    const auto get_ld = [](c10::MaybeOwned<Tensor>& t, bool trans_t, bool trans_res) -> int64_t {
+    const auto get_ld = [](const c10::MaybeOwned<Tensor>& t, bool trans_t, bool trans_res) -> int64_t {
       // NOTE: a tensor of shape (1, 2) with strides (1, 1) is contiguous in PyTorch.
       // However, cuBLAS expects inputs with sorted strides being strictly increasing/decreasing.
       const auto strides = t->is_contiguous() ? c10::contiguous_strides(t->sizes()) : t->strides();
@@ -196,64 +189,87 @@ struct cublasCommonArgs {
       return;
     }
 
-    // Whether bias broadcasts over rows/cols as per `bias + m1 @ m2` in PyTorch.
-    // NOTE: cuBLASLt assumes "transposed" broadcasting when `bias` is a vector.
-    // row broadcast: bias is viewed as a 1D memory.
-    const bool bias_row_broadcasts = (
-      (
-        // result is row-major. This implies a transposition trick
-        // which forces bias.shape[-1] == m (post transposition).
-        // shapes [1, ..., 1, m] are fine.
-        transpose_result
-        && self->dim() >= 1
-        && self->sizes().end()[-1] == m
-        && self->numel() == m
-      )
-      || (
-        // result is col-major. This implies no transposition trick
-        // which forces bias.shape[-2:] == (m, 1).
-        // shapes [1, ..., m, 1] are fine.
-        !transpose_result
-        && self->dim() >= 2
-        && self->sizes().end()[-1] == 1
-        && self->sizes().end()[-2] == m
-        && self->numel() == m
+    // Whether bias broadcasts over columns POST transposition trick (if used).
+    // If so, there is a potential for the bias fusion and/or viewing bias
+    // as a 2D matrix in the out-of-place cuBLASLt's GEMM.
+    const bool bias_col_broadcasts = (
+      self->is_contiguous() && (
+        (
+          // result is row-major. This implies a transposition trick
+          // which forces bias.shape[-1] == m (post transposition).
+          // shapes [1, ..., 1, m] are fine.
+          transpose_result
+          && self->dim() >= 1
+          && self->sizes().end()[-1] == m
+          && self->numel() == m
+        )
+        || (
+          // result is col-major. This implies no transposition trick
+          // which forces bias.shape[-2:] == (m, 1).
+          // shapes [1, ..., m, 1] are fine.
+          !transpose_result
+          && self->dim() >= 2
+          && self->sizes().end()[-2] == m
+          && self->sizes().end()[-1] == 1
+          && self->numel() == m
+        )
       )
     );
-    // col broadcast: bias can be viewed as a 2D memory with the leading dimension 0.
-    const auto non_ld_len = transpose_result ? n : m;
-    const bool bias_col_broadcasts = (
-      // shapes [1, ..., 1, non_ld_len, 1] are fine
-      self->dim() >= 2
-      && self->sizes().end()[-1] == 1
-      && self->sizes().end()[-2] == non_ld_len
-      && self->numel() == non_ld_len
+    // row broadcast: bias can be viewed as a 2D memory with the leading dimension 0.
+    const bool bias_row_broadcasts = (
+      self->is_contiguous() && (
+        (
+          // result is row-major. This implies a transposition trick
+          // which forces bias.shape[-2:] = (n, 1).
+          transpose_result
+          && self->dim() >= 2
+          && self->sizes().end()[-2] == n
+          && self->sizes().end()[-1] == 1
+          && self->numel() == n
+        )
+        || (
+          // result is col-major. This implies no transposition trick
+          // which forces bias.shape[-1] == n.
+          !transpose_result
+          && self->dim() >= 1
+          && self->sizes().end()[-1] == n
+          && self->numel() == n
+        )
+      )
     );
     const bool can_use_bias_in_epilogue = (
-        self->is_contiguous() // required for epilogue fusion
-        && bias_row_broadcasts // required for epilogue fusion
+        bias_col_broadcasts // required for epilogue fusion
         && is_beta_one() // no scaling for bias in epilogue
         && !result->is_complex() // no Epilogue support for complex types
     );
     if (can_use_bias_in_epilogue) { // Case for bias in epilogue
       bias = c10::MaybeOwned<Tensor>::borrowed(*self);
     } else { // Case for, potentially, an out-of-place GEMM
-      if (bias_row_broadcasts && self->is_contiguous()) {
+      if (bias_col_broadcasts) {
         // Bias can be viewed as 2D with the leading dimension 0.
-        // Being contiguous is key!
         bias = c10::MaybeOwned<Tensor>::borrowed(*self);
         bias_ld = static_cast<int64_t>(0);
       }
-      else if (bias_col_broadcasts) {
+      else if (bias_row_broadcasts) {
         // Not yet supporeted in Lt, because:
         // 1. Cannot set C desc layout != D desc layout.
         // 2. Can match layout with op(C) = Z or T,
         //    but it is not supported.
         must_copy_bias = true;
       } else if (self->dim() == 2) { // 2D bias
-        // DEBUG {
-        must_copy_bias = true;
-        return;
+        const auto self_maybe_expanded = (self->sizes() == result->sizes())
+          ? c10::MaybeOwned<Tensor>::borrowed(*self)
+          : c10::MaybeOwned<Tensor>::owned(*expand_size(*self, result->sizes(), "cublasCommonArgs::cublasCommonArgs()"));
+        const auto self_ld = get_ld(self_maybe_expanded, false, transpose_result);
+        const auto self_non_ld = get_ld(self_maybe_expanded, true, transpose_result);
+        // Layout should match that of the result, or ld is zero with contiguous non-ld dim (layout match by default)
+        if (ld_complies(*self_maybe_expanded, transpose_result) || (self_ld == 0 && self_non_ld == 1)) {
+          bias = self_maybe_expanded;
+          bias_ld = self_ld;
+        } else {
+          // Strides do not comply - copy bias into result
+          must_copy_bias = true;
+        }
       } else { // Fallback - copy bias into result
         must_copy_bias = true;
       }
