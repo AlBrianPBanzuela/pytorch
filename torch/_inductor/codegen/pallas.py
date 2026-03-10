@@ -5,7 +5,7 @@ import hashlib
 import itertools
 import math
 import typing_extensions
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy  # noqa: TC002
 
@@ -91,9 +91,7 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 class PallasKernelWrapper:
     """Wrapper to provide .run() interface for Pallas kernels"""
 
-    def __init__(
-        self, kernel_fn: Callable[..., Any], kernel_path: Optional[str] = None
-    ):
+    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
         kernel_code_log.info("Pallas kernel path: %s", kernel_path)
@@ -269,7 +267,7 @@ class PallasKernelOverrides(OpOverrides):
     def to_dtype(
         x: str,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> str:
         jax_dtype = torch_dtype_to_jax(dtype)
@@ -431,7 +429,8 @@ class PallasKernelOverrides(OpOverrides):
     # Sign operations
     @staticmethod
     def sign(x: str) -> str:
-        return f"jnp.sign({x})"
+        # PyTorch returns 0 for NaN, JAX returns NaN
+        return f"jnp.where(jnp.isnan({x}), 0.0, jnp.sign({x}))"
 
     @staticmethod
     def signbit(x: str) -> str:
@@ -1212,14 +1211,30 @@ class PallasKernel(SIMDKernel):
             return index_str, needs_flatten
 
     @staticmethod
-    def _safe_int(val: Any) -> Optional[int]:
+    def _safe_int(val: Any) -> int | None:
         """Convert value to int, returning None on failure."""
         try:
             return int(val)
         except (TypeError, ValueError):
             return None
 
-    def _compute_prefix_numel(self, prefixes: OrderedSet) -> Optional[int]:
+    def _zero_dim_output_flags(self, ctx: _CodegenContext) -> tuple[bool, bool]:
+        """Return whether an output has a zero or unknown dimension."""
+        has_unknown_dim = False
+        for buf_name in ctx.output_buffer_lookup.values():
+            buf = V.graph.try_get_buffer(buf_name)
+            if buf is None:
+                has_unknown_dim = True
+                continue
+            for dim in buf.get_size():
+                dim_int = self._safe_int(dim)
+                if dim_int == 0:
+                    return True, has_unknown_dim
+                if dim_int is None:
+                    has_unknown_dim = True
+        return False, has_unknown_dim
+
+    def _compute_prefix_numel(self, prefixes: OrderedSet) -> int | None:
         """Compute total numel for given prefixes (e.g., pointwise prefixes)."""
         result = 1
         for p in prefixes:
@@ -1230,7 +1245,7 @@ class PallasKernel(SIMDKernel):
                 result *= numel
         return result
 
-    def _compute_reduction_numel(self) -> Optional[int]:
+    def _compute_reduction_numel(self) -> int | None:
         """Compute total reduction numel."""
         result = 1
         for tree in self.range_trees:
@@ -1305,7 +1320,7 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def _get_buffer_info(self, name: str) -> Optional[tuple[Any, Any, Any, list, bool]]:
+    def _get_buffer_info(self, name: str) -> tuple[Any, Any, Any, list, bool] | None:
         """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous).
 
         Returns None if the buffer doesn't exist.
@@ -2333,7 +2348,7 @@ class PallasKernel(SIMDKernel):
 
     def _detect_scatter_pattern(
         self, index: sympy.Expr, output_name: str = ""
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Detect scatter operation pattern. Returns scatter info dict or None."""
         indirect_syms = self._get_indirect_vars(index)
         if len(indirect_syms) != 1:
@@ -2354,7 +2369,7 @@ class PallasKernel(SIMDKernel):
 
     def _detect_point_scatter(
         self, output_name: str, indirect_var: str, indirect_coeff: int
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Detect single-element scatter pattern."""
         if not output_name:
             return None
@@ -2387,7 +2402,7 @@ class PallasKernel(SIMDKernel):
 
     def _detect_iter_scatter(
         self, index: sympy.Expr, indirect_var: str, indirect_coeff: int
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Detect scatter pattern with iteration variables."""
         used_iter_vars = self._get_used_iter_vars(index)
 
@@ -2435,8 +2450,8 @@ class PallasKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:  # type: ignore[override]
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:  # type: ignore[override]
         """
         Generate code for reduction operations in JAX/Pallas.
 
@@ -2480,8 +2495,8 @@ class PallasKernel(SIMDKernel):
         has_pointwise = any(p in self.numels for p in pointwise_prefixes)
 
         # Get the pointwise and reduction numels
-        pointwise_numel: Optional[int] = self._compute_prefix_numel(pointwise_prefixes)
-        reduction_numel: Optional[int] = self._compute_reduction_numel()
+        pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
+        reduction_numel: int | None = self._compute_reduction_numel()
 
         # Count the number of pointwise and reduction dimensions
         n_reduction_dims = sum(
@@ -2791,7 +2806,7 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
+    def codegen_kernel(self, name: str | None = None) -> str:  # type: ignore[override]
         """
         Generate the complete Pallas kernel code as a Python string.
 
@@ -2968,62 +2983,79 @@ class PallasKernel(SIMDKernel):
         alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
         ctx.alias_pairs = alias_pairs
 
+        has_zero_dim, has_unknown_dim = self._zero_dim_output_flags(ctx)
+
+        zero_dim_return = (
+            "results = tuple(jnp.empty(s, dtype=dt) "
+            "for s, dt in zip(out_shapes, out_dtypes))",
+            "return results if len(results) > 1 else results[0]",
+        )
+
         with code.indent():
-            # Pallas requires >= 1-d tensors; promote 0-d to (1,)
-            code.writeline(
-                "_pallas_out_shapes = tuple("
-                "s if len(s) > 0 else (1,) for s in out_shapes)"
-            )
-            # Reshape aliased inputs to match promoted output shapes
-            for input_idx, out_idx in alias_pairs:
-                param = ctx.kernel_input_params[input_idx]
-                code.writeline(
-                    f"{param} = {param}.reshape(_pallas_out_shapes[{out_idx}])"
-                )
-            code.writeline("out_shapes_pallas = tuple(")
-            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
-            code.writeline(
-                "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
-            )
-            code.writeline(")")
-            if self.tile_cpu_tpu:
-                self._codegen_tiled_specs(ctx)
+            if has_zero_dim:
+                code.writelines(zero_dim_return)
             else:
-                code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
-                code.writeline("out_specs_pallas = tuple(")
-                code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+                if has_unknown_dim:
+                    code.writeline("if any(0 in shape for shape in out_shapes):")
+                    with code.indent():
+                        code.writelines(zero_dim_return)
+                # Pallas requires >= 1-d tensors; promote 0-d to (1,)
+                code.writeline(
+                    "_pallas_out_shapes = tuple("
+                    "s if len(s) > 0 else (1,) for s in out_shapes)"
+                )
+                # Reshape aliased inputs to match promoted output shapes
+                for input_idx, out_idx in alias_pairs:
+                    param = ctx.kernel_input_params[input_idx]
+                    code.writeline(
+                        f"{param} = {param}.reshape(_pallas_out_shapes[{out_idx}])"
+                    )
+                code.writeline("out_shapes_pallas = tuple(")
+                code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
                 code.writeline(
                     "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
                 )
                 code.writeline(")")
-                code.writeline("in_specs_pallas = tuple(")
-                code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
-                code.writeline(
-                    "    for i in [" + ", ".join(ctx.kernel_input_params) + "]"
+                if self.tile_cpu_tpu:
+                    self._codegen_tiled_specs(ctx)
+                else:
+                    code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
+                    code.writeline("out_specs_pallas = tuple(")
+                    code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+                    code.writeline(
+                        "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
+                    )
+                    code.writeline(")")
+                    code.writeline("in_specs_pallas = tuple(")
+                    code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+                    code.writeline(
+                        "    for i in [" + ", ".join(ctx.kernel_input_params) + "]"
+                    )
+                    code.writeline(")")
+
+                # Wrap kernel with functools.partial to pass scalar arguments (size variables)
+                partial_args = []
+                for sv_param in ctx.size_var_params:
+                    partial_args.append(f"{sv_param}={sv_param}")
+
+                if partial_args:
+                    kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
+                else:
+                    kernel_arg = f"{kernel_name}_kernel,"
+
+                use_tma = (
+                    self.is_gpu
+                    and self.use_emit_pipeline
+                    and self._can_use_tma_approach()
                 )
-                code.writeline(")")
-
-            # Wrap kernel with functools.partial to pass scalar arguments (size variables)
-            partial_args = []
-            for sv_param in ctx.size_var_params:
-                partial_args.append(f"{sv_param}={sv_param}")
-
-            if partial_args:
-                kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
-            else:
-                kernel_arg = f"{kernel_name}_kernel,"
-
-            use_tma = (
-                self.is_gpu and self.use_emit_pipeline and self._can_use_tma_approach()
-            )
-            if use_tma:
-                self._codegen_jit_wrapper_tma(ctx, kernel_arg)
-            elif self.is_gpu:
-                self._codegen_jit_wrapper_legacy_gpu(ctx, kernel_arg)
-            else:
-                self._codegen_jit_wrapper_cpu_tpu(
-                    ctx, kernel_arg, alias_pairs, alias_map_literal
-                )
+                if use_tma:
+                    self._codegen_jit_wrapper_tma(ctx, kernel_arg)
+                elif self.is_gpu:
+                    self._codegen_jit_wrapper_legacy_gpu(ctx, kernel_arg)
+                else:
+                    self._codegen_jit_wrapper_cpu_tpu(
+                        ctx, kernel_arg, alias_pairs, alias_map_literal
+                    )
 
         self._codegen_main_entry(ctx, jit_wrapper_name)
         return code.getvalue()
@@ -3399,10 +3431,11 @@ from torch._inductor.runtime.runtime_utils import (
         transpose_literal = "True" if self.tile_has_transpose else "False"
 
         skip_n = self.tile_skip_last_n
+        is_tpu_literal = "True" if ctx.is_tpu else "False"
         code.writeline(
             f"_tile, _grid, _ax2g = pallas_compute_tiling("
             f"out_shapes[0], transpose={transpose_literal}, "
-            f"skip_last_n={skip_n}, exact_only=True)"
+            f"skip_last_n={skip_n}, exact_only=True, is_tpu={is_tpu_literal})"
         )
         code.writeline("_ng = len(_grid)")
         code.writeline("_ref = out_shapes[0]")
@@ -3495,7 +3528,6 @@ from torch._inductor.runtime.runtime_utils import (
             f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
-            code.writeline("jax.config.update('jax_enable_x64', True)")
             code.writeline("jax.clear_caches()")
 
             # Build JAX placeholders for all inputs
@@ -3542,10 +3574,27 @@ from torch._inductor.runtime.runtime_utils import (
             )
 
             # Register and call via tpu_torch_pallas
-            code.writeline(
-                f"kernel_key = '{kernel_name_str}_' + "
-                f"'_'.join(str(s) for s in {ctx.output_params[0]}.shape)"
+            # Include all output and input shapes in the key to avoid stale
+            # cache hits when the same kernel name is compiled with different
+            # input/output ranks (e.g. broadcasting vs non-broadcasting calls).
+            shape_key_parts = []
+            for p in ctx.output_params:
+                shape_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            output_key_expr = (
+                " + 'x' + ".join(shape_key_parts) if shape_key_parts else "''"
             )
+            input_key_parts = []
+            for p in ctx.kernel_input_params:
+                input_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            input_key_expr = (
+                " + 'x' + ".join(input_key_parts) if input_key_parts else "''"
+            )
+            code.writeline(
+                f"kernel_key = '{kernel_name_str}_out_' + "
+                f"{output_key_expr}"
+                f" + '_in_' + {input_key_expr}"
+            )
+
             code.writeline(
                 f"if not tpu_torch_pallas.lookup_custom_kernel('{kernel_name_str}', kernel_key):"
             )
@@ -3672,7 +3721,7 @@ from torch._inductor.runtime.runtime_utils import (
         suffix = ".detach().contiguous()" if contiguous else ".detach()"
         code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
+    def call_kernel(self, name: str, node: IRNode | None = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
         wrapper = V.graph.wrapper_code
         arg_defs, call_args, _, _ = self.args.python_argdefs()
