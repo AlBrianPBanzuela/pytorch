@@ -166,10 +166,13 @@ void CUDAGraph::capture_end() {
     _currently_capturing_graphs.erase(capture_id_);
   }
 
-  AT_CUDA_CHECK(endCaptureErr);
-
+  // End pool allocation before checking the error so captures_underway
+  // is cleaned up even if cudaStreamEndCapture failed (e.g. due to an
+  // illegal operation during capture).
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+
+  AT_CUDA_CHECK(endCaptureErr);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
@@ -340,19 +343,6 @@ MempoolId_t CUDAGraph::pool() {
   TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
-}
-
-std::vector<std::pair<at::Tensor, at::Tensor>> CUDAGraph::_captured_rng_states() const {
-  std::vector<std::pair<at::Tensor, at::Tensor>> result;
-  for (const auto& [gen_state, _] : captured_generator_states_) {
-    auto* cs = gen_state->get_capture_state(capture_id_);
-    if (cs && cs->is_initialized()) {
-      result.emplace_back(
-          at::Tensor(cs->rng_state_seed_extragraph_),
-          at::Tensor(cs->rng_state_offset_extragraph_));
-    }
-  }
-  return result;
 }
 
 CUDAGraph::~CUDAGraph() {

@@ -85,9 +85,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       cudaGraphConditionalHandle handle,
       const Tensor& scalar_cuda_pred_tensor);
 
-  // Returns the (seed_tensor, offset_tensor) pairs for each captured generator.
-  std::vector<std::pair<at::Tensor, at::Tensor>> _captured_rng_states() const;
-
  private:
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
