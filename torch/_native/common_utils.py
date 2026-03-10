@@ -3,6 +3,7 @@ import importlib.metadata
 import os
 from functools import cache
 
+import packaging.version
 
 @cache
 def check_native_jit_disabled() -> bool:
@@ -31,7 +32,7 @@ def _unavailable_reason(deps: list[tuple[str, str]]) -> None | str:
     return None
 
 
-def _available_version(package: str) -> tuple[int, int, int] | None:
+def _available_version(package: str) -> packaging.version.Version | None:
     """
     Get the installed version of a package as (major, minor, patch).
 
@@ -44,14 +45,13 @@ def _available_version(package: str) -> tuple[int, int, int] | None:
     except importlib.metadata.PackageNotFoundError:
         return None
 
-    import packaging.version
 
     try:
         v = packaging.version.parse(version)
     except packaging.version.InvalidVersion:
         return None
 
-    return (v.major, v.minor, v.micro)
+    return v # (v.major, v.minor, v.micro)
 
 
 @cache

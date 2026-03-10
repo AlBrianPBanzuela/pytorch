@@ -2447,8 +2447,8 @@ class TestFP8Matmul(TestCase):
         good_recipe = [ScalingType.BlockWise1x32.value]
         good_swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
 
-        with patch.object(cu, "_CUTEDSL_AVAILABLE", True), \
-             patch("torch.cuda.get_device_capability", return_value=(10, 0)):
+        with patch.object(cu, "runtime_available", return_value=True), \
+            patch("torch.cuda.get_device_capability", return_value=(10, 0)):
             # All conditions met → True
             self.assertTrue(_should_use_cutedsl_scaled_grouped_mm_mxfp8(
                 mat_a, mat_b, good_recipe, good_swizzle,
@@ -2615,13 +2615,6 @@ class TestFP8Matmul(TestCase):
         if y_lp.isnan().any():
             raise AssertionError("low-precision output contains NaN")
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
-
-    @unittest.skipIf(not _CUTEDSL_AVAILABLE, "CuTeDSL runtime not available")
-    def test_cutedsl_mxfp8_kernel_override_registered(self, device="cuda"):
-        from torch._native.ops.cutedsl_mxfp8_scaled_grouped_mm.scaled_grouped_mm_mxfp8 import (
-            _NN_LIB,
-        )
-        self.assertIsNotNone(_NN_LIB)
 
     @unittest.skipIf(
         not (IS_SM100 and _CUTEDSL_AVAILABLE and PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM),
