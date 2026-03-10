@@ -2891,59 +2891,65 @@ class TestCustomOpAPI(TestCase):
 
         # -- Intercepted: needs_input_grad --
         self.assertEqual(wrapped.needs_input_grad, override)
-        self.assertNotEqual(wrapped.needs_input_grad, real_ctx.needs_input_grad)
 
-        # -- C-level properties (PyGetSetDef, 16 total) --
-        s0, s1 = wrapped.saved_tensors
-        self.assertEqual(s0, x)
-        self.assertEqual(s1, y)
-        # saved_variables (deprecated alias)
-        self.assertEqual(len(wrapped.saved_variables), 2)
-        # _raw_saved_tensors
-        self.assertEqual(len(wrapped._raw_saved_tensors), 2)
-        # next_functions
-        self.assertEqual(len(wrapped.next_functions), 2)
-        # requires_grad
-        self.assertTrue(wrapped.requires_grad)
-        # metadata
-        self.assertIsNotNone(wrapped.metadata)
-        # _input_metadata
-        self.assertIsNotNone(wrapped._input_metadata)
-        # to_save (None after forward completes)
-        self.assertIsNone(wrapped.to_save)
-        # non_differentiable
-        self.assertIsNone(wrapped.non_differentiable)
-        # dirty_tensors
-        self.assertIsNone(wrapped.dirty_tensors)
-        # saved_for_forward
-        self.assertIsNone(wrapped.saved_for_forward)
-        # _compiled_autograd_backward_state
-        self.assertIsNone(wrapped._compiled_autograd_backward_state)
+        # -- All forwarded attributes should return same value as real ctx --
+        # C-level properties (PyGetSetDef, 15 forwarded of 16 total)
+        for attr in [
+            "saved_tensors",
+            "saved_variables",
+            "_raw_saved_tensors",
+            "next_functions",
+            "requires_grad",
+            "metadata",
+            "to_save",
+            "non_differentiable",
+            "dirty_tensors",
+            "saved_for_forward",
+            "_compiled_autograd_backward_state",
+        ]:
+            self.assertEqual(
+                getattr(wrapped, attr), getattr(real_ctx, attr), msg=attr
+            )
+        # _input_metadata creates a new object per call
+        self.assertEqual(
+            type(wrapped._input_metadata), type(real_ctx._input_metadata)
+        )
 
-        # -- C-level methods (PyMethodDef, 9 total) --
-        self.assertIn("MyFn", wrapped.name())
-        self.assertIsInstance(wrapped._sequence_nr(), int)
+        # C-level methods (PyMethodDef)
+        self.assertEqual(wrapped.name(), real_ctx.name())
+        self.assertEqual(wrapped._sequence_nr(), real_ctx._sequence_nr())
         handle = wrapped.register_hook(lambda *a: None)
         handle.remove()
         handle = wrapped.register_prehook(lambda *a: None)
         handle.remove()
 
-        # -- Python mixin methods (FunctionCtx, 6 total) --
-        # These are forward-only but should still be accessible.
-        self.assertTrue(callable(wrapped.save_for_backward))
-        self.assertTrue(callable(wrapped.save_for_forward))
-        self.assertTrue(callable(wrapped.mark_dirty))
-        self.assertTrue(callable(wrapped.mark_non_differentiable))
-        self.assertTrue(callable(wrapped.set_materialize_grads))
+        # Python mixin methods (FunctionCtx) — forwarded, bound to real ctx
+        for attr in [
+            "save_for_backward",
+            "save_for_forward",
+            "mark_dirty",
+            "mark_non_differentiable",
+            "set_materialize_grads",
+        ]:
+            self.assertEqual(
+                getattr(wrapped, attr).__func__,
+                getattr(real_ctx, attr).__func__,
+                msg=attr,
+            )
 
-        # -- Python mixin methods (BackwardCFunction, 3 total) --
-        self.assertTrue(callable(wrapped.apply))
-        self.assertTrue(callable(wrapped.apply_jvp))
-        self.assertTrue(callable(wrapped._compiled_autograd_key))
+        # Python mixin methods (BackwardCFunction) — forwarded, bound to real ctx
+        for attr in ["apply", "apply_jvp", "_compiled_autograd_key"]:
+            self.assertEqual(
+                getattr(wrapped, attr).__func__,
+                getattr(real_ctx, attr).__func__,
+                msg=attr,
+            )
 
-        # -- Class attrs (FunctionMeta, 2 total) --
-        self.assertIs(wrapped._forward_cls, MyFn)
-        self.assertIsInstance(wrapped._autograd_function_id, int)
+        # Class attrs (FunctionMeta) — forwarded
+        self.assertIs(wrapped._forward_cls, real_ctx._forward_cls)
+        self.assertEqual(
+            wrapped._autograd_function_id, real_ctx._autograd_function_id
+        )
 
         # -- User-set attributes: read and write --
         self.assertEqual(wrapped.my_attr, 42)
