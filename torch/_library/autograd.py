@@ -5,22 +5,28 @@ from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
 from torch import _C, _ops, autograd, Tensor
-from torch._functorch.autograd_function import WrappedCtx
 from torch.utils import _pytree
 
 from . import utils
 
 
-class _WrappedCtx(WrappedCtx):
-    _pt_reserved_attrs = ("_pt_needs_input_grad", *WrappedCtx._pt_reserved_attrs)
-
+# Wraps ctx to override needs_input_grad. Same pattern as WrappedCtx in
+# torch/_functorch/autograd_function.py, redefined here to avoid a circular
+# import (torch._library is imported during torch.utils._pytree init).
+class _CtxWithNeedsInputGrad:
     def __init__(self, ctx, needs_input_grad):
-        super().__init__(ctx)
-        self._pt_needs_input_grad = needs_input_grad
+        self.__dict__["_inner_ctx"] = ctx
+        self.__dict__["_needs_input_grad"] = needs_input_grad
 
     @property
     def needs_input_grad(self):
-        return self._pt_needs_input_grad
+        return self._needs_input_grad
+
+    def __getattr__(self, name):
+        return getattr(self._inner_ctx, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._inner_ctx, name, value)
 
 
 class InfoProtocol(Protocol):
@@ -85,7 +91,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
 
     def backward(ctx, *grads):
         if info._backward_fn:
-            wrapped_ctx = _WrappedCtx(ctx, ctx.needs_input_grad[:-1])
+            wrapped_ctx = _CtxWithNeedsInputGrad(ctx, ctx.needs_input_grad[:-1])
             result = info._backward_fn(wrapped_ctx, *grads)
             if isinstance(result, tuple):
                 return (*result, None)
@@ -183,7 +189,7 @@ def supports_tensorlist(cls: Any) -> Any:
         # 1. get rid of the additional bool (which comes from the extra
         # `metadata input`)
         # 2. _pytree.tree_unflatten to get the right structure.
-        wrapped_ctx = _WrappedCtx(
+        wrapped_ctx = _CtxWithNeedsInputGrad(
             ctx,
             _pytree.tree_unflatten(
                 list(ctx.needs_input_grad[:-1]), metadata.input_spec
