@@ -9,18 +9,20 @@ from .common_utils import (
 )
 from .registry import _OpFn, _register_op_override
 
+from packaging.version import Version
 
 log = logging.getLogger(__name__)
 
 
-_CUTEDSL_BLESSED_VERSIONS: set[tuple[int, int, int]] = {
-    # Current version
-    (4, 4, 1),
+_CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
+    # Current version - Note Version.from_part(release=(4.4.1)) is better
+    #                   but > v26 of packaging.
+    Version(f'{4}.{4}.{1}'),
 }
 
 
 @functools.cache
-def _check_runtime_available() -> tuple[bool, tuple[int, int, int] | None]:
+def _check_runtime_available() -> tuple[bool, Version | None]:
     """
     Check if cutedsl (and deps) are available.
 
@@ -51,18 +53,18 @@ def runtime_available() -> bool:
     return available
 
 
-def runtime_version() -> None | tuple[int, int, int]:
+def runtime_version() -> None | Version:
     _, version = _check_runtime_available()
     return version
 
 
-def _version_is_blessed() -> bool:
+def _version_is_ok() -> bool:
     _, version = _check_runtime_available()
     if version is None:
         return False
     if check_native_version_skip():
         return True
-    return version in _CUTEDSL_BLESSED_VERSIONS
+    return version in _CUTEDSL_REQUIRED_VERSIONS
 
 
 def register_op_override(
@@ -83,12 +85,12 @@ def register_op_override(
     if (not available) or check_native_jit_disabled():
         return
 
-    if not _version_is_blessed():
+    if not _version_is_ok():
         log.warning(
-            "cutedsl version %s is not blessed (blessed: %s); "
+            "cutedsl version %s is not known-good (ok: %s); "
             "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
             version,
-            _CUTEDSL_BLESSED_VERSIONS,
+            _CUTEDSL_REQUIRED_VERSIONS,
         )
         return
 
