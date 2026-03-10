@@ -27,7 +27,7 @@ class TestNativeDSLOps(TestCase):
         """triton_utils and cutedsl_utils expose the same public API."""
         from torch._native import cutedsl_utils, triton_utils
 
-        REQUIRED_METHODS = {"runtime_available", "runtime_version", "register_op"}
+        REQUIRED_METHODS = {"runtime_available", "runtime_version", "register_op_override"}
 
         for mod in (triton_utils, cutedsl_utils):
             public = {name for name in dir(mod) if not name.startswith("_")}
@@ -46,10 +46,9 @@ class TestNativeDSLOps(TestCase):
             self.assertIsInstance(mod.runtime_available(), bool)
             ver = mod.runtime_version()
             if ver is not None:
-                self.assertIsInstance(ver, tuple)
-                self.assertEqual(len(ver), 3)
-                for v in ver:
-                    self.assertIsInstance(v, int)
+                from packaging.version import Version
+
+                self.assertIsInstance(ver, Version)
 
     def test_no_dsl_imports_after_import_torch(self):
         """import torch must not transitively import DSL runtimes.
@@ -99,51 +98,48 @@ class TestNativeDSLOps(TestCase):
         self.assertIn("nonexistent_pkg_xyz", reason)
 
     def test_available_version(self):
-        """_available_version returns a 3-tuple of ints for a clean version."""
+        """_available_version returns a packaging.version.Version"""
         from torch._native.common_utils import _available_version
+        from packaging.version import Version
 
         # Use typing_extensions which always has a clean major.minor.patch version,
         # unlike torch which may have pre-release suffixes in dev builds.
         ver = _available_version("typing_extensions")
-        self.assertIsInstance(ver, tuple)
-        self.assertEqual(len(ver), 3)
-        for v in ver:
-            self.assertIsInstance(v, int)
+        self.assertIsInstance(ver, Version)
 
     def test_registry_mechanics(self):
-        """register_op_registerer + register_all_operators round-trips."""
-        from torch._native.registry import (
-            _RegisteredFns,
-            register_all_operators,
-            register_op_registerer,
-        )
+        """_get_library caches Library instances per (lib, dispatch_key)."""
+        import torch.library
+        from torch._native.registry import _get_library, libs
 
-        sentinel = []
+        key = ("_test_native_dsl_registry", "CPU")
+        libs.pop(key, None)
 
-        def fn():
-            sentinel.append(True)
+        lib1 = _get_library(*key)
+        self.assertIsInstance(lib1, torch.library.Library)
+        lib2 = _get_library(*key)
+        self.assertIs(lib1, lib2, "should return cached instance")
 
-        original_len = len(_RegisteredFns)
-        register_op_registerer(fn)
-        self.assertEqual(len(_RegisteredFns), original_len + 1)
-
-        register_all_operators()
-        self.assertTrue(sentinel, "registered fn was never called")
+        # Different dispatch key -> different Library
+        key2 = ("_test_native_dsl_registry", "CUDA")
+        libs.pop(key2, None)
+        lib3 = _get_library(*key2)
+        self.assertIsNot(lib1, lib3)
 
         # cleanup
-        _RegisteredFns.pop()
+        libs.pop(key, None)
+        libs.pop(key2, None)
 
     def test_register_op_skips_when_jit_disabled(self):
-        """register_op does not enqueue fn when TORCH_DISABLE_NATIVE_JIT=1."""
+        """register_op_override does not call through when TORCH_DISABLE_NATIVE_JIT=1."""
         script = textwrap.dedent("""\
-            from torch._native.registry import _RegisteredFns
+            from unittest.mock import patch
             from torch._native import triton_utils, cutedsl_utils
 
-            before = len(_RegisteredFns)
-            triton_utils.register_op(lambda: None)
-            cutedsl_utils.register_op(lambda: None)
-            after = len(_RegisteredFns)
-            print(before == after)
+            with patch('torch._native.registry._register_op_override') as mock_reg:
+                triton_utils.register_op_override("aten", "add.Tensor", "CUDA", lambda: None)
+                cutedsl_utils.register_op_override("aten", "add.Tensor", "CUDA", lambda: None)
+                print(mock_reg.call_count == 0)
         """)
         env = os.environ.copy()
         env["TORCH_DISABLE_NATIVE_JIT"] = "1"
@@ -153,20 +149,19 @@ class TestNativeDSLOps(TestCase):
     def test_version_skip_env_var_overrides(self):
         """TORCH_NATIVE_SKIP_VERSION_CHECK=1 allows non-blessed versions."""
         script = textwrap.dedent("""\
+            from unittest.mock import patch, MagicMock
+            from packaging.version import Version
             from torch._native import triton_utils, cutedsl_utils
-            from torch._native.registry import _RegisteredFns
 
-            # Force runtime "available" with a non-blessed version
-            triton_utils._TRITON_AVAILABLE = True
-            triton_utils._TRITON_VERSION = (99, 99, 99)
-            cutedsl_utils._CUTEDSL_AVAILABLE = True
-            cutedsl_utils._CUTEDSL_VERSION = (99, 99, 99)
+            fake_version = Version("99.99.99")
 
-            before = len(_RegisteredFns)
-            triton_utils.register_op(lambda: None)
-            cutedsl_utils.register_op(lambda: None)
-            after = len(_RegisteredFns)
-            print(after - before)
+            with patch.object(triton_utils, '_check_runtime_available', return_value=(True, fake_version)), \\
+                 patch.object(cutedsl_utils, '_check_runtime_available', return_value=(True, fake_version)), \\
+                 patch.object(triton_utils, '_register_op_override') as triton_mock, \\
+                 patch.object(cutedsl_utils, '_register_op_override') as cute_mock:
+                triton_utils.register_op_override("aten", "add.Tensor", "CUDA", lambda: None)
+                cutedsl_utils.register_op_override("aten", "add.Tensor", "CUDA", lambda: None)
+                print(triton_mock.call_count + cute_mock.call_count)
         """)
         env = os.environ.copy()
         env["TORCH_NATIVE_SKIP_VERSION_CHECK"] = "1"
@@ -196,24 +191,21 @@ class TestNativeDSLOps(TestCase):
         self.assertEqual(result, "True")
 
     def test_available_version_prerelease(self):
-        """_available_version handles pre-release suffixes correctly."""
+        """_available_version parses valid versions and rejects unparsable ones."""
         from unittest.mock import patch
+
+        from packaging.version import Version
 
         from torch._native.common_utils import _available_version
 
-        cases = [
-            ("0.7.0rc1", (0, 7, 0)),
-            ("3.1.0.post1", (3, 1, 0)),
-            ("2.4.0a1", (2, 4, 0)),
-            ("1.2.3", (1, 2, 3)),
-        ]
-        for version_str, expected in cases:
+        valid_versions = ["0.7.0rc1", "3.1.0.post1", "2.4.0a1", "1.2.3"]
+        for version_str in valid_versions:
             with patch("importlib.metadata.version", return_value=version_str):
                 result = _available_version("fake_package")
                 self.assertEqual(
                     result,
-                    expected,
-                    f"_available_version({version_str!r}) = {result}, expected {expected}",
+                    Version(version_str),
+                    f"_available_version({version_str!r}) = {result}",
                 )
 
         # Completely unparsable -> None
