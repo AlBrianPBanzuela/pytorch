@@ -1,6 +1,8 @@
 import functools
 import logging
 
+from packaging.version import Version
+
 from .common_utils import (
     _available_version,
     _unavailable_reason,
@@ -9,7 +11,6 @@ from .common_utils import (
 )
 from .registry import _OpFn, _register_op_override
 
-from packaging.version import Version
 
 log = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ log = logging.getLogger(__name__)
 _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     # Current version - Note Version.from_part(release=(4.4.1)) is better
     #                   but > v26 of packaging.
-    Version(f'{4}.{4}.{1}'),
+    Version(f"{4}.{4}.{1}"),
 }
 
 

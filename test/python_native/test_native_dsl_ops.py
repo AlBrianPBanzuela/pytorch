@@ -27,7 +27,11 @@ class TestNativeDSLOps(TestCase):
         """triton_utils and cutedsl_utils expose the same public API."""
         from torch._native import cutedsl_utils, triton_utils
 
-        REQUIRED_METHODS = {"runtime_available", "runtime_version", "register_op_override"}
+        REQUIRED_METHODS = {
+            "runtime_available",
+            "runtime_version",
+            "register_op_override",
+        }
 
         for mod in (triton_utils, cutedsl_utils):
             public = {name for name in dir(mod) if not name.startswith("_")}
@@ -99,8 +103,9 @@ class TestNativeDSLOps(TestCase):
 
     def test_available_version(self):
         """_available_version returns a packaging.version.Version"""
-        from torch._native.common_utils import _available_version
         from packaging.version import Version
+
+        from torch._native.common_utils import _available_version
 
         # Use typing_extensions which always has a clean major.minor.patch version,
         # unlike torch which may have pre-release suffixes in dev builds.

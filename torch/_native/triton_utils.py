@@ -1,5 +1,6 @@
 import functools
 import logging
+
 from packaging.version import Version
 
 from .common_utils import (
@@ -19,7 +20,7 @@ _TRITON_MINIMUM_VERSION_MINOR = 6
 
 
 @functools.cache
-def _check_runtime_available() -> [bool, Version | None]:
+def _check_runtime_available() -> tuple[bool, Version | None]:
     """
     Check if triton is available
 
