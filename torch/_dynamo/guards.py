@@ -2597,7 +2597,12 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         # Construct a debug string to put into the c++ equals match guard.
-        code = [f"{ref} == {val!r}"]
+        try:
+            code = [f"{ref} == {val!r}"]
+        except AttributeError:
+            # Backing object may not be fully initialized (e.g. during
+            # tracing of __init__ for frozen dataclasses or context managers)
+            code = [f"{ref} == {type(val).__name__}(...)"]
         if istype(val, ok_mutable_types):
             # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
             # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
