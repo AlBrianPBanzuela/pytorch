@@ -1274,6 +1274,31 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gn(inp), inp + 3)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_contextmanager_graph_break_in_body(self):
+        from contextlib import contextmanager
+
+        @torch._dynamo.disable
+        def skipped_generator():
+            yield
+
+        @contextmanager
+        def my_ctx():
+            skipped_generator()
+            yield
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            with my_ctx():
+                x = x + 2
+            return x + 3
+
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp), inp + 6)
+        self.assertEqual(cnts.frame_count, 2)
+
     @unittest.expectedFailure
     def test_nested_decorated_function(self):
         # decorator must call ContextWrappingVariable.cleanup_assert to trigger this test
