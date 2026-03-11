@@ -21,7 +21,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 import functools
 import inspect
 import types
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -296,9 +296,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
-        real_obj = self.get_real_value()
+        real_obj = self.as_python_constant()
         real_obj_type = type(real_obj)
-        is_value_type = is_opaque_value_type(real_obj_type)
         if is_opaque_type(real_obj_type):
             member_type = get_member_type(real_obj_type, name)
 
@@ -313,7 +312,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 else:
                     return super().var_getattr(tx, name)
 
-            elif member_type == MemberType.INLINED:
+            elif member_type == MemberType.INLINED or is_opaque_value_type(
+                real_obj_type
+            ):
                 value = getattr(real_obj, name)
                 if (
                     inspect.ismethod(value)
@@ -324,10 +325,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
-                return super().var_getattr(tx, name)
-
-            elif is_value_type:
-                # Unregistered members are inlined by default for value types
                 return super().var_getattr(tx, name)
 
             elif name in ("__bool__", "__len__") and not hasattr(real_obj, name):
@@ -388,14 +385,13 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: list[Any],
+        args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        real_obj = self.get_real_value()
+        real_obj = self.as_python_constant()
         real_obj_type = type(real_obj)
-        is_value_type = is_opaque_value_type(real_obj_type)
         if is_opaque_type(real_obj_type):
             member_type = get_member_type(real_obj_type, name)
 
@@ -443,7 +439,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
                 return VariableTracker.build(tx, constant_val)
 
-            elif member_type == MemberType.INLINED:
+            elif member_type == MemberType.INLINED or is_opaque_value_type(
+                real_obj_type
+            ):
                 proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
                 proxy = tx.output.create_proxy(
@@ -454,10 +452,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 )
 
                 return wrap_fx_proxy(tx=tx, proxy=proxy)
-
-            elif is_value_type:
-                # Value types: unregistered members are inlined
-                return super().call_method(tx, name, args, kwargs)
 
             else:
                 unimplemented(
