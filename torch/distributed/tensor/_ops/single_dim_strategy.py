@@ -453,6 +453,25 @@ def _expand_single_dim_strategy_to_mesh(
             base_name = op_name.split("::")[1].split(".")[0]
             is_inplace = base_name.endswith("_")
 
+            # cross_mesh_indices are defined as positions in args_schema (the
+            # full arg list), but expand_to_full_mesh_op_strategy indexes into
+            # args_strategy (OpStrategy items only).  Non-OpStrategy args like
+            # empty lists (e.g. max_exp_avg_sqs=[] when amsgrad=False) are
+            # filtered out, shifting later indices.  Remap here.
+            cross_mesh_indices = strategy_info.cross_mesh_indices
+            if cross_mesh_indices is not None:
+                schema_to_strategy: dict[int, int] = {}
+                strategy_pos = 0
+                for schema_pos, arg in enumerate(op_schema.args_schema):
+                    if isinstance(arg, OpStrategy):
+                        schema_to_strategy[schema_pos] = strategy_pos
+                        strategy_pos += 1
+                cross_mesh_indices = [
+                    schema_to_strategy[i]
+                    for i in cross_mesh_indices
+                    if i in schema_to_strategy
+                ]
+
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,
@@ -462,7 +481,7 @@ def _expand_single_dim_strategy_to_mesh(
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
                 allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
-                cross_mesh_indices=strategy_info.cross_mesh_indices,
+                cross_mesh_indices=cross_mesh_indices,
             )
 
         return expanded_strategy
