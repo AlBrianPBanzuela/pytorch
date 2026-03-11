@@ -524,8 +524,7 @@ def _expand_single_dim_strategy_to_mesh(
             return op_schema, target_output_meta
 
         # Strip trailing underscore for inplace ops
-        if base_op_name.endswith("_"):
-            base_op_name = base_op_name[:-1]
+        base_op_name = base_op_name.removesuffix("_")
 
         # figure out target op variant
         variant_map = {
@@ -592,11 +591,7 @@ def _expand_single_dim_strategy_to_mesh(
 
     # TODO maybe this could be helped by adding a new 'tag' to the OpOverload?
     op_name = op_schema.op.name()
-    if (
-        op_name.startswith("aten::_foreach_")
-        or op_name.startswith("aten::_amp_foreach_")
-        or op_name.startswith("aten::_fused_")
-    ):
+    if op_name.startswith(("aten::_foreach_", "aten::_amp_foreach_", "aten::_fused_")):
         return expanded_foreach_strategy
 
     return _create_expanded_strategy(op_schema, output_tensor_meta)

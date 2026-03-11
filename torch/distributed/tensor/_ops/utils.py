@@ -485,12 +485,11 @@ def expand_to_full_mesh_op_strategy(
                     cross_mesh_input = input_args_strategy[idx]
                     original_spec = cross_mesh_input.strategies[0].output_spec
                     if original_spec.mesh != mesh:
-                        assert all(
-                            p == Replicate() for p in original_spec.placements
-                        ), (
-                            f"Cross-mesh input at index {idx} must be Replicate, "
-                            f"but got {original_spec.placements}"
-                        )
+                        if not all(p == Replicate() for p in original_spec.placements):
+                            raise RuntimeError(
+                                f"Cross-mesh input at index {idx} must be Replicate, "
+                                f"but got {original_spec.placements}"
+                            )
                         input_specs[idx] = DTensorSpec(
                             mesh=original_spec.mesh,
                             placements=original_spec.placements,
