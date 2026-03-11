@@ -5281,7 +5281,23 @@ class LiftedSyntheticObject:
     ctor_arg_sources: tuple[Any, ...] | None
 
 
-LiftedArgOrigin = LiftedUserArg | LiftedCapturedSource | LiftedSyntheticObject
+@dataclass
+class LiftedBoundSymbol:
+    """Lifted arg that is a SymInt already bound as a graph input.
+
+    SymInt graph inputs are created during tensor wrapping (not through
+    VariableBuilder.wrap_symint), so they aren't registered in
+    unspec_variable_map or variable_tracker_cache. Using LiftedCapturedSource
+    for these would resolve the source to a concrete Python int via
+    source.get_value() instead of reusing the existing symbolic proxy.
+    """
+
+    expr: Any  # sympy.Expr
+
+
+LiftedArgOrigin = (
+    LiftedUserArg | LiftedCapturedSource | LiftedSyntheticObject | LiftedBoundSymbol
+)
 
 
 def get_fn_id(fn_var: Any) -> int | None:
@@ -5774,6 +5790,14 @@ def stamp_out_subgraph(
     for freevar in cached.freevar_mapping:
         if isinstance(freevar, LiftedUserArg):
             new_lifted_args.append(flat_proxies[freevar.index])
+        elif isinstance(freevar, LiftedBoundSymbol):
+            from torch._dynamo.output_graph import LazyProxy
+
+            proxy = tx.output.current_tracer.bound_symbols[freevar.expr]
+            if isinstance(proxy, LazyProxy):
+                proxy = proxy()
+                tx.output.current_tracer.bound_symbols[freevar.expr] = proxy
+            new_lifted_args.append(proxy)
         elif isinstance(freevar, LiftedSyntheticObject):
             ctor_args = freevar.ctor_args
             ctor_arg_sources = freevar.ctor_arg_sources
@@ -5855,6 +5879,7 @@ def build_freevar_mapping(
     - LiftedUserArg: a user argument (intermediate activation or explicit input)
     - LiftedCapturedSource: a captured variable (e.g. a weight or parameter)
     - LiftedSyntheticObject: a TorchScriptObject with a SyntheticLocalSource
+    - LiftedBoundSymbol: a SymInt already bound as a graph input
     """
     proxy_node_to_idx: dict[torch.fx.Node, int] = {}
     idx = 0
@@ -5873,6 +5898,14 @@ def build_freevar_mapping(
         else:
             grapharg = outer_proxy.node.meta.get("grapharg", None)
             source = grapharg.source if grapharg is not None else None
+            # SymInt graph inputs are created during tensor wrapping, not
+            # through VariableBuilder.wrap_symint, so they aren't registered
+            # in unspec_variable_map. Using LiftedCapturedSource would
+            # resolve the source to a concrete int. Instead, store the sympy
+            # expression and look it up in bound_symbols during stamp-out.
+            if grapharg is not None and isinstance(grapharg.example, torch.SymInt):
+                freevar_mapping.append(LiftedBoundSymbol(grapharg.example.node.expr))
+                continue
             assert source is not None, (
                 f"Freevar has no source: node.op={outer_proxy.node.op} "
                 f"node.name={outer_proxy.node.name} -- this likely means a "
