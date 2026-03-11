@@ -18,6 +18,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import (
@@ -1170,6 +1171,202 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(isinstance(d_params[0], DTensor))
         self.assertEqual(d_params[0].placements, (Shard(0),))
         self.assertEqual(d_params[0].device_mesh, param_mesh)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_fused_adam_cross_mesh_empty_max_exp_avg_sqs(self):
+        """Test cross-mesh fused adam with max_exp_avg_sqs=[] (amsgrad=False).
+
+        When max_exp_avg_sqs is empty, it's not an OpStrategy after per-element
+        translation, which shifts the args_strategy indices. cross_mesh_indices
+        must be remapped so state_steps is still correctly identified.
+        """
+        mesh_2d = init_device_mesh(
+            self.device_type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        param_mesh = mesh_2d["tp"]
+        step_mesh = mesh_2d["dp"]
+
+        d_params = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_grads = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avgs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avg_sqs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_state_steps = [
+            distribute_tensor(
+                torch.tensor(1.0, device=self.device_type), step_mesh, [Replicate()]
+            )
+        ]
+
+        # Empty max_exp_avg_sqs triggers the index shift bug
+        torch._fused_adam_(
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            [],  # empty when amsgrad=False
+            d_state_steps,
+            lr=0.001,
+            beta1=0.9,
+            beta2=0.999,
+            weight_decay=0.0,
+            eps=1e-8,
+            amsgrad=False,
+            maximize=False,
+        )
+
+        self.assertIsInstance(d_params[0], DTensor)
+        self.assertEqual(d_params[0].placements, (Shard(0),))
+        self.assertEqual(d_params[0].device_mesh, param_mesh)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_fused_adamw_strided_shard_cross_mesh(self):
+        """Reproduce the torchtitan pattern: params with _StridedShard on a 2D
+        mesh, state_steps with Replicate on a 1D DP sub-mesh."""
+        mesh_2d = init_device_mesh(
+            self.device_type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        dp_mesh = mesh_2d["dp"]
+        placements = [_StridedShard(0, split_factor=2), Shard(0)]
+
+        d_params = [
+            DTensor.from_local(
+                torch.randn(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_grads = [
+            DTensor.from_local(
+                torch.randn(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_exp_avgs = [
+            DTensor.from_local(
+                torch.zeros(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_exp_avg_sqs = [
+            DTensor.from_local(
+                torch.zeros(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_state_steps = [
+            DTensor.from_local(
+                torch.tensor(1.0, device=self.device_type),
+                dp_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+        ]
+
+        torch.ops.aten._fused_adamw_.default(
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            [],
+            d_state_steps,
+            lr=0.1,
+            beta1=0.9,
+            beta2=0.999,
+            weight_decay=0.01,
+            eps=1e-8,
+            amsgrad=False,
+            maximize=False,
+        )
+
+        self.assertIsInstance(d_params[0], DTensor)
+        self.assertEqual(d_params[0].placements, tuple(placements))
+        self.assertEqual(d_params[0].device_mesh, mesh_2d)
+
+    @with_comms
+    def test_fused_adamw_tensor_lr(self):
+        """Test _fused_adamw_ with tensor lr kwarg."""
+        device_mesh = self.build_device_mesh()
+
+        d_params = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_grads = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avgs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avg_sqs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_state_steps = [
+            distribute_tensor(
+                torch.tensor(1.0, device=self.device_type),
+                device_mesh,
+                [Replicate()],
+            )
+        ]
+        d_lr = distribute_tensor(
+            torch.tensor(0.001, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+
+        # tensor_lr variant passes lr as a tensor kwarg
+        torch.ops.aten._fused_adamw_.tensor_lr(
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            [],
+            d_state_steps,
+            lr=d_lr,
+            beta1=0.9,
+            beta2=0.999,
+            weight_decay=0.01,
+            eps=1e-8,
+            amsgrad=False,
+            maximize=False,
+        )
+
+        self.assertIsInstance(d_params[0], DTensor)
+        self.assertEqual(d_params[0].placements, (Shard(0),))
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)

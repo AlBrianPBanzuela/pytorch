@@ -81,6 +81,14 @@ def _common_pointwise_single_dim_strategy(
         # For multi-output ops (e.g. frexp), all outputs share the same
         # pointwise sharding, so replicate the output placement.
         num_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+        # Count tensor kwargs (e.g. lr in _fused_adamw_.tensor_lr) that need
+        # a placement entry in the strategy.  Exclude "out" because
+        # _out_wrapper appends the out placement separately.
+        num_tensor_kwargs = sum(
+            1
+            for k, v in kwargs_schema.items()
+            if isinstance(v, TensorMeta) and k != "out"
+        )
         placements: list[list[Placement | _ShardingPlaceholder]] = []
         for i in range(len(common_shape)):
             shard_placements: list[Placement | _ShardingPlaceholder] = [
@@ -98,6 +106,8 @@ def _common_pointwise_single_dim_strategy(
                     )
                 else:
                     shard_placements.append(Replicate())
+            # Tensor kwargs (e.g. lr) are scalar-like and always replicated.
+            shard_placements.extend([Replicate()] * num_tensor_kwargs)
             placements.append(shard_placements)
         if partial_extra_rules:
             n_tensors = len(tensor_arg_metas)
@@ -109,7 +119,8 @@ def _common_pointwise_single_dim_strategy(
                 # see _MUL_RULES to see how _UNARY_LINEAR_RULES handles the
                 # scalar promotion case
                 if len(rule) == expected_len:
-                    placements.append(rule)
+                    # Append Replicate for tensor kwargs to match expected length
+                    placements.append(rule + [Replicate()] * num_tensor_kwargs)
         return placements
 
     return strategy
