@@ -13,12 +13,16 @@ from torch import _C, _ops, Tensor
 from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
-from . import autograd, utils
+from . import autograd as autograd_lib, utils
 from .effects import EffectType
 
 
 device_types_t = str | Sequence[str] | None
 log = logging.getLogger(__name__)
+
+# Experiment flags for benchmarking custom_op overhead
+_ENABLE_ALIASING_CHECK = True
+_ENABLE_AUTOGRAD_DISPATCH = True
 
 
 @overload
@@ -231,6 +235,8 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        self._raw_fns: dict[str | None, Callable] = {}
+        self._mutated_idxs: tuple = ()
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -374,19 +380,20 @@ class CustomOpDef:
                     def backend_impl(*args, **kwargs):
                         result = self._backend_fns[device_type](*args, **kwargs)
 
-                        def get_module():
-                            fn = self._backend_fns[device_type]
-                            return inspect.getmodule(fn)
+                        if _ENABLE_ALIASING_CHECK:
+                            def get_module():
+                                fn = self._backend_fns[device_type]
+                                return inspect.getmodule(fn)
 
-                        schema = self._opoverload._schema
-                        if not schema._is_view_op():
-                            utils._c_check_aliasing_constraint(
-                                self._name,
-                                args,
-                                kwargs,
-                                result,
-                                get_module,
-                            )
+                            schema = self._opoverload._schema
+                            if not schema._is_view_op():
+                                utils._c_check_aliasing_constraint(
+                                    self._name,
+                                    args,
+                                    kwargs,
+                                    result,
+                                    get_module,
+                                )
                         return result
 
                     if device_type is None:
@@ -410,6 +417,8 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
+                self._raw_fns[device_type] = fn
+            self._install_fast_call()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
@@ -665,42 +674,128 @@ class CustomOpDef:
 
         lib._register_fake(self._name, fake_impl, _stacklevel=4)
 
-        autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
-        lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
+        if _ENABLE_AUTOGRAD_DISPATCH:
+            autograd_impl = autograd_lib.make_autograd_impl(self._opoverload, self)
+            lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
+            schema = self._opoverload._schema
+
+            if schema._is_view_op() or schema.is_mutable:
+                lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
+
+            if schema.is_mutable:
+                mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
+                self._mutated_idxs = mutated_idxs
+
+                original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+                    f"{lib.ns}::{self._name}", "ADInplaceOrView"
+                )
+
+                def adinplaceorview_impl(keyset, *args, **kwargs):
+                    # Handle the mutated idx the user gave us explicitly
+
+                    for idx in mutated_idxs:
+                        increment_version(args[idx])
+                    for key in mutated_keys:
+                        increment_version(kwargs[key])
+                    # Handle view + mutation that are in the schema
+                    return original_kernel.call_boxed(keyset, *args, **kwargs)
+
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Warning only once for all operators",
+                        category=UserWarning,
+                    )
+                    lib.impl(
+                        self._name,
+                        adinplaceorview_impl,
+                        "ADInplaceOrView",
+                        with_keyset=True,
+                    )
+
+    def _install_fast_call(self):
         schema = self._opoverload._schema
+        is_mutable = schema.is_mutable
+        mutated_idxs = self._mutated_idxs
+        raw_fns = self._raw_fns
+        opdef = self
+        op = self._opoverload
+        has_kwarg_only_args = utils.has_kwarg_only_args(schema)
 
-        if schema._is_view_op() or schema.is_mutable:
-            lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
-
-        if schema.is_mutable:
-            mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
-
-            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
-                f"{lib.ns}::{self._name}", "ADInplaceOrView"
-            )
-
-            def adinplaceorview_impl(keyset, *args, **kwargs):
-                # Handle the mutated idx the user gave us explicitly
-
+        def forward(ctx, *args):
+            if is_mutable:
                 for idx in mutated_idxs:
                     increment_version(args[idx])
-                for key in mutated_keys:
-                    increment_version(kwargs[key])
-                # Handle view + mutation that are in the schema
-                return original_kernel.call_boxed(keyset, *args, **kwargs)
 
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="Warning only once for all operators",
-                    category=UserWarning,
-                )
-                lib.impl(
-                    self._name,
-                    adinplaceorview_impl,
-                    "ADInplaceOrView",
-                    with_keyset=True,
-                )
+            device_type = args[0].device.type
+            fn = raw_fns.get(device_type)
+            if fn is None:
+                fn = raw_fns.get(None)
+            result = fn(*args)
+
+            if opdef._setup_context_fn:
+                filled_args, filled_kwargs = utils.fill_defaults(op._schema, args, {})
+                if has_kwarg_only_args:
+                    opdef._setup_context_fn(
+                        ctx=ctx,
+                        inputs=filled_args,
+                        keyword_only_inputs=filled_kwargs,
+                        output=result,
+                    )
+                else:
+                    opdef._setup_context_fn(ctx=ctx, inputs=filled_args, output=result)
+
+            return result
+
+        def backward(ctx, *grads):
+            if opdef._backward_fn:
+                return opdef._backward_fn(ctx, *grads)
+            raise RuntimeError(
+                f"Trying to backward through {op} but no autograd "
+                f"formula was registered. "
+                f"Please use register_autograd to add one."
+            )
+
+        Generated = type(
+            f"FastGeneratedBackwardFor_{op._namespace}_{op._opname}",
+            (torch.autograd.Function,),
+            {
+                "forward": staticmethod(forward),
+                "backward": staticmethod(backward),
+            },
+        )
+
+        has_tensorlist = any(
+            utils.is_tensorlist_like_type(a.type)
+            for a in (*schema.arguments, *schema.returns)
+        )
+        if has_tensorlist:
+            Generated = autograd_lib.supports_tensorlist(Generated)
+
+        def fast_call(*args, **kwargs):
+            if kwargs:
+                return NotImplemented
+
+            first_arg = args[0]
+            if not isinstance(first_arg, Tensor):
+                return NotImplemented
+            device_type = first_arg.device.type
+
+            fn = raw_fns.get(device_type)
+            if fn is None:
+                fn = raw_fns.get(None)
+            if fn is None:
+                return NotImplemented
+
+            if _C.is_grad_enabled() and _C._any_requires_grad(*args):
+                return Generated.apply(*args)
+
+            if is_mutable:
+                for idx in mutated_idxs:
+                    increment_version(args[idx])
+            return fn(*args)
+
+        self._opoverload._overloadpacket._fast_call = fast_call
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
