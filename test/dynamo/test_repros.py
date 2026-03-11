@@ -2126,7 +2126,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref0, res0))
             self.assertTrue(same(ref1, res1))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_primtorch(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -3912,7 +3911,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     @skipIfWindows(
         msg="TODO: (xuhancn) fix, AssertionError: tensor([[0.1000, 0.1000, 0.1000,  ..., 0.1000, 0.1000, 0.1000],"
     )
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_optim_state_references_cleared(self):
         model = torch.nn.Linear(2048, 2048, bias=False)
         x = torch.ones(2048)
@@ -3942,7 +3940,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertIsNone(state_ref())
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_grad_references_cleared(self):
         model = torch.nn.Linear(2048, 2048, bias=False)
         x = torch.ones(2048)
