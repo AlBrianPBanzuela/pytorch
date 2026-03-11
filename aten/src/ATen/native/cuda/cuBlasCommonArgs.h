@@ -11,6 +11,13 @@ using at::blas::SwizzleType;
 
 namespace {
 
+inline bool ld_complies(const Tensor& t, bool is_row_major_like) {
+  int64_t ld = is_row_major_like ? 0 : 1;
+  const auto strides = t.strides();
+  const auto sizes = t.sizes();
+  return strides[1 - ld] == 1 && strides[ld] >= std::max<int64_t>(1, sizes[1 - ld]);
+}
+
 // TODO: https://github.com/pytorch/pytorch/pull/59380#pullrequestreview-725310492
 c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, bool resolve_conj) {
   if (resolve_conj && tensor.is_conj()) {
@@ -20,50 +27,26 @@ c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, b
   }
 }
 
-c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, bool transpose_result) {
+template <typename resolve_conj_indicator_t>
+c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(
+    const Tensor& tensor,
+    bool& transpose_tensor,
+    const resolve_conj_indicator_t& resolve_conj_indicator
+) {
   if (tensor.is_non_overlapping_and_dense()) { // common case
       transpose_tensor = tensor.is_contiguous();
-      return resolve_conj_if_indicated(tensor, transpose_result ? transpose_tensor : !transpose_tensor);
+      // TODO: Conj resolution is not efficient here -- it should be analyzed
+      // in the context of the whole operation
+      return resolve_conj_if_indicated(tensor, resolve_conj_indicator(transpose_tensor));
   }
-  IntArrayRef tensor_strides = tensor.strides();
-  IntArrayRef tensor_sizes = tensor.sizes();
-  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
-    transpose_tensor = false;
-    return resolve_conj_if_indicated(tensor, !transpose_result);
-  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
-    transpose_tensor = true;
-    return resolve_conj_if_indicated(tensor, transpose_result);
-  } else {
-    transpose_tensor = true;
-    return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
-  }
-}
-
-c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
-  if (tensor.is_non_overlapping_and_dense()) { // common case
-      transpose_tensor = tensor.is_contiguous();
-      return resolve_conj_if_indicated(tensor, true);
-  }
-
-  IntArrayRef tensor_strides = tensor.strides();
-  IntArrayRef tensor_sizes = tensor.sizes();
-  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
-    transpose_tensor = false;
-    return resolve_conj_if_indicated(tensor, true);
-  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
-    transpose_tensor = true;
-    return resolve_conj_if_indicated(tensor, true);
-  } else {
-    transpose_tensor = true;
-    return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
-  }
-}
-
-bool inline ld_complies(const Tensor& t, bool is_row_major_like) {
-  int64_t ld = is_row_major_like ? 0 : 1;
-  const auto strides = t.strides();
-  const auto sizes = t.sizes();
-  return strides[1 - ld] == 1 && strides[ld] >= std::max<int64_t>(1, sizes[1 - ld]);
+  // Do not use the transposition trick iff the input is col-major-like
+  transpose_tensor = !ld_complies(tensor, /*is_row_major_like=*/false);
+  // TODO: Conj resolution is not efficient here -- it should be analyzed
+  // in the context of the whole operation
+  return transpose_tensor && !ld_complies(tensor, /*is_row_major_like=*/true)
+    // Safe to return like that as the content is going to be moved
+    ? c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous))
+    : resolve_conj_if_indicated(tensor, resolve_conj_indicator(transpose_tensor));
 }
 
 } // namespace
@@ -114,9 +97,19 @@ struct cublasCommonArgs {
       const std::optional<ScalingType>& scaling_choice_a = std::nullopt,
       const std::optional<ScalingType>& scaling_choice_b = std::nullopt) {
     bool transpose_result = false, transpose_a = false, transpose_b = false;
-    result = prepare_matrix_for_cublas(c, transpose_result);
-    mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, transpose_result);
-    matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_b, transpose_result);
+    // TODO: the conj flag resolution is not efficicient
+    // and needs to be analyzed in the context of the whole operation.
+    const auto res_conj_indicator = [](const bool trans) -> auto {
+      // Always indicate to resolve for result.
+      return true;
+    };
+    const auto mat_conj_indicator = [&](const bool trans) -> auto {
+      return transpose_result ? trans : !trans;
+    };
+
+    result = prepare_matrix_for_cublas(c, transpose_result, res_conj_indicator);
+    mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, mat_conj_indicator);
+    matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_b, mat_conj_indicator);
 
     // Handle scale tensors if provided
     if (scale_a && scale_b) {

@@ -7769,8 +7769,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16, torch.half))
     @dtypes(*floating_types_and(torch.bfloat16))
-    @tf32_on_and_off(0.05)
-    @reduced_f32_on_and_off(0.05)
     def test_addmm_layout_variants_correctness(self, device, dtype):
         m = 3
         k = 5
@@ -7795,7 +7793,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             )
             yield from layouts
 
-        for out, m1, m2, bias, activation in itertools.product(
+        beta_variants = ({}, {"beta": 0}, {"beta": 1.4})
+
+        for out, m1, m2, bias, activation, beta in itertools.product(
             gen_matrix_layouts(m, n),
             gen_matrix_layouts(m, k),
             gen_matrix_layouts(k, n),
@@ -7805,12 +7805,13 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 gen_matrix_layouts(1, n),
                 gen_matrix_layouts(m, n),
             ),
-            activation_variants
+            activation_variants,
+            beta_variants,
         ):
             # Contiguous input is canonical and well-tested.
             # We use it here as a reference to avoid atol/rtol tweaks.
-            expected = torch.addmm(bias.contiguous(), m1.contiguous(), m2.contiguous())
-            actual = torch.addmm(bias, m1, m2, out=out)
+            expected = torch.addmm(bias.contiguous(), m1.contiguous(), m2.contiguous(), **beta)
+            actual = torch.addmm(bias, m1, m2, **beta, out=out)
             self.assertEqual(actual, out, atol=0.0, rtol=0.0)
             self.assertEqual(expected, actual)
 
