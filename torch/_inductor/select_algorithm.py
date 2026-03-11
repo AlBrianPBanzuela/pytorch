@@ -227,17 +227,19 @@ class PartialRender:
         if line_end == -1:
             line_end = len(self._code)
 
+        # Inline placeholder — substitute as-is (first occurrence only)
         if self._code[line_start:line_end].strip() != hook_key:
-            return self._code.replace(hook_key, result)
+            return self._code[:idx] + result + self._code[idx + len(hook_key) :]
 
-        # Whole-line placeholder
+        # Whole-line placeholder with empty result — remove entire line
         if not (result and result.strip()):
             return self._code[:line_start] + self._code[line_end + 1 :]
 
+        # Whole-line placeholder — dedent result and re-indent to match
         indent_str = self._code[line_start:idx]
         dedented = textwrap.dedent(result.rstrip("\n"))
-        indented = textwrap.indent(dedented, indent_str).strip()
-        return self._code.replace(hook_key, indented)
+        indented = textwrap.indent(dedented, indent_str)
+        return self._code[:line_start] + indented + self._code[line_end:]
 
     def finalize_hook(self, hook_key: str, strict: bool = True) -> None:
         """
