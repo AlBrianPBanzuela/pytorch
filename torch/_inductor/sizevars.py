@@ -416,7 +416,26 @@ class SizeVarAllocator:
             return False
 
         expr = sympy.Eq(Mod(numerator, denominator), 0)
-        return self.statically_known_true(expr)  # type: ignore[arg-type]
+        if self.statically_known_true(expr): # type: ignore[arg-type]
+            return True
+
+        # Step 2: Handle cases where numerator is a product (a * b * ...)
+        # Handles cases where sympy fails to propagate divisibility from a single factor.
+        if isinstance(numerator, sympy.Mul) and isinstance(denominator, (int, sympy.Integer)):
+            denom_int = int(denominator)
+            
+            # Check each individual factor in the product
+            for factor in numerator.args:
+                if isinstance(factor, (int, sympy.Integer)):
+                    # Check if a constant factor (e.g., 32) is divisible by denominator (e.g., 16)
+                    if int(factor) % denom_int == 0:
+                        return True
+                else:
+                    # Check if a symbolic factor (e.g., x.shape[-1]) is known to be divisible
+                    factor_expr = sympy.Eq(Mod(factor, denominator), 0)
+                    if self.statically_known_true(factor_expr): # type: ignore[arg-type]
+                        return True
+        return False
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
         """
