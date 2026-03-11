@@ -14,6 +14,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
+from torch._dynamo.testing import normalize_gm
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -472,6 +473,133 @@ class TestFXGraphPasses(JitTestCase):
         self.assertEqual(sorted_names_reversed[1], "linear")
         self.assertEqual(sorted_names_reversed[2], "add_2")
         self.assertEqual(sorted_names_reversed[3], "add_3")
+
+    def test_fuse_preserves_input_order(self):
+        """Test that fuse_by_partitions preserves the original graph's input order.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/164204
+        When partition nodes reference external inputs in a different order than
+        the original graph's placeholder order, the fused subgraph should still
+        use the original order.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, input_ids, attention_mask):
+                mask = attention_mask + 1  # references attention_mask first
+                ids = input_ids * 2        # references input_ids second
+                return mask + ids
+
+        gm = symbolic_trace(M())
+        nodes_to_fuse = {
+            n: None for n in gm.graph.nodes if n.op not in ("placeholder", "output")
+        }
+        fused_gm = fuse_by_partitions(gm, [nodes_to_fuse])
+
+        self.assertExpectedInline(
+            normalize_gm(fused_gm.print_readable(print_output=False)),
+            """\
+class M(torch.nn.Module):
+    def forward(self, input_ids, attention_mask):
+        fused_0 = self.fused_0(input_ids, attention_mask);  input_ids = attention_mask = None
+        return fused_0
+
+    class fused_0(torch.nn.Module):
+        def forward(self, input_ids, attention_mask):
+            add = attention_mask + 1;  attention_mask = None
+            mul = input_ids * 2;  input_ids = None
+            add_1 = add + mul;  add = mul = None
+            return add_1
+""",
+        )
+
+        # Verify correctness
+        x = torch.randn(3)
+        y = torch.randn(3)
+        self.assertEqual(M()(x, y), fused_gm(x, y))
+
+    def test_fuse_input_order_with_internal_deps(self):
+        """Test input ordering when some inputs to a node are inside the partition.
+
+        Graph: x, y, z -> a=x+z, b=a*y -> out=b
+        Partition: {a, b}. External inputs are [x, z, y].
+        a uses x and z (both external), b uses a (internal) and y (external).
+        Without the fix, y's placeholder would be created last (after x, z)
+        since b is processed after a. With the fix, the order follows the
+        original graph: [x, y, z].
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = x + z
+                b = a * y
+                return b
+
+        gm = symbolic_trace(M())
+        nodes_to_fuse = {
+            n: None for n in gm.graph.nodes if n.op not in ("placeholder", "output")
+        }
+        fused_gm = fuse_by_partitions(gm, [nodes_to_fuse])
+
+        self.assertExpectedInline(
+            normalize_gm(fused_gm.print_readable(print_output=False)),
+            """\
+class M(torch.nn.Module):
+    def forward(self, x, y, z):
+        fused_0 = self.fused_0(x, y, z);  x = y = z = None
+        return fused_0
+
+    class fused_0(torch.nn.Module):
+        def forward(self, x, y, z):
+            add = x + z;  x = z = None
+            mul = add * y;  add = y = None
+            return mul
+""",
+        )
+
+        x, y, z = torch.randn(3), torch.randn(3), torch.randn(3)
+        self.assertEqual(M()(x, y, z), fused_gm(x, y, z))
+
+    def test_fuse_input_order_intermediate_inputs(self):
+        """Test input ordering when fused partition's inputs are intermediate nodes.
+
+        Graph: x, y -> a=y+1, b=x+1, c=a*b, d=c+1 -> out=d
+        Partition: {c, d}. External inputs are [a, b] — neither is a
+        placeholder. Their order should follow the original graph: [a, b].
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = y + 1
+                b = x + 1
+                c = a * b
+                d = c + 1
+                return d
+
+        gm = symbolic_trace(M())
+        nodes_by_name = {n.name: n for n in gm.graph.nodes}
+        nodes_to_fuse = {nodes_by_name["mul"]: None, nodes_by_name["add_2"]: None}
+        fused_gm = fuse_by_partitions(gm, [nodes_to_fuse])
+
+        self.assertExpectedInline(
+            normalize_gm(fused_gm.print_readable(print_output=False)),
+            """\
+class M(torch.nn.Module):
+    def forward(self, x, y):
+        add = y + 1;  y = None
+        add_1 = x + 1;  x = None
+        fused_0 = self.fused_0(add, add_1);  add = add_1 = None
+        return fused_0
+
+    class fused_0(torch.nn.Module):
+        def forward(self, add, add_1):
+            mul = add * add_1;  add = add_1 = None
+            add_2 = mul + 1;  mul = None
+            return add_2
+""",
+        )
+
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(M()(x, y), fused_gm(x, y))
 
     def test_partitioner_nested_getitem_chains(self):
         """Test that nested getitem chains are properly reassigned to producer's partition.
