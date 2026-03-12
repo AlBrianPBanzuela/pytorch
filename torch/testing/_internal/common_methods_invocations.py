@@ -12684,7 +12684,7 @@ op_db: list[OpInfo] = [
            skips=(
                # https://github.com/intel/torch-xpu-ops/issues/1893
                DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view',
-                            device_type='xpu', dtypes=(torch.float64,))),
+                            device_type='xpu', dtypes=(torch.float64,)),),
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
@@ -20637,7 +20637,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDeviceUtils', 'test_device_mode_ops'),
                # https://github.com/intel/torch-xpu-ops/issues/3041
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp', device_type='xpu'))),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp', device_type='xpu'),)),
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
