@@ -3,8 +3,8 @@
 #   "This release is composed of 4160 commits from 536 contributors since PyTorch 2.9."
 #
 # Usage:
-#   ./scripts/release_summary.sh                    # auto-detect latest release
-#   ./scripts/release_summary.sh v2.10.0 v2.9.0     # explicit current and previous tags
+#   ./scripts/release/release_summary.sh                    # auto-detect latest release
+#   ./scripts/release/release_summary.sh v2.10.0 v2.9.0     # explicit current and previous tags
 
 set -euo pipefail
 
