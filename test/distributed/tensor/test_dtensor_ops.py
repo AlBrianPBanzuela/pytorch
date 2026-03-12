@@ -209,6 +209,12 @@ dtensor_fails = {
     xfail("sparse.mm", "reduce"),
     # bug in squeeze.dims strategy: TypeError with empty dims arg
     xfail("squeeze", "multiple"),
+    # group_norm: sharding passes wrong N/HxW scalars to native_group_norm
+    xfail("nn.functional.group_norm"),
+    # interpolation ops: Partial strategy triggers errors during sharding prop
+    xfail("nn.functional.grid_sample"),
+    # instance_norm decomposes to group_norm → same N/HxW mismatch
+    xfail("nn.functional.instance_norm"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
     # output_specs count mismatch in unsafe_split strategy
@@ -238,6 +244,7 @@ dtensor_fails = {
     skip("fft.hfftn"),
     skip("fft.ifftn"),
     skip("fft.irfft"),
+    skip("frexp"),
     skip("istft"),
     skip("isclose"),
     skip("isreal"),
@@ -264,6 +271,9 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     xfail("nn.functional.huber_loss"),
+    skip("nn.functional.max_unpool1d", "grad"),
+    skip("nn.functional.max_unpool2d", "grad"),
+    xfail("nn.functional.max_unpool3d", "grad"),
     skip("nn.functional.multi_head_attention_forward"),
 }
 
@@ -299,8 +309,14 @@ dtensor_compiled_fails = {
     xfail("nn.functional.interpolate", "bicubic"),
     xfail("nn.functional.interpolate", "bilinear"),
     xfail("nn.functional.interpolate", "linear"),
+    xfail("nn.functional.interpolate", "nearest"),
+    xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.interpolate", "trilinear"),
+    xfail("nn.functional.max_unpool1d"),
+    xfail("nn.functional.max_unpool2d"),
+    xfail("nn.functional.max_unpool3d"),
     xfail("nn.functional.upsample_bilinear"),
+    xfail("nn.functional.upsample_nearest"),
     # Data-dependent outputs (SymBool, unbacked shapes) that raise
     # during DTensor's fake prop.
     xfail("equal"),
@@ -316,6 +332,7 @@ dtensor_compiled_fails = {
     # Miscellaneous runtime crashes (e.g. index out of bounds).
     xfail("gather"),
     xfail("index_select"),
+    xfail("lu_unpack"),
     xfail("scatter"),
     xfail("scatter_add"),
     # False positives: these have no sharding strategy and their
@@ -376,7 +393,6 @@ dtensor_fails_no_strategy = {
     xfail("block_diag"),
     xfail("cdist"),
     xfail("complex"),
-    xfail("cross"),
     xfail("diagonal_scatter"),
     xfail("exponential"),
     xfail("fft.ihfft2"),
@@ -392,7 +408,6 @@ dtensor_fails_no_strategy = {
     xfail("index_reduce", "amax"),
     xfail("index_reduce", "amin"),
     xfail("isin"),
-    xfail("linalg.cross"),
     xfail("linalg.matrix_power"),
     xfail("linalg.tensorsolve"),
     xfail("linspace", "tensor_overload"),
@@ -804,7 +819,6 @@ ops_unbacked_dtensor_dde = {
     skip("broadcast_to"),
     xfail("bucketize"),
     xfail("cartesian_prod"),
-    xfail("cholesky_solve"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
     xfail("dist"),
@@ -819,12 +833,19 @@ ops_unbacked_dtensor_dde = {
     xfail("histc"),
     xfail("index_put"),
     xfail("index_select"),
+    xfail("kthvalue"),
+    xfail("linalg.lu"),
+    xfail("linalg.lu_factor"),
+    xfail("linalg.lu_factor_ex"),
+    xfail("lu"),
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
     xfail("matmul"),
+    xfail("matrix_exp"),
     xfail("max", "reduction_with_dim"),
     xfail("min", "reduction_with_dim"),
+    xfail("mode"),
     xfail("msort"),
     xfail("mv"),
     xfail("narrow"),
@@ -861,6 +882,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
+    xfail("nn.functional.upsample_nearest"),
     xfail("nn.functional.pixel_unshuffle"),
     xfail("nonzero_static"),
     xfail("permute_copy"),

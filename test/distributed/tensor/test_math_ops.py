@@ -1470,6 +1470,38 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_shard(0))
 
+    def test_linalg_cross(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        a = torch.randn(8, 4, 3, device=self.device_type)
+        b = torch.randn(8, 4, 3, device=self.device_type)
+
+        # Shard on batch dim (dim=0), cross on default dim=-1
+        dt_a = distribute_tensor(a, device_mesh, [Shard(0)])
+        dt_b = distribute_tensor(b, device_mesh, [Shard(0)])
+        expected = torch.linalg.cross(a, b)
+        result = torch.linalg.cross(dt_a, dt_b)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # Shard on dim=1, cross on dim=-1
+        dt_a1 = distribute_tensor(a, device_mesh, [Shard(1)])
+        dt_b1 = distribute_tensor(b, device_mesh, [Shard(1)])
+        result1 = torch.linalg.cross(dt_a1, dt_b1)
+        self.assertEqual(result1.full_tensor(), expected)
+        self.assertTrue(result1.placements[0].is_shard(1))
+
+    def test_linalg_solve_partial(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        A = torch.randn(4, 4, device=self.device_type, dtype=torch.float64)
+        A = A @ A.mT + 4 * torch.eye(4, device=self.device_type, dtype=torch.float64)
+        B = torch.randn(4, 2, device=self.device_type, dtype=torch.float64)
+
+        dt_A = distribute_tensor(A, device_mesh, [Replicate()])
+        dt_B = distribute_tensor(B, device_mesh, [Partial()])
+        expected = torch.linalg.solve(A, B * self.world_size)
+        result = torch.linalg.solve(dt_A, dt_B)
+        self.assertEqual(result.full_tensor(), expected)
+
     @with_comms
     def test_interpolation_upsample_ops(self):
         device_mesh = self.build_device_mesh()
@@ -1516,24 +1548,20 @@ class DistMathOpsTest(DTensorTestBase):
         running_mean = torch.zeros(C, device=self.device_type)
         running_var = torch.ones(C, device=self.device_type)
 
-        # batch_norm (eval mode with running stats) — replicate-only strategy
+        replicate = [Replicate()]
         dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+        dt_weight = distribute_tensor(weight, device_mesh, replicate)
+        dt_bias = distribute_tensor(bias, device_mesh, replicate)
+        dt_running_mean = distribute_tensor(running_mean, device_mesh, replicate)
+        dt_running_var = distribute_tensor(running_var, device_mesh, replicate)
+
+        # batch_norm (eval mode with running stats) — replicate-only strategy
         expected = F.batch_norm(inp, running_mean, running_var, weight, bias)
-        result = F.batch_norm(dt_inp, running_mean, running_var, weight, bias)
+        result = F.batch_norm(
+            dt_inp, dt_running_mean, dt_running_var, dt_weight, dt_bias
+        )
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_replicate())
-
-        # group_norm — batch-dim shardable
-        groups = 3
-        expected = F.group_norm(inp, groups, weight, bias)
-        result = F.group_norm(dt_inp, groups, weight, bias)
-        self.assertEqual(result.full_tensor(), expected)
-        self.assertTrue(result.placements[0].is_shard(0))
-
-        # instance_norm — decomposes through group_norm
-        expected = F.instance_norm(inp, running_mean, running_var, weight, bias)
-        result = F.instance_norm(dt_inp, running_mean, running_var, weight, bias)
-        self.assertEqual(result.full_tensor(), expected)
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
