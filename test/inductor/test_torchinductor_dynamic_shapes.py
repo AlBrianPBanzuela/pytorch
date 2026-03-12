@@ -1410,7 +1410,7 @@ class TestInductorDynamic(TestCase):
             source = ConstantSource("test_input")
             # Create symbolic sizes: dim0 is DYNAMIC, dim1 is STATIC
             sym_sizes, sym_strides, _ = shape_env.create_symbolic_sizes_strides_storage_offset(
-                torch.empty(10, 10, device=device),
+                torch.empty(30, 10, device=device),
                 source=source,
                 symbolic_context=StatelessSymbolicContext(
                     dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
@@ -1426,14 +1426,14 @@ class TestInductorDynamic(TestCase):
             self.assertTrue(hasattr(result_fake.shape[0], '__sym_int__') or 
                           str(result_fake.shape[0]).startswith('s'))
 
-            # Run with real tensors - should use cached compiled code
-            result_real1 = program(torch.rand(100, 10, device=device))
-            # With size > 10, fn1 returns sum(dim=0) which has shape [10]
-            self.assertEqual(result_real1.shape, torch.Size([10]))
+        # Run with real tensors - should use cached compiled code
+        result_real1 = program(torch.rand(100, 10, device=device))
+        # With size > 10, fn1 returns sum(dim=0) which has shape [10]
+        self.assertEqual(result_real1.shape, torch.Size([10]))
 
-            # Run with different batch size - dynamic shapes should handle this
-            result_real2 = program(torch.rand(200, 10, device=device))
-            self.assertEqual(result_real2.shape, torch.Size([10]))
+        # Run with different batch size - dynamic shapes should handle this
+        result_real2 = program(torch.rand(200, 10, device=device))
+        self.assertEqual(result_real2.shape, torch.Size([10]))
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
