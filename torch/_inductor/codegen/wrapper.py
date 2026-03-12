@@ -434,6 +434,9 @@ class MemoryPlanningState:
         self.comm_demand_schedule: dict[CommBufferReuseKey, list[int]] = {}
         # Pre-computed: buffer free schedule (buffer_name -> sni of free)
         self.buffer_free_sni: dict[str, int] = {}
+        # Pre-computed: regular alloc schedule (reuse_key -> sorted sni list)
+        # Used to avoid borrowing when it would break a regular reuse chain.
+        self.regular_alloc_schedule: dict[ReuseKey, list[int]] = {}
 
     def __contains__(self, key: ReuseKey) -> bool:
         return bool(self.reuse_pool.get(key, None))
@@ -891,7 +894,11 @@ class AllocateLine(MemoryPlanningLine):
         """Try to borrow an idle pg_alloc buffer for a regular (non-comm) op.
 
         Returns a ReuseLine if borrowing is safe, None otherwise.
-        Safety: the buffer must be freed before the next comm op needs it.
+        Safety: (1) the buffer must be freed before the next comm op needs it,
+        and (2) borrowing must not break a regular reuse chain — if a future
+        regular allocation with the same reuse key exists after this buffer
+        is freed, we skip (the freed buffer would return to the comm pool
+        instead of the regular pool, starving the future allocation).
         """
         import bisect
 
@@ -899,6 +906,15 @@ class AllocateLine(MemoryPlanningLine):
         free_sni = state.buffer_free_sni.get(buf_name)
         if free_sni is None:
             # Don't know when this buffer will be freed (e.g., graph output)
+            return None
+
+        # Check reuse chain: if a future regular allocation with the same key
+        # exists after this buffer is freed, borrowing would break the chain
+        # (freed buffer returns to comm pool, not regular pool).
+        regular_key = buffer_reuse_key(self.node)
+        future_allocs = state.regular_alloc_schedule.get(regular_key, [])
+        idx = bisect.bisect_right(future_allocs, free_sni)
+        if idx < len(future_allocs):
             return None
 
         # Build match key: (device, dtype, size_str) — ignoring alignment
@@ -2131,11 +2147,14 @@ class PythonWrapperCodegen(CodeGen):
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def _prescan_borrow_schedules(self, state: MemoryPlanningState) -> None:
-        """Pre-scan lines to build comm demand schedule and buffer free schedule.
+        """Pre-scan lines to build comm demand schedule, buffer free schedule,
+        and regular alloc schedule.
 
         This enables the lookahead needed for safe cross-pool borrowing:
-        we need to know (a) when each regular buffer will be freed, and
-        (b) when the next comm allocation of a given key occurs.
+        we need to know (a) when each regular buffer will be freed,
+        (b) when the next comm allocation of a given key occurs, and
+        (c) when each regular reuse key will next be allocated (to avoid
+        breaking regular reuse chains).
         """
         for line in self.lines:
             if isinstance(line, AllocateLine) and line.comm_buffer:
@@ -2145,12 +2164,19 @@ class PythonWrapperCodegen(CodeGen):
                     state.comm_demand_schedule.setdefault(key, []).append(
                         line.scheduler_node_index
                     )
+            elif isinstance(line, AllocateLine) and not line.comm_buffer:
+                key = buffer_reuse_key(line.node)
+                state.regular_alloc_schedule.setdefault(key, []).append(
+                    line.scheduler_node_index
+                )
             elif isinstance(line, FreeIfNotReusedLine) and not line.comm_buffer:
                 state.buffer_free_sni[line.node.get_name()] = line.scheduler_node_index
 
-        # Sort demand schedules for binary search
+        # Sort schedules for binary search
         for key in state.comm_demand_schedule:
             state.comm_demand_schedule[key].sort()
+        for key in state.regular_alloc_schedule:
+            state.regular_alloc_schedule[key].sort()
 
     def memory_plan_reuse(self):
         outputs = self.get_graph_outputs()
