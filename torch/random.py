@@ -17,6 +17,7 @@ __all__ = [
     "split",
     "fold_in",
     "normal",
+    "uniform",
     "thread_safe_generator",
 ]
 
@@ -60,6 +61,23 @@ def normal(
         device = key.device
     result = torch.empty(shape, dtype=dtype, device=device)
     return torch._philox_normal(result, key, mean, std)
+
+
+def uniform(
+    key: torch.Tensor,
+    shape: tuple[int, ...],
+    *,
+    low: float = 0.0,
+    high: float = 1.0,
+    dtype: torch.dtype | None = None,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    if dtype is None:
+        dtype = torch.float32
+    if device is None:
+        device = key.device
+    result = torch.empty(shape, dtype=dtype, device=device)
+    return torch._philox_uniform(result, key, low, high)
 
 
 def set_rng_state(new_state: torch.Tensor) -> None:

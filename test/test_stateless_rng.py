@@ -259,5 +259,92 @@ class TestPhiloxNormal(TestCase):
             torch.random.normal(key, (100,))
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+class TestPhiloxUniform(TestCase):
+    def test_basic_shape_and_dtype(self):
+        key = torch.random.key(42, device="cuda")
+        for dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16]:
+            result = torch.random.uniform(key, (100,), dtype=dtype)
+            self.assertEqual(result.shape, (100,))
+            self.assertEqual(result.dtype, dtype)
+
+    def test_determinism(self):
+        key = torch.random.key(42, device="cuda")
+        a = torch.random.uniform(key, (1000,))
+        b = torch.random.uniform(key, (1000,))
+        self.assertEqual(a, b)
+
+    def test_different_keys(self):
+        key1 = torch.random.key(42, device="cuda")
+        key2 = torch.random.key(43, device="cuda")
+        a = torch.random.uniform(key1, (1000,))
+        b = torch.random.uniform(key2, (1000,))
+        self.assertNotEqual(a, b)
+
+    def test_standard_uniform_statistics(self):
+        key = torch.random.key(42, device="cuda")
+        result = torch.random.uniform(key, (100000,))
+        self.assertTrue(abs(result.mean().item() - 0.5) < 0.05)
+        self.assertTrue(result.min().item() > 0.0)
+        self.assertTrue(result.max().item() <= 1.0)
+
+    def test_custom_low_high(self):
+        key = torch.random.key(42, device="cuda")
+        result = torch.random.uniform(key, (100000,), low=2.0, high=5.0)
+        self.assertTrue(abs(result.mean().item() - 3.5) < 0.1)
+        self.assertTrue(result.min().item() >= 2.0)
+        self.assertTrue(result.max().item() <= 5.0)
+
+    def test_batched_keys(self):
+        key = torch.random.key(42, device="cuda")
+        keys = torch.random.split(key, 4)  # (4, 2)
+        result = torch.random.uniform(keys, (4, 100))
+        for i in range(4):
+            individual = torch.random.uniform(keys[i], (100,))
+            self.assertEqual(result[i], individual)
+
+    def test_multi_batch(self):
+        key = torch.random.key(42, device="cuda")
+        keys = torch.random.split(key, 6).reshape(2, 3, 2)  # (2, 3, 2)
+        result = torch.random.uniform(keys, (2, 3, 50))
+        for i in range(2):
+            for j in range(3):
+                individual = torch.random.uniform(keys[i][j], (50,))
+                self.assertEqual(result[i][j], individual)
+
+    def test_broadcasting(self):
+        key = torch.random.key(42, device="cuda").unsqueeze(0)  # (1, 2)
+        result = torch.random.uniform(key, (4, 100))
+        for i in range(1, 4):
+            self.assertEqual(result[0], result[i])
+
+    def test_dtype_and_device(self):
+        key = torch.random.key(42, device="cuda")
+        result = torch.random.uniform(key, (500,), low=2.0, high=5.0, dtype=torch.float64)
+        self.assertEqual(result.shape, (500,))
+        self.assertEqual(result.dtype, torch.float64)
+
+    def test_error_wrong_key_dtype(self):
+        key = torch.tensor([42, 0], dtype=torch.float32, device="cuda")
+        with self.assertRaises(RuntimeError):
+            torch.random.uniform(key, (100,))
+
+    def test_error_wrong_device(self):
+        key = torch.random.key(42)  # CPU key
+        with self.assertRaises(RuntimeError):
+            torch.random.uniform(key, (100,), device="cuda")
+
+    def test_error_shape_mismatch(self):
+        key = torch.random.key(42, device="cuda")
+        keys = torch.random.split(key, 3)  # (3, 2)
+        with self.assertRaises(RuntimeError):
+            torch.random.uniform(keys, (2, 100))  # batch dim 2 != 3
+
+    def test_error_key_last_dim_not_2(self):
+        key = torch.tensor([42, 0, 1], dtype=torch.uint64, device="cuda")
+        with self.assertRaises(RuntimeError):
+            torch.random.uniform(key, (100,))
+
+
 if __name__ == "__main__":
     run_tests()
