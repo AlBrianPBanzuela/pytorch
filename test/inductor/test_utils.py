@@ -348,7 +348,6 @@ class TestFakeTensorUpdater(TestCase):
             with gm.graph.inserting_after(fn):
                 if "val" in fn.meta and len(fn.meta["val"].size()) == 4:
                     # Shuffle the strides, testing that subgraph updating still works.
-                    breakpoint()
                     cloned_node = gm.graph.call_function(
                         torch.clone, (fn,), {"memory_format": torch.channels_last}
                     )
