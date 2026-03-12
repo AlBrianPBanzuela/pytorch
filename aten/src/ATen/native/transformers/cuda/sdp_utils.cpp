@@ -51,11 +51,11 @@
 * the SDP parameters. If all filters pass, the backend can be used and use_<backend>
 * returns true. If any filter fails, then use_<backend> returns false.
 *
-* In order to aid in debugging, each filter takes sdp_params and a debug flag.
-* If the debug flag is set, the filter will print a warning message if it fails.
-* The behavior of select_sdp_backend is to return the first backend that
-* succeeds. If no backend is viable then it will run each use_<backend> function
-* with debug=true and return SDPBackend::error.
+* Diagnostics are optional. When the public can_use_<backend>(..., debug=true)
+* APIs are used, the failing filters emit warnings immediately. When
+* select_sdp_backend reaches terminal failure, it re-runs the candidate
+* backends with an SDPDiagnostics context that records rejection reasons in
+* backend priority order and then raises one aggregated error.
 */
 
 namespace sdp {

@@ -1981,9 +1981,12 @@ class TestSDPAFailureModes(NNTestCase):
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, "Expected query, key and value to all be of dtype: {Half, Float}"):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            self.assert_rejected_backends_error(
+                error,
+                "Memory efficient attention: Expected query, key and value to all be of dtype: {Half, Float}",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
