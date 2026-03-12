@@ -2040,7 +2040,9 @@ def cat(inputs, dim=0):
             def has_fusible_multi_consumer(arg):
                 if not hasattr(arg, "users") or len(arg.users) <= 1:
                     return False
-                return any(is_pointwise_use(u) for u in arg.users if u is not cat_node)
+                return any(
+                    is_pointwise_use(u) for u in arg.users if u is not cat_node
+                )
 
             return any(has_fusible_multi_consumer(arg) for arg in fx_args)
 

@@ -46,6 +46,7 @@ class TestCatMultiConsumer(TestCase):
             "Optimization should avoid reading x twice.",
         )
 
+    @torch._inductor.config.patch(fx_graph_cache=False)
     @requires_gpu()
     def test_single_consumer_cat_unchanged(self):
         """Single-consumer cat unchanged."""
@@ -55,10 +56,22 @@ class TestCatMultiConsumer(TestCase):
 
         x = torch.randn(1024, 768, device=GPU_TYPE)
         compiled = torch.compile(fn)
+        metrics.reset()
         result = compiled(x)
         ref = fn(x)
 
         self.assertEqual(result, ref)
+
+        # Single-consumer cat should use pointwise_cat which fuses the
+        # zeros fill into the cat kernel.  Total bytes: read x + write z.
+        x_bytes = x.nelement() * x.element_size()
+        z_bytes = ref.nelement() * ref.element_size()
+        expected_bytes = x_bytes + z_bytes
+        self.assertEqual(
+            metrics.num_bytes_accessed,
+            expected_bytes,
+            f"Expected {expected_bytes} bytes, got {metrics.num_bytes_accessed}.",
+        )
 
 
 if __name__ == "__main__":
