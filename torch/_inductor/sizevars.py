@@ -550,8 +550,8 @@ class SizeVarAllocator:
         if right == gcd:
             return right
 
-        # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c,
-        # but sympy doesn't simplify this yet. So, evaluate the Min here.
+        # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
+        # sympy doesn't simplify this yet. So, evaluate it here.
         for lhs, rhs in [(left, right), (right, left)]:
 
             def le_rhs(a: Expr) -> bool:
