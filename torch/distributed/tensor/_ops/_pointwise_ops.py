@@ -35,34 +35,28 @@ prims = torch.ops.prims
 unary_linear_ops = [aten.to.dtype]
 
 
-def _is_list_op(op: OpOverload) -> bool:
-    """Returns True if op is a foreach, amp_foreach, or fused op."""
-    name = op.name()
-    return name.startswith(("aten::_foreach_", "aten::_amp_foreach_", "aten::_fused_"))
+def _common_pointwise_single_dim_strategy(
+    partial_extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    """Factory for single-dim strategies that add partial placement rules.
 
+    Returns strategies shaped [output, *args] only.  Tensor kwarg placements
+    (e.g. ``out``, ``lr``) are appended by the wrapper in
+    ``_register_single_dim_pointwise``.
+    """
 
-# The state_steps arg of fused adam / adamw is a Replicate scalar tensor, which will be put on
-# the compute_mesh of an op across all parameter groups, even when not all parameter groups
-# are on the same device mesh. This idx will help avoid hitting exceptions or unnecessary
-# redistribute during sharding propagation.
-_FUSED_OP_SCALAR_IDX = 5
-
-
-def _register_single_dim_pointwise(
-    op: OpOverload,
-    partial_extra_rules: list[list[Placement]] | None = None,
-    static_argnum: int = 0,
-) -> None:
-    def strategy_fn(
+    def strategy(
         op: OpOverload,
-        args: ArgsType,
-        kwargs: KwargsType,
+        args_schema: ArgsType,
+        kwargs_schema: KwargsType,
     ) -> list[list[Placement | _ShardingPlaceholder]]:
         tensor_arg_metas: list[TensorMeta] = [
-            arg for arg in args if isinstance(arg, TensorMeta)
+            arg for arg in args_schema if isinstance(arg, TensorMeta)
         ]
         common_shape = torch.broadcast_shapes(
-            *[arg.shape for arg in args if isinstance(arg, TensorMeta)]
+            *[arg.shape for arg in args_schema if isinstance(arg, TensorMeta)]
         )
         # For multi-output ops (e.g. frexp), all outputs share the same
         # pointwise sharding, so replicate the output placement.
@@ -93,18 +87,51 @@ def _register_single_dim_pointwise(
                 # unary rules (len 2, for scalar promotion) and binary rules
                 # (len 3, for tensor-tensor), so mismatched lengths are expected.
                 if len(rule) == expected_len:
-                    placements.append(rule)  # pyrefly: ignore[bad-argument-type]
-
-        # Append tensor kwarg placements in schema declaration order.
-        # out = output placement (s[0]); everything else (e.g. lr) = Replicate.
-        # TODO: move kwargs handling upstream if this works
-        kw_names = [k for k, v in kwargs.items() if isinstance(v, TensorMeta)]
-        if kw_names:
-            placements = [
-                s + [s[0] if name == "out" else Replicate() for name in kw_names]
-                for s in placements
-            ]
+                    placements.append(rule)
         return placements
+
+    return strategy
+
+
+def _is_list_op(op: OpOverload) -> bool:
+    """Returns True if op is a foreach, amp_foreach, or fused op."""
+    name = op.name()
+    return name.startswith(("aten::_foreach_", "aten::_amp_foreach_", "aten::_fused_"))
+
+
+# The state_steps arg of fused adam / adamw is a Replicate scalar tensor, which will be put on
+# the compute_mesh of an op across all parameter groups, even when not all parameter groups
+# are on the same device mesh. This idx will help avoid hitting exceptions or unnecessary
+# redistribute during sharding propagation.
+_FUSED_OP_SCALAR_IDX = 5
+
+
+def _register_single_dim_pointwise(
+    op: OpOverload,
+    partial_extra_rules: list[list[Placement]] | None = None,
+    static_argnum: int = 0,
+) -> None:
+    inner_fn = _common_pointwise_single_dim_strategy(
+        partial_extra_rules=partial_extra_rules  # pyrefly: ignore[bad-argument-type]
+    )
+
+    # Wrap to append tensor kwarg placements in schema declaration order.
+    # out = output placement (s[0]); everything else (e.g. lr) = Replicate.
+    # TODO: move kwargs handling upstream if this works
+    def strategy_fn(
+        op: OpOverload,
+        args: ArgsType,
+        kwargs: KwargsType,
+        _fn: Callable = inner_fn,
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        strategies = _fn(op, args, kwargs)
+        kw_names = [k for k, v in kwargs.items() if isinstance(v, TensorMeta)]
+        if not kw_names:
+            return strategies
+        return [
+            s + [s[0] if name == "out" else Replicate() for name in kw_names]
+            for s in strategies
+        ]
 
     if _is_list_op(op):
         schema_info = RuntimeSchemaInfo(needs_pytree=True)
