@@ -553,8 +553,8 @@ class SizeVarAllocator:
         # Min/Max fallback: we can prove Min(a, b) <= b, but this type of Min/Max
         # reasoning isn't handled in sympy yet. So, just evaluate the Min here.
         for lhs, rhs in [(left, right), (right, left)]:
-            if isinstance(lhs, (sympy.Min, sympy.Max)) and rhs in lhs.args:
-                return sympy.Min(lhs, rhs)
+            if isinstance(lhs, sympy.Min) and rhs in lhs.args:
+                return lhs  # Min(Min(a, b), b) = Min(a, b)
 
         raise TypeError(
             f"evaluate_min({left}, {right}) with unbacked symints"
