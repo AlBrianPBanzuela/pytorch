@@ -4554,5 +4554,15 @@
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
+  ],
+  "GB9899": [
+    {
+      "Gb_type": "DeviceMesh construction",
+      "Context": "DeviceMesh(...)",
+      "Explanation": "DeviceMesh construction involves data-dependent operations that cannot be traced. Move DeviceMesh creation outside of torch.compile regions, or it will be automatically handled via graph break.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
