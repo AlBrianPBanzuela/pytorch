@@ -3552,9 +3552,7 @@ if HAS_CUDA_AND_TRITON:
             criterion = torch.nn.CrossEntropyLoss()
             optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 
-            with patch(
-                "torch._inductor.compile_fx.compile_fx_backward", intercept_bw
-            ):
+            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
                 compiled_model = torch.compile(model, mode="reduce-overhead")
                 output = compiled_model(input_data)
                 loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
@@ -3588,16 +3586,12 @@ if HAS_CUDA_AND_TRITON:
             # tensors remain static in the backward.
             from unittest.mock import patch
 
-            from torch._inductor.utils import count_tangents
-
             forward_partitioned = None
             orig_bw = torch._inductor.compile_fx.compile_fx_backward
 
             def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
                 nonlocal forward_partitioned
-                forward_partitioned = (
-                    compiler_config_extra.forward_is_partitioned.value
-                )
+                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
                 return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
 
             class Mod(torch.nn.Module):
@@ -3613,9 +3607,7 @@ if HAS_CUDA_AND_TRITON:
             criterion = torch.nn.CrossEntropyLoss()
             optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 
-            with patch(
-                "torch._inductor.compile_fx.compile_fx_backward", intercept_bw
-            ):
+            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
                 compiled_model = torch.compile(model, mode="reduce-overhead")
                 output = compiled_model(input_data)
                 loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
