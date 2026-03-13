@@ -12782,7 +12782,7 @@ op_db: list[OpInfo] = [
                    unittest.skip("Skipped!"),
                    'TestFwdGradients',
                    'test_inplace_forward_mode_AD',
-                   dtypes=(torch.float64)),
+                   dtypes=(torch.float64,)),
            )),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
