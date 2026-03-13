@@ -478,7 +478,7 @@ def expand_to_full_mesh_op_strategy(
                 f"{len(args_strategy)} args + {len(kwargs_strategy)} kwargs)"
             )
 
-        # Note on different_mesh_args:
+        # NOTE: [Different mesh args]
         #
         # Some ops have args that live on a different mesh than the op's
         # compute mesh.  These args must be Replicate — you cannot
