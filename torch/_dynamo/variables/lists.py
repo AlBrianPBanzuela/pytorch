@@ -129,6 +129,8 @@ class BaseListVariable(VariableTracker):
         values = []
         any_unrealized = False
         for item in self.items:
+            if item is self:
+                return (False, False, None)
             can_peek, is_unrealized, value = item.try_peek_constant()
             if not can_peek:
                 return (False, False, None)
@@ -1093,10 +1095,10 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
-            if not all(k.is_python_constant() for k in keys):
+            if not all(k.try_peek_constant()[0] for k in keys):
                 first_non_constant_key = None
                 for k in keys:
-                    if not k.is_python_constant():
+                    if not k.try_peek_constant()[0]:
                         first_non_constant_key = k
                 assert first_non_constant_key is not None
 
