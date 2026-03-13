@@ -320,7 +320,7 @@ class FSDPState(_State):
         for fsdp_param_group in self._fsdp_param_groups:
             fsdp_param_group.pre_backward(default_prefetch)
         for fsdp_state in self._states_to_backward_prefetch:
-            for target_param_group in fsdp_state._fsdp_param_groups:
+            for target_param_group in reversed(fsdp_state._fsdp_param_groups):
                 FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
         return grad
 
