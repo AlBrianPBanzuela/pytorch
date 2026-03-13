@@ -3644,6 +3644,53 @@ class GraphModule(torch.nn.Module):
             for ri, ei in zip(r, e):
                 self.assertEqual(ri, ei)
 
+    def test_subgraph_reuse_tuple_destructure_with_intermediates(self):
+        """Reuse must handle tuple destructuring when graph has extra intermediate outputs.
+
+        When allow_side_effects=True, intermediates may be added as extra
+        graph outputs beyond the user-visible return values. The normal path
+        returns body_r (which has the correct user-visible length), but
+        stamp_out_subgraph returns flat_variable (which includes all graph
+        outputs). This test ensures that destructuring `a, b = layer(x, y)`
+        works correctly even on the reuse path.
+        """
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8, bias=False)
+
+            @nested_compile_region()
+            def forward(self, x, residual):
+                h = self.linear(x)
+                h = h + residual
+                new_residual = h * 0.5
+                return h, new_residual
+
+        class Model(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer() for _ in range(num_layers)])
+
+            def forward(self, x, residual):
+                for layer in self.layers:
+                    hidden_states, residual = layer(x, residual)
+                    x = hidden_states
+                return x, residual
+
+        model = Model(3)
+        x = torch.randn(4, 8)
+        residual = torch.randn(4, 8)
+        ref = model(x, residual)
+
+        torch._dynamo.reset()
+
+        res = torch.compile(model, backend="aot_eager", fullgraph=True)(
+            x.clone(), residual.clone()
+        )
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(

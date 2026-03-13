@@ -786,6 +786,10 @@ class InvokeSubgraphReuseEntry:
     # sources → new arg sources so that captured variable sources can be
     # rewritten for the current invocation.
     arg_sources: list[Any]  # list[Source]
+    # Number of user-visible outputs (from the function return value).
+    # The graph may have additional outputs from side-effect intermediates;
+    # stamp_out_subgraph uses this to return only the user-visible slice.
+    num_user_outputs: int = 0
 
 
 @dataclass
