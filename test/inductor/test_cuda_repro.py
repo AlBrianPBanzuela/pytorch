@@ -1527,7 +1527,7 @@ class CudaReproTests(TestCase):
         torch.manual_seed(0)
         torch.cuda.manual_seed_all(0)
 
-        x = torch.rand(1000, device="cuda", dtype=torch.float32)
+        x = torch.rand(1000, device=device_type, dtype=torch.float32)
 
         def fn(x):
             x_bf16 = x.to(torch.bfloat16)
