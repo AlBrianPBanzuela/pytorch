@@ -85,16 +85,15 @@ class CacheSizeRelevantForFrame:
     # Number of CacheEntry objects having same ID_MATCH'd objects as given frame.
     num_cache_entries_with_same_id_matched_objs: int = 0
 
-    # Per-function cache limit set via torch.compile(cache_limit=N).
+    # Per-region recompile limit set via torch.compile(region_recompile_limit=N).
     # None means use global config limits.
-    cache_limit: int | None = None
+    region_recompile_limit: int | None = None
 
     @property
-    def exceeds_cache_limit(self) -> bool:
-        """Check if the per-function cache_limit has been reached."""
+    def exceeds_region_recompile_limit(self) -> bool:
         return (
-            self.cache_limit is not None
-            and self.num_cache_entries >= self.cache_limit
+            self.region_recompile_limit is not None
+            and self.num_cache_entries >= self.region_recompile_limit
         )
 
     def will_compilation_exceed(self, limit: int) -> bool:
@@ -147,7 +146,7 @@ def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry: Any) -> bool:
 def compute_cache_size(
     frame: DynamoFrameType,
     cache_entry: Any,
-    cache_limit: int | None = None,
+    region_recompile_limit: int | None = None,
 ) -> CacheSizeRelevantForFrame:
     # Walk the linked list to calculate the cache size
     num_cache_entries = 0
@@ -163,7 +162,9 @@ def compute_cache_size(
         cache_entry = cache_entry.next
 
     return CacheSizeRelevantForFrame(
-        num_cache_entries, num_cache_entries_with_same_id_matched_objs, cache_limit
+        num_cache_entries,
+        num_cache_entries_with_same_id_matched_objs,
+        region_recompile_limit,
     )
 
 

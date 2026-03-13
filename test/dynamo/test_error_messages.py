@@ -2190,8 +2190,8 @@ To diagnose recompilation issues, see https://docs.pytorch.org/docs/main/user_gu
                 lambda: outer(torch.ones(3)),
                 """\
 Dynamo recompile limit exceeded
-  Explanation: Dynamo attempted to recompile the code object too many times, exceeding the recompile_limit cache size limit (currently set to 1). Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.
-  Hint: To monitor recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider increasing torch._dynamo.config.recompile_limit to an appropriate value.
+  Explanation: Dynamo attempted to recompile 'fn' 1 times, exceeding the recompile_limit (currently set to 1). Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.
+  Hint: To monitor recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider increasing the recompile limit to an appropriate value.
   Hint: See https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html for tips on dealing with recompilations.
 
   Developer debug context: Limit type: recompile_limit
