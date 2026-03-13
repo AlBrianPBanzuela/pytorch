@@ -1,3 +1,11 @@
+
+# fmt: off
+# Auto-generated debug instrumentation code.
+import os
+import fbvscode
+if os.environ.get("D"):
+    fbvscode.attach_debugger()
+# fmt: on
 # Owner(s): ["module: dynamo"]
 
 import copy
@@ -2720,6 +2728,76 @@ class AOTAutogradCacheTests(InductorTestCase):
             self.assertEqual(result1, result2)
             self.assertEqual(result2, result3)
             self.assertEqual(result3, result4)
+
+    def test_cache_hit_across_processes(self):
+        """
+        Verify that a second subprocess gets a cache hit from the first subprocess's
+        compilation, using a shared cache directory.
+        """
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        cache_dir = tempfile.mkdtemp()
+        try:
+            script = textwrap.dedent(
+                f"""
+                import json
+                import torch
+                import torch._dynamo
+                from torch._dynamo.utils import counters
+                from torch._inductor import config as inductor_config
+
+                inductor_config.fx_graph_cache = True
+                inductor_config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                def fn(x, y):
+                    return x + y
+
+                compiled_fn = torch.compile(fn)
+                x = torch.randn(10)
+                y = torch.randn(10)
+                compiled_fn(x, y)
+
+                print(json.dumps(dict(counters["aot_autograd"])))
+                """
+            )
+
+            env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
+
+            # First subprocess - expect cache miss
+            out1 = (
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    env=env,
+                    stderr=subprocess.DEVNULL,
+                )
+                .decode()
+                .strip()
+            )
+            import json
+
+            counters1 = json.loads(out1.splitlines()[-1])
+            self.assertEqual(counters1.get("autograd_cache_miss", 0), 1)
+            self.assertEqual(counters1.get("autograd_cache_hit", 0), 0)
+
+            # Second subprocess - expect cache hit
+            out2 = (
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    env=env,
+                    stderr=subprocess.DEVNULL,
+                )
+                .decode()
+                .strip()
+            )
+            counters2 = json.loads(out2.splitlines()[-1])
+            self.assertEqual(counters2.get("autograd_cache_miss", 0), 0)
+            self.assertEqual(counters2.get("autograd_cache_hit", 0), 1)
+        finally:
+            shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})
