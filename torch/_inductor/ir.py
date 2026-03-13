@@ -3655,6 +3655,7 @@ class SliceView(View):
             min_func = sympy.Min
             max_func = sympy.Max
         elif any(
+            # Only needed when backed_size_oblivious is on.
             x.has(sympy.Min, sympy.Max)
             for x in (start, end, dim_size)
             if isinstance(x, Expr)
