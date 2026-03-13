@@ -1184,9 +1184,14 @@ class BuiltinVariable(VariableTracker):
                         return ComputedLazyConstantVariable.create(
                             fn, list(args), reconstruct_fn
                         )
-                    except (TypeError, ValueError):
-                        # Operation failed (e.g., operator.le(torch.device, str) raises TypeError).
-                        # Fall back to realizing lazy args and let other handlers deal with it.
+                    except (
+                        TypeError,
+                        ValueError,
+                        AsPythonConstantNotImplementedError,
+                    ):
+                        # Operation failed - fall back to realizing lazy args.
+                        # AsPythonConstantNotImplementedError: a realized lazy arg
+                        # became symbolic (e.g. SymNodeVariable with specialize_int=False).
                         return obj.call_function(
                             tx,
                             [v.realize() for v in args],
@@ -1430,7 +1435,10 @@ class BuiltinVariable(VariableTracker):
                                 tx,
                                 args=[VariableTracker.build(tx, a) for a in exc.args],
                             )
-                        return VariableTracker.build(tx, res)  # pyrefly: ignore [unbound-name]
+                        return VariableTracker.build(
+                            tx,
+                            res,  # pyrefly: ignore [unbound-name]
+                        )
                     return None
 
             handlers.append(constant_fold_handler)
