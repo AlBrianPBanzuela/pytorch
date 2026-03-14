@@ -1981,8 +1981,6 @@ class AOTInductorTestsTemplate:
                 "y": (Dim.DYNAMIC, Dim.STATIC),
             }
             self.check_model(model, example_inputs, dynamic_shapes=spec)
-        except Exception:
-            raise
         finally:
             torch.cuda.caching_allocator_enable(True)
 
