@@ -65,7 +65,11 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu,
+    requires_gpu_and_triton,
+)
 
 
 def get_inputs(optim):
