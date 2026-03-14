@@ -895,15 +895,23 @@ def _generate_epilogue_pointwise_source(name, epilogue_ops, has_bias, extra_shap
     if has_bias:
         params = (
             f"acc_ptr, bias_ptr{extra_sep}{extra_ptr_params}, "
-            f"out_ptr, N, n_elements, BLOCK_SIZE: tl.constexpr = 1024"
+            f"out_ptr, N, n_elements, BLOCK_SIZE: tl.constexpr"
         )
     else:
         params = (
             f"acc_ptr{extra_sep}{extra_ptr_params}, "
-            f"out_ptr, N, n_elements, BLOCK_SIZE: tl.constexpr = 1024"
+            f"out_ptr, N, n_elements, BLOCK_SIZE: tl.constexpr"
         )
 
     lines = [
+        "@triton.autotune(",
+        "    configs=[",
+        "        triton.Config({'BLOCK_SIZE': 512}),",
+        "        triton.Config({'BLOCK_SIZE': 1024}),",
+        "        triton.Config({'BLOCK_SIZE': 2048}),",
+        "    ],",
+        "    key=['n_elements'],",
+        ")",
         "@triton.jit",
         f"def {name}({params}):",
         "    pid = tl.program_id(0)",
@@ -1153,7 +1161,10 @@ class _TritonMatmulModule(torch.nn.Module):
         triton_ms = sorted(triton_times)[n_bench // 2]
         cublas_ms = sorted(cublas_times)[n_bench // 2]
 
-        winner = "cublas" if cublas_ms <= triton_ms else "triton"
+        # Per-call synchronization adds fixed overhead (~3-5us) that
+        # compresses the ratio between backends. In practice cuBLAS
+        # pipelines better, so require Triton to win by >10%.
+        winner = "cublas" if cublas_ms <= triton_ms * 1.1 else "triton"
         self._use_cublas = winner == "cublas"
         _TritonMatmulModule._backend_cache[cache_key] = winner
 
@@ -1210,16 +1221,12 @@ class _TritonMatmulModule(torch.nn.Module):
         """
         self._ensure_epilogue_fn()
         numel = acc.numel()
-        grid = ((numel + 1023) // 1024,)
+        grid = lambda meta, n=numel: ((n + meta["BLOCK_SIZE"] - 1) // meta["BLOCK_SIZE"],)  # noqa: E731
         extras = extras or []
-        flat_extras = [
-            ext.reshape(-1) if ext.ndim > 1 and list(ext.shape) != [1] else ext
-            for ext in extras
-        ]
         if self.has_bias:
-            self._epilogue_fn[grid](acc, bias, *flat_extras, acc, self.N, numel)
+            self._epilogue_fn[grid](acc, bias, *extras, acc, self.N, numel)
         else:
-            self._epilogue_fn[grid](acc, *flat_extras, acc, self.N, numel)
+            self._epilogue_fn[grid](acc, *extras, acc, self.N, numel)
         return acc
 
     def _forward_into_buf(self, buf, input_t, weight_t, *rest):

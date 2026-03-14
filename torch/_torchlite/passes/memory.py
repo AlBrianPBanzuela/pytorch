@@ -19,6 +19,9 @@ _VIEW_OPS = frozenset({
     torch.ops.aten.slice.Tensor,
     torch.ops.aten.permute.default,
     torch.ops.aten._unsafe_view.default,
+    torch.ops.aten.unsqueeze.default,
+    torch.Tensor.reshape,
+    torch.Tensor.view,
 })
 
 

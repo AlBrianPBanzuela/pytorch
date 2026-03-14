@@ -296,6 +296,13 @@ def matmul_epilogue(
                     break
             if has_bad_extra:
                 break
+            if user_op == "add":
+                _norm_targets = {_F.rms_norm, _F.layer_norm}
+                if any(
+                    u.op == "call_function" and u.target in _norm_targets
+                    for u in user.users
+                ):
+                    break
             chain.append(user)
             mm_nodes.add(user.name)
             current = user

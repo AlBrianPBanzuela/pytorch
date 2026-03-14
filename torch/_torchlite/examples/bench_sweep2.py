@@ -404,6 +404,7 @@ def main():
 
     for name, model_fn, input_shape, dtype in MODELS:
         try:
+            torch._dynamo.reset()
             torch.manual_seed(42)
             model = model_fn().to(dtype).cuda().eval()
             x = torch.randn(input_shape, device="cuda", dtype=dtype)

@@ -521,6 +521,16 @@ def codegen_inference(
     graph = gm.graph
     lines = []
     namespace: Dict[str, object] = {"torch": torch}
+    namespace["_rt"] = torch._C._dynamo.guards._reinterpret_tensor
+
+    def _contiguous_strides(shape):
+        if not shape:
+            return ()
+        strides = [0] * len(shape)
+        strides[-1] = 1
+        for i in range(len(shape) - 2, -1, -1):
+            strides[i] = strides[i + 1] * shape[i + 1]
+        return tuple(strides)
 
     # Collect pool info: for each pool_id, track the max numel and
     # whether all nodes sharing the pool have the same shape.
@@ -638,6 +648,13 @@ def codegen_inference(
 
     # Map node -> variable name in generated code
     node_to_var: Dict[str, str] = {}
+    # Cache (input_var, shape_tuple) -> result_var to skip redundant reshapes
+    reshape_cache: Dict[tuple, str] = {}
+    # Track reshape source: node_name -> original source var (before reshape)
+    reshape_source: Dict[str, str] = {}
+    # Track which node names produce known-contiguous tensors, so we can
+    # use _reinterpret_tensor instead of .reshape() for view ops on them.
+    known_contiguous: set = set()
 
     # Build placeholder signature
     placeholder_names = []
@@ -645,6 +662,7 @@ def codegen_inference(
         if node.op == "placeholder":
             placeholder_names.append(node.name)
             node_to_var[node.name] = node.name
+            known_contiguous.add(node.name)
 
     lines.append(f"def forward({', '.join(placeholder_names)}):")
 
@@ -652,6 +670,48 @@ def codegen_inference(
     for node in graph.nodes:
         if node.op == "get_attr":
             node_to_var[node.name] = node.name
+
+    # Liveness analysis: walk backward from output to find which nodes
+    # are actually consumed. Dead view-like call_function nodes (e.g.
+    # a reshape whose result is never used) are skipped during codegen
+    # to avoid emitting redundant Python dispatch calls.
+    _VIEW_LIKE_OPS = frozenset({
+        torch.ops.aten.t.default,
+        torch.ops.aten.transpose.int,
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+        torch.ops.aten.expand.default,
+        torch.ops.aten.slice.Tensor,
+        torch.ops.aten.permute.default,
+        torch.ops.aten._unsafe_view.default,
+        torch.ops.aten.unsqueeze.default,
+        torch.Tensor.reshape,
+        torch.Tensor.view,
+    })
+    live_nodes: set = set()
+    for node in reversed(list(graph.nodes)):
+        if node.op == "output":
+            live_nodes.add(node.name)
+            for arg in node.args:
+                if isinstance(arg, torch.fx.Node):
+                    live_nodes.add(arg.name)
+                elif isinstance(arg, (list, tuple)):
+                    for a in arg:
+                        if isinstance(a, torch.fx.Node):
+                            live_nodes.add(a.name)
+            continue
+        if node.name not in live_nodes:
+            continue
+        for arg in node.args:
+            if isinstance(arg, torch.fx.Node):
+                live_nodes.add(arg.name)
+            elif isinstance(arg, (list, tuple)):
+                for a in arg:
+                    if isinstance(a, torch.fx.Node):
+                        live_nodes.add(a.name)
+        for v in node.kwargs.values():
+            if isinstance(v, torch.fx.Node):
+                live_nodes.add(v.name)
 
     # Generate code for each op node
     output_var = None
@@ -661,6 +721,10 @@ def codegen_inference(
         if node.op in ("placeholder", "get_attr"):
             continue
         if node.name in _handled_nodes:
+            continue
+        if (node.name not in live_nodes
+                and node.op == "call_function"
+                and getattr(node, "target", None) in _VIEW_LIKE_OPS):
             continue
 
         if node.op == "output":
@@ -823,9 +887,8 @@ def codegen_inference(
                             )
 
                         numel = mod.M * mod.N
-                        grid_val = (numel + 1023) // 1024
                         ep_grid = f"_ep_grid_{node.name}"
-                        namespace[ep_grid] = (grid_val,)
+                        namespace[ep_grid] = lambda meta, n=numel: ((n + meta["BLOCK_SIZE"] - 1) // meta["BLOCK_SIZE"],)  # noqa: E731, B950
 
                         # Build kernel args: acc, [bias,] [extras...], out, N, numel
                         # out == acc (in-place) to avoid a torch.empty allocation
@@ -833,20 +896,15 @@ def codegen_inference(
                         if mod.has_bias:
                             kernel_args.append(_arg_str(node.args[2]))
                         for ea in extra_args:
-                            evar = _arg_str(ea)
-                            flat_ref = f"_flat_{node.name}_{evar}"
-                            namespace[flat_ref] = None  # placeholder
-                            lines.append(
-                                f"    {flat_ref} = {evar}.reshape(-1) "
-                                f"if {evar}.ndim > 1 else {evar}"
-                            )
-                            kernel_args.append(flat_ref)
+                            kernel_args.append(_arg_str(ea))
                         kernel_args.extend([acc_var, str(mod.N), str(numel)])
                         args_str = ", ".join(kernel_args)
                         lines.append(
                             f"    {ep_fn_ref}[{ep_grid}]({args_str})"
                         )
                         lines.append(f"    {var_name} = {acc_var}")
+                        if acc_var != buf_name:
+                            reshape_source[node.name] = buf_name
                     elif mod.epilogue_ops:
                         if mod.has_bias:
                             bias_var = _arg_str(node.args[2])
@@ -921,7 +979,9 @@ def codegen_inference(
                                 break
 
                         if acc_var != var_name:
-                            lines.append(f"    {var_name} = {acc_var}")
+                            node_to_var[node.name] = acc_var
+                        if acc_var != buf_name:
+                            reshape_source[node.name] = buf_name
                     else:
                         # No epilogue ops — addmm.out already handled bias
                         # above if present, nothing extra needed here.
@@ -931,8 +991,119 @@ def codegen_inference(
                                 f"    {var_name} = {buf_name}.view("
                                 f"{repr(mod.out_shape)})"
                             )
+                            reshape_source[node.name] = buf_name
                         else:
                             lines.append(f"    {var_name} = {buf_name}")
+                elif mod._use_cublas is False:
+                    node_to_var[node.name] = var_name
+
+                    if pool_id is not None and pool_uniform:
+                        buf_name = f"_buf{pool_id}"
+                        matmul_buf = f"_mb_{node.name}"
+                        lines.append(
+                            f"    {matmul_buf} = {buf_name}.view("
+                            f"{mod.M}, {mod.N})"
+                        )
+                    elif pool_id is not None:
+                        mn = mod.M * mod.N
+                        matmul_buf = f"_mb_{node.name}"
+                        lines.append(
+                            f"    {matmul_buf} = _buf{pool_id}[:{mn}]"
+                            f".view({mod.M}, {mod.N})"
+                        )
+                    else:
+                        matmul_buf = f"_buf_unpool_{node.name}"
+                        namespace[matmul_buf] = torch.empty(
+                            (mod.M, mod.N), dtype=mod.dtype, device=device,
+                        )
+
+                    input_var = _arg_str(node.args[0])
+                    weight_var = _arg_str(node.args[1])
+
+                    if mod.has_bias:
+                        extra_args = node.args[3:]
+                    else:
+                        extra_args = node.args[2:]
+
+                    triton_ref = f"_triton_fn_{node.name}"
+                    namespace[triton_ref] = mod.triton_fn
+
+                    import triton as _triton_mod
+                    grid_ref = f"_triton_grid_{node.name}"
+                    _M, _N = mod.M, mod.N
+                    namespace[grid_ref] = lambda META, M=_M, N=_N: (
+                        _triton_mod.cdiv(M, META["BLOCK_M"])
+                        * _triton_mod.cdiv(N, META["BLOCK_N"]),
+                    )
+
+                    kernel_args = [input_var, weight_var]
+                    if mod.has_bias:
+                        kernel_args.append(_arg_str(node.args[2]))
+                    kernel_args.append(matmul_buf)
+
+                    extra_flat_info = []
+                    for i, ea in enumerate(extra_args):
+                        evar = _arg_str(ea)
+                        if (i < len(mod.extra_shapes)
+                                and len(mod.extra_shapes[i]) >= 2):
+                            ea_src_name = ea.name if isinstance(ea, torch.fx.Node) else None
+                            ea_src_var = (
+                                reshape_source.get(ea_src_name, evar)
+                                if ea_src_name else evar
+                            )
+                            total = 1
+                            for d in mod.extra_shapes[i]:
+                                total *= d
+                            cols = total // mod.M
+                            ea_shape = (mod.M, cols)
+                            ea_src_shape = (
+                                ea.meta.get("shape")
+                                if isinstance(ea, torch.fx.Node) else None
+                            )
+                            if (ea_src_shape is not None
+                                    and tuple(ea_src_shape) == ea_shape):
+                                kernel_args.append(ea_src_var)
+                                extra_flat_info.append(
+                                    (ea_src_var, str(cols), "1"))
+                            else:
+                                flat_ref = f"_flat_{node.name}_{i}"
+                                namespace[flat_ref] = None
+                                lines.append(
+                                    f"    {flat_ref} = {evar}.reshape("
+                                    f"{mod.M}, -1)"
+                                )
+                                kernel_args.append(flat_ref)
+                                extra_flat_info.append(
+                                    (flat_ref, str(cols), "1"))
+                        else:
+                            kernel_args.append(evar)
+                            extra_flat_info.append(None)
+
+                    kernel_args.extend([
+                        str(mod.M), str(mod.N), str(mod.K),
+                        f"{input_var}.stride(0)", f"{input_var}.stride(1)",
+                        f"{weight_var}.stride(0)", f"{weight_var}.stride(1)",
+                        str(mod.N), "1",
+                    ])
+
+                    for info in extra_flat_info:
+                        if info is not None:
+                            kernel_args.extend([info[1], info[2]])
+
+                    args_joined = ", ".join(kernel_args)
+                    lines.append(
+                        f"    {triton_ref}[{grid_ref}]({args_joined})"
+                    )
+
+                    if (mod.out_shape is not None
+                            and list(mod.out_shape) != [mod.M, mod.N]):
+                        lines.append(
+                            f"    {var_name} = {matmul_buf}.view("
+                            f"{repr(mod.out_shape)})"
+                        )
+                        reshape_source[node.name] = matmul_buf
+                    else:
+                        node_to_var[node.name] = matmul_buf
                 elif pool_id is not None and pool_uniform:
                     buf_name = f"_buf{pool_id}"
                     node_to_var[node.name] = var_name
@@ -962,11 +1133,80 @@ def codegen_inference(
                 mod_ref = f"_add_rms_mod_{node.name}"
                 input_args = ", ".join(_arg_str(a) for a in node.args)
                 node_to_var[node.name] = var_name
+                pool_uniform = (
+                    pool_id is not None
+                    and pool_info[pool_id]["uniform"]
+                )
 
                 if not mod.has_add:
-                    lines.append(
-                        f"    {var_name} = {mod_ref}({input_args})"
+                    x_arg = _arg_str(node.args[0])
+                    w_arg = _arg_str(node.args[1])
+
+                    if pool_id is not None and pool_uniform:
+                        buf_ref = f"_buf{pool_id}"
+                        out_ref = f"_rms_v_{node.name}"
+                        lines.append(
+                            f"    {out_ref} = {buf_ref}.view("
+                            f"{mod.n_rows}, {mod.norm_dim})"
+                        )
+                        node_to_var[node.name] = buf_ref
+                    elif pool_id is not None:
+                        pv = pool_views.get(node.name)
+                        if pv:
+                            out_ref = pv
+                        else:
+                            out_ref = f"_rms_out_{node.name}"
+                            dtype_ref = f"_rms_dtype_{node.name}"
+                            namespace[dtype_ref] = mod.dtype
+                            lines.append(
+                                f"    {out_ref} = torch.empty("
+                                f"{repr(mod.shape)}, dtype={dtype_ref}, "
+                                f"device={x_arg}.device)"
+                            )
+                    else:
+                        out_ref = f"_rms_out_{node.name}"
+                        dtype_ref = f"_rms_dtype_{node.name}"
+                        namespace[dtype_ref] = mod.dtype
+                        lines.append(
+                            f"    {out_ref} = torch.empty("
+                            f"{repr(mod.shape)}, dtype={dtype_ref}, "
+                            f"device={x_arg}.device)"
+                        )
+
+                    tfn_ref = f"_rms_tfn_{node.name}"
+                    namespace[tfn_ref] = mod.triton_fn
+                    grid_ref = f"_rms_grid_{node.name}"
+                    namespace[grid_ref] = (mod.n_rows,)
+
+                    input_node = node.args[0]
+                    input_is_contiguous = (
+                        input_node.name in known_contiguous
+                        or input_node.op in ("placeholder", "call_module")
+                        or (
+                            input_node.op == "call_function"
+                            and input_node.target in (
+                                torch.ops.aten.addmm.default,
+                                torch.ops.aten.mm.default,
+                                torch.ops.aten.clone.default,
+                            )
+                        )
                     )
+                    if input_is_contiguous:
+                        contig_var = x_arg
+                    else:
+                        contig_var = f"_rms_x_{node.name}"
+                        lines.append(
+                            f"    {contig_var} = {x_arg}.contiguous()"
+                        )
+                    lines.append(
+                        f"    {tfn_ref}[{grid_ref}]("
+                        f"{contig_var}, {w_arg}, {out_ref}, "
+                        f"{mod.n_rows}, {mod.norm_dim}, {mod.eps}, "
+                        f"BLOCK_SIZE={mod.block_size})"
+                    )
+                    node_to_var[node.name] = out_ref
+                    if pool_id is not None and pool_uniform:
+                        node_to_var[node.name] = buf_ref
                 else:
                     getitem_nodes = {}
                     for user in node.users:
@@ -998,9 +1238,27 @@ def codegen_inference(
                     norm_buf = _pool_buf_for(norm_gi)
 
                     if add_buf and norm_buf:
+                        add_arg = add_buf
+                        norm_arg = norm_buf
+                        add_pid = add_gi.meta.get("memory_pool") if add_gi else None
+                        norm_pid = norm_gi.meta.get("memory_pool") if norm_gi else None
+                        if add_pid is not None and pool_info.get(add_pid, {}).get("uniform"):
+                            add_view = f"_add_v_{node.name}"
+                            lines.append(
+                                f"    {add_view} = {add_buf}.view("
+                                f"{repr(mod.shape)})"
+                            )
+                            add_arg = add_view
+                        if norm_pid is not None and pool_info.get(norm_pid, {}).get("uniform"):
+                            norm_view = f"_norm_v_{node.name}"
+                            lines.append(
+                                f"    {norm_view} = {norm_buf}.view("
+                                f"{repr(mod.shape)})"
+                            )
+                            norm_arg = norm_view
                         lines.append(
                             f"    {mod_ref}.forward_into_bufs("
-                            f"{input_args}, {add_buf}, {norm_buf})"
+                            f"{input_args}, {add_arg}, {norm_arg})"
                         )
                         if add_gi:
                             node_to_var[add_gi.name] = add_buf
@@ -1018,9 +1276,18 @@ def codegen_inference(
                             f"{shape_repr}, dtype={dtype_ref}, "
                             f"device={_arg_str(node.args[0])}.device)"
                         )
+                        add_arg = add_buf
+                        add_pid = add_gi.meta.get("memory_pool") if add_gi else None
+                        if add_pid is not None and pool_info.get(add_pid, {}).get("uniform"):
+                            add_view = f"_add_v_{node.name}"
+                            lines.append(
+                                f"    {add_view} = {add_buf}.view("
+                                f"{repr(mod.shape)})"
+                            )
+                            add_arg = add_view
                         lines.append(
                             f"    {mod_ref}.forward_into_bufs("
-                            f"{input_args}, {add_buf}, {norm_var})"
+                            f"{input_args}, {add_arg}, {norm_var})"
                         )
                         if add_gi:
                             node_to_var[add_gi.name] = add_buf
@@ -1072,9 +1339,27 @@ def codegen_inference(
                     norm_buf = _pool_buf_for_ln(norm_gi)
 
                     if add_buf and norm_buf:
+                        add_arg = add_buf
+                        norm_arg = norm_buf
+                        add_pid = add_gi.meta.get("memory_pool") if add_gi else None
+                        norm_pid = norm_gi.meta.get("memory_pool") if norm_gi else None
+                        if add_pid is not None and pool_info.get(add_pid, {}).get("uniform"):
+                            add_view = f"_add_v_{node.name}"
+                            lines.append(
+                                f"    {add_view} = {add_buf}.view("
+                                f"{repr(mod.shape)})"
+                            )
+                            add_arg = add_view
+                        if norm_pid is not None and pool_info.get(norm_pid, {}).get("uniform"):
+                            norm_view = f"_norm_v_{node.name}"
+                            lines.append(
+                                f"    {norm_view} = {norm_buf}.view("
+                                f"{repr(mod.shape)})"
+                            )
+                            norm_arg = norm_view
                         lines.append(
                             f"    {mod_ref}.forward_into_bufs("
-                            f"{input_args}, {add_buf}, {norm_buf})"
+                            f"{input_args}, {add_arg}, {norm_arg})"
                         )
                         if add_gi:
                             node_to_var[add_gi.name] = add_buf
@@ -1090,6 +1375,7 @@ def codegen_inference(
                 node_to_var[node.name] = var_name
                 input_args = ", ".join(_arg_str(a) for a in node.args)
                 lines.append(f"    {var_name} = {node.target}({input_args})")
+            known_contiguous.add(node.name)
             continue
 
         if node.op == "call_function":
@@ -1113,6 +1399,9 @@ def codegen_inference(
                 torch.ops.aten.slice.Tensor,
                 torch.ops.aten.permute.default,
                 torch.ops.aten._unsafe_view.default,
+                torch.ops.aten.unsqueeze.default,
+                torch.Tensor.reshape,
+                torch.Tensor.view,
             )
 
             pool_uniform = (
@@ -1124,9 +1413,8 @@ def codegen_inference(
                 target == torch.ops.aten.addmm.default
                 and node_dtype == torch.float32
             )
-            if is_mm and pool_id is not None and (
-                target == torch.ops.aten.mm.default or decompose_addmm
-            ):
+            if (is_mm and pool_id is not None
+                    and target == torch.ops.aten.mm.default):
                 ns_target = f"_op_{node.name}"
                 namespace[ns_target] = torch.ops.aten.mm.out
                 pv = pool_views.get(node.name)
@@ -1149,21 +1437,9 @@ def codegen_inference(
                         f".view({shape_repr})"
                     )
                     node_to_var[node.name] = view_var
-
-                if target == torch.ops.aten.mm.default:
-                    lines.append(
-                        f"    {ns_target}({args_str}, out={buf_name})"
-                    )
-                elif target == torch.ops.aten.addmm.default:
-                    bias_arg = _arg_str(node.args[0])
-                    input_arg = _arg_str(node.args[1])
-                    weight_arg = _arg_str(node.args[2])
-                    lines.append(
-                        f"    {ns_target}({input_arg}, {weight_arg}, out={buf_name})"
-                    )
-                    lines.append(
-                        f"    {buf_name}.add_({bias_arg})"
-                    )
+                lines.append(
+                    f"    {ns_target}({args_str}, out={buf_name})"
+                )
             elif is_mm and pool_id is not None:
                 ns_target = f"_op_{node.name}"
                 namespace[ns_target] = torch.ops.aten.addmm.out
@@ -1234,15 +1510,65 @@ def codegen_inference(
                     torch.ops.aten.reshape.default,
                     torch.ops.aten.view.default,
                 ):
-                    shape_str = _shape_args(node.args[1])
-                    lines.append(
-                        f"    {var_name} = {self_arg}.reshape({shape_str})"
+                    src_name = node.args[0].name
+                    src_var = reshape_source.get(src_name, self_arg)
+                    shape_arg = node.args[1]
+                    shape_key = (
+                        tuple(a.name if isinstance(a, torch.fx.Node) else a
+                              for a in shape_arg)
+                        if isinstance(shape_arg, (list, tuple))
+                        else shape_arg
                     )
+                    cache_key = (src_var, shape_key)
+                    cached = reshape_cache.get(cache_key)
+                    if cached is not None:
+                        node_to_var[node.name] = cached
+                        if src_name in known_contiguous:
+                            known_contiguous.add(node.name)
+                        continue
+                    is_static = (
+                        isinstance(shape_arg, (list, tuple))
+                        and all(isinstance(s, int) for s in shape_arg)
+                    )
+                    if is_static and src_name in known_contiguous:
+                        shape_t = tuple(shape_arg)
+                        strides_t = _contiguous_strides(shape_t)
+                        lines.append(
+                            f"    {var_name} = _rt({src_var}, "
+                            f"{shape_t}, {strides_t}, 0)"
+                        )
+                        known_contiguous.add(node.name)
+                    else:
+                        shape_str = _shape_args(node.args[1])
+                        lines.append(
+                            f"    {var_name} = {src_var}.reshape({shape_str})"
+                        )
+                        if src_name in known_contiguous:
+                            known_contiguous.add(node.name)
+                    reshape_cache[cache_key] = var_name
+                    reshape_source[node.name] = src_var
                 elif target == torch.ops.aten._unsafe_view.default:
-                    shape_str = _shape_args(node.args[1])
-                    lines.append(
-                        f"    {var_name} = {self_arg}.view({shape_str})"
+                    src_name = node.args[0].name
+                    shape_arg = node.args[1]
+                    is_static = (
+                        isinstance(shape_arg, (list, tuple))
+                        and all(isinstance(s, int) for s in shape_arg)
                     )
+                    if is_static and src_name in known_contiguous:
+                        shape_t = tuple(shape_arg)
+                        strides_t = _contiguous_strides(shape_t)
+                        lines.append(
+                            f"    {var_name} = _rt({self_arg}, "
+                            f"{shape_t}, {strides_t}, 0)"
+                        )
+                        known_contiguous.add(node.name)
+                    else:
+                        shape_str = _shape_args(node.args[1])
+                        lines.append(
+                            f"    {var_name} = {self_arg}.view({shape_str})"
+                        )
+                        if src_name in known_contiguous:
+                            known_contiguous.add(node.name)
                 elif target == torch.ops.aten.expand.default:
                     shape_str = _shape_args(node.args[1])
                     lines.append(
@@ -1258,6 +1584,36 @@ def codegen_inference(
                     lines.append(
                         f"    {var_name} = {self_arg}[{rest}]"
                     )
+                elif target == torch.ops.aten.unsqueeze.default:
+                    dim_arg = _arg_str(node.args[1])
+                    lines.append(
+                        f"    {var_name} = {self_arg}.unsqueeze({dim_arg})"
+                    )
+                elif target in (torch.Tensor.reshape, torch.Tensor.view):
+                    src_name = node.args[0].name
+                    src_var = reshape_source.get(src_name, self_arg)
+                    shape_args = node.args[1:]
+                    is_static = all(
+                        isinstance(s, int) for s in shape_args
+                    )
+                    if is_static and src_name in known_contiguous:
+                        shape_t = tuple(shape_args)
+                        strides_t = _contiguous_strides(shape_t)
+                        lines.append(
+                            f"    {var_name} = _rt({src_var}, "
+                            f"{shape_t}, {strides_t}, 0)"
+                        )
+                        known_contiguous.add(node.name)
+                    else:
+                        shape_str = ", ".join(
+                            _arg_str(a) for a in shape_args
+                        )
+                        lines.append(
+                            f"    {var_name} = {src_var}.reshape({shape_str})"
+                        )
+                        if src_name in known_contiguous:
+                            known_contiguous.add(node.name)
+                    reshape_source[node.name] = src_var
                 else:
                     ns_target = f"_op_{node.name}"
                     namespace[ns_target] = target
@@ -1276,10 +1632,40 @@ def codegen_inference(
                     )
                 elif target == torch.ops.aten.unbind.int:
                     self_arg = _arg_str(node.args[0])
-                    dim_arg = _arg_str(node.args[1]) if len(node.args) > 1 else "0"
-                    lines.append(
-                        f"    {var_name} = {self_arg}.unbind({dim_arg})"
-                    )
+                    src_node = node.args[0]
+                    src_shape = src_node.meta.get("shape")
+                    dim = node.args[1] if len(node.args) > 1 else 0
+                    if (src_shape is not None
+                            and src_node.name in known_contiguous
+                            and isinstance(dim, int)):
+                        src_strides = _contiguous_strides(tuple(src_shape))
+                        item_shape = tuple(
+                            s for i, s in enumerate(src_shape) if i != dim)
+                        item_strides = tuple(
+                            s for i, s in enumerate(src_strides) if i != dim)
+                        stride_at_dim = src_strides[dim]
+                        for user in node.users:
+                            if (user.op == "call_function"
+                                    and user.target is operator.getitem
+                                    and len(user.args) >= 2
+                                    and isinstance(user.args[1], int)):
+                                idx = user.args[1]
+                                offset = idx * stride_at_dim
+                                user_var = user.name
+                                node_to_var[user.name] = user_var
+                                lines.append(
+                                    f"    {user_var} = _rt({self_arg}, "
+                                    f"{item_shape}, {item_strides}, "
+                                    f"{offset})"
+                                )
+                                known_contiguous.add(user.name)
+                                _handled_nodes.add(user.name)
+                    else:
+                        dim_arg = _arg_str(
+                            node.args[1]) if len(node.args) > 1 else "0"
+                        lines.append(
+                            f"    {var_name} = {self_arg}.unbind({dim_arg})"
+                        )
                 elif target in (
                     torch.ops.aten.sym_size.int,
                     torch.ops.aten.sym_size.default,
@@ -1308,14 +1694,105 @@ def codegen_inference(
                         f"    {var_name} = {ns_target}({all_args})"
                     )
             else:
-                # Generic op with pool — can't use out=, just let it allocate
                 node_to_var[node.name] = var_name
-                ns_target = f"_op_{node.name}"
-                namespace[ns_target] = target
-                all_args = args_str
-                if kwargs_parts:
-                    all_args += ", " + ", ".join(kwargs_parts)
-                lines.append(f"    {var_name} = {ns_target}({all_args})")
+                if target is operator.getitem:
+                    lines.append(
+                        f"    {var_name} = {_arg_str(node.args[0])}"
+                        f"[{_arg_str(node.args[1])}]"
+                    )
+                elif target == torch.ops.aten.unbind.int:
+                    self_arg = _arg_str(node.args[0])
+                    src_node = node.args[0]
+                    src_shape = src_node.meta.get("shape")
+                    dim = node.args[1] if len(node.args) > 1 else 0
+                    if (src_shape is not None
+                            and src_node.name in known_contiguous
+                            and isinstance(dim, int)):
+                        src_strides = _contiguous_strides(tuple(src_shape))
+                        item_shape = tuple(
+                            s for i, s in enumerate(src_shape) if i != dim)
+                        item_strides = tuple(
+                            s for i, s in enumerate(src_strides) if i != dim)
+                        stride_at_dim = src_strides[dim]
+                        for user in node.users:
+                            if (user.op == "call_function"
+                                    and user.target is operator.getitem
+                                    and len(user.args) >= 2
+                                    and isinstance(user.args[1], int)):
+                                idx = user.args[1]
+                                offset = idx * stride_at_dim
+                                user_var = user.name
+                                node_to_var[user.name] = user_var
+                                lines.append(
+                                    f"    {user_var} = _rt({self_arg}, "
+                                    f"{item_shape}, {item_strides}, "
+                                    f"{offset})"
+                                )
+                                known_contiguous.add(user.name)
+                                _handled_nodes.add(user.name)
+                    else:
+                        dim_arg = _arg_str(
+                            node.args[1]) if len(node.args) > 1 else "0"
+                        lines.append(
+                            f"    {var_name} = {self_arg}.unbind({dim_arg})"
+                        )
+                elif target == torch.ops.aten.clone.default:
+                    self_arg = _arg_str(node.args[0])
+                    lines.append(f"    {var_name} = {self_arg}.clone()")
+                elif target == torch.ops.aten.unsqueeze.default:
+                    self_arg = _arg_str(node.args[0])
+                    dim_arg = _arg_str(node.args[1])
+                    lines.append(
+                        f"    {var_name} = {self_arg}.unsqueeze({dim_arg})"
+                    )
+                elif target == torch.ops.aten.contiguous.default:
+                    self_arg = _arg_str(node.args[0])
+                    lines.append(
+                        f"    {var_name} = {self_arg}.contiguous()"
+                    )
+                elif target in (
+                    torch.ops.aten.reshape.default,
+                    torch.ops.aten.view.default,
+                ):
+                    self_arg = _arg_str(node.args[0])
+                    src_name = node.args[0].name
+                    src_var = reshape_source.get(src_name, self_arg)
+
+                    shape_arg = node.args[1]
+                    is_static = (
+                        isinstance(shape_arg, (list, tuple))
+                        and all(isinstance(s, int) for s in shape_arg)
+                    )
+                    if is_static and src_name in known_contiguous:
+                        shape_t = tuple(shape_arg)
+                        strides_t = _contiguous_strides(shape_t)
+                        lines.append(
+                            f"    {var_name} = _rt({src_var}, "
+                            f"{shape_t}, {strides_t}, 0)"
+                        )
+                        known_contiguous.add(node.name)
+                    else:
+                        def _shape_args_pooled(sa):
+                            if isinstance(sa, (list, tuple)):
+                                return ", ".join(_arg_str(s) for s in sa)
+                            return _arg_str(sa)
+
+                        shape_str = _shape_args_pooled(shape_arg)
+                        lines.append(
+                            f"    {var_name} = {src_var}.reshape({shape_str})"
+                        )
+                        if src_name in known_contiguous:
+                            known_contiguous.add(node.name)
+                    reshape_source[node.name] = src_var
+                else:
+                    ns_target = f"_op_{node.name}"
+                    namespace[ns_target] = target
+                    all_args = args_str
+                    if kwargs_parts:
+                        all_args += ", " + ", ".join(kwargs_parts)
+                    lines.append(f"    {var_name} = {ns_target}({all_args})")
+            if is_mm or target == torch.ops.aten.clone.default:
+                known_contiguous.add(node.name)
             continue
 
     if output_var is not None:
@@ -1328,6 +1805,20 @@ def codegen_inference(
         lines.append("    return None")
 
     import builtins as _builtins
+    import re as _re
+
+    _assign_pat = _re.compile(r"^    (\w+) = ")
+    used_vars: set = set()
+    alive = []
+    for line in reversed(lines[1:]):
+        m = _assign_pat.match(line)
+        if m and m.group(1) not in used_vars:
+            continue
+        alive.append(line)
+        for tok in _re.findall(r"\b\w+\b", line):
+            used_vars.add(tok)
+    alive.reverse()
+    lines = [lines[0]] + alive
 
     source = "\n".join(lines)
     if os.environ.get("TORCHLITE_DUMP_CODEGEN"):
