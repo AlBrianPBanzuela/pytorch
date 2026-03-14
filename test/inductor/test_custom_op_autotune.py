@@ -18,7 +18,6 @@ from torch._inductor.kernel.custom_op import (
     register_custom_op_autotuning,
 )
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -27,13 +26,12 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     HAS_TRITON,
     IS_BIG_GPU,
-    GPU_TYPE,
 )
-
 
 
 torch.set_float32_matmul_precision("high")
