@@ -1023,218 +1023,124 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
     @with_comms
     @skip_unless_torch_gpu
     @parametrize(
-        "mesh_type,amsgrad",
+        "variant",
         [
-            # All tensors on the same 1D mesh
-            ("same", False),
-            # state_steps on a different sub-mesh, with max_exp_avg_sqs present
-            ("cross", True),
-            # state_steps on a different sub-mesh, empty max_exp_avg_sqs
+            # All tensors on the same 1D mesh, _fused_adam_
+            "adam_same_mesh",
+            # state_steps on a different sub-mesh, amsgrad=True
+            "adam_cross_mesh_amsgrad",
+            # state_steps on a different sub-mesh, amsgrad=False
             # (triggers the different_mesh_args index remapping)
-            ("cross", False),
+            "adam_cross_mesh",
+            # _fused_adamw_ with _StridedShard on 2D mesh (torchtitan pattern)
+            "adamw_strided_shard_cross_mesh",
+            # _fused_adamw_ with tensor lr kwarg
+            "adamw_tensor_lr",
         ],
     )
-    def test_fused_adam(self, mesh_type, amsgrad):
-        if mesh_type == "same":
-            param_mesh = self.build_device_mesh()
-            step_mesh = param_mesh
-        else:
+    def test_fused_optimizer(self, variant):
+        use_cross_mesh = "cross_mesh" in variant
+        use_strided = "strided" in variant
+        use_tensor_lr = "tensor_lr" in variant
+        amsgrad = "amsgrad" in variant
+
+        # --- mesh setup ---
+        if use_cross_mesh or use_strided:
             mesh_2d = init_device_mesh(
                 self.device_type,
                 (2, self.world_size // 2),
                 mesh_dim_names=("dp", "tp"),
             )
-            param_mesh = mesh_2d["tp"]
-            step_mesh = mesh_2d["dp"]
+            if use_strided:
+                param_mesh = mesh_2d
+                step_mesh = mesh_2d["dp"]
+                param_placements = [_StridedShard(0, split_factor=2), Shard(0)]
+            else:
+                param_mesh = mesh_2d["tp"]
+                step_mesh = mesh_2d["dp"]
+                param_placements = [Shard(0)]
+        else:
+            param_mesh = self.build_device_mesh()
+            step_mesh = param_mesh
+            param_placements = [Shard(0)]
 
-        d_params = [
-            distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
-            )
-        ]
-        d_grads = [
-            distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
-            )
-        ]
-        d_exp_avgs = [
-            distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
-            )
-        ]
-        d_exp_avg_sqs = [
-            distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
-            )
-        ]
-        d_max_exp_avg_sqs = (
-            [
+        # --- build optimizer state tensors ---
+        shape = (4, 8) if use_strided else (8, 8)
+
+        def _make(val_fn, mesh, placements):
+            if use_strided and mesh.ndim > 1:
+                return [
+                    DTensor.from_local(
+                        val_fn(shape, device=self.device_type),
+                        mesh,
+                        placements,
+                        run_check=False,
+                    )
+                ]
+            return [
                 distribute_tensor(
-                    torch.zeros(8, 8, device=self.device_type),
-                    param_mesh,
-                    [Shard(0)],
+                    val_fn(shape, device=self.device_type), mesh, placements
                 )
             ]
-            if amsgrad
-            else []
+
+        d_params = _make(torch.rand, param_mesh, param_placements)
+        d_grads = _make(torch.rand, param_mesh, param_placements)
+        d_exp_avgs = _make(torch.zeros, param_mesh, param_placements)
+        d_exp_avg_sqs = _make(torch.zeros, param_mesh, param_placements)
+        d_max_exp_avg_sqs = (
+            _make(torch.zeros, param_mesh, param_placements) if amsgrad else []
         )
         d_state_steps = [
             distribute_tensor(
-                torch.tensor(1.0, device=self.device_type), step_mesh, [Replicate()]
+                torch.tensor(1.0, device=self.device_type),
+                step_mesh,
+                [Replicate()],
+            )
+            if not use_strided
+            else DTensor.from_local(
+                torch.tensor(1.0, device=self.device_type),
+                step_mesh,
+                [Replicate()],
+                run_check=False,
             )
         ]
 
-        torch._fused_adam_(
+        # --- choose op and kwargs ---
+        kwargs = dict(
+            beta1=0.9,
+            beta2=0.999,
+            eps=1e-8,
+            amsgrad=amsgrad,
+            maximize=False,
+        )
+        if use_tensor_lr:
+            d_lr = distribute_tensor(
+                torch.tensor(0.001, device=self.device_type),
+                param_mesh,
+                [Replicate()],
+            )
+            kwargs.update(lr=d_lr, weight_decay=0.01)
+            op = torch.ops.aten._fused_adamw_.tensor_lr
+        elif "adamw" in variant:
+            kwargs.update(lr=0.1, weight_decay=0.01)
+            op = torch.ops.aten._fused_adamw_.default
+        else:
+            kwargs.update(lr=0.001, weight_decay=0.0)
+            op = torch._fused_adam_
+
+        op(
             d_params,
             d_grads,
             d_exp_avgs,
             d_exp_avg_sqs,
             d_max_exp_avg_sqs,
             d_state_steps,
-            lr=0.001,
-            beta1=0.9,
-            beta2=0.999,
-            weight_decay=0.0,
-            eps=1e-8,
-            amsgrad=amsgrad,
-            maximize=False,
+            **kwargs,
         )
 
         self.assertIsInstance(d_params[0], DTensor)
-        self.assertEqual(d_params[0].placements, (Shard(0),))
+        self.assertEqual(d_params[0].placements, tuple(param_placements))
         self.assertEqual(d_params[0].device_mesh, param_mesh)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_fused_adamw_strided_shard_cross_mesh(self):
-        """Reproduce the torchtitan pattern: params with _StridedShard on a 2D
-        mesh, state_steps with Replicate on a 1D DP sub-mesh."""
-        mesh_2d = init_device_mesh(
-            self.device_type,
-            (2, self.world_size // 2),
-            mesh_dim_names=("dp", "tp"),
-        )
-        dp_mesh = mesh_2d["dp"]
-        placements = [_StridedShard(0, split_factor=2), Shard(0)]
-
-        d_params = [
-            DTensor.from_local(
-                torch.randn(4, 8, device=self.device_type),
-                mesh_2d,
-                placements,
-                run_check=False,
-            )
-        ]
-        d_grads = [
-            DTensor.from_local(
-                torch.randn(4, 8, device=self.device_type),
-                mesh_2d,
-                placements,
-                run_check=False,
-            )
-        ]
-        d_exp_avgs = [
-            DTensor.from_local(
-                torch.zeros(4, 8, device=self.device_type),
-                mesh_2d,
-                placements,
-                run_check=False,
-            )
-        ]
-        d_exp_avg_sqs = [
-            DTensor.from_local(
-                torch.zeros(4, 8, device=self.device_type),
-                mesh_2d,
-                placements,
-                run_check=False,
-            )
-        ]
-        d_state_steps = [
-            DTensor.from_local(
-                torch.tensor(1.0, device=self.device_type),
-                dp_mesh,
-                [Replicate()],
-                run_check=False,
-            )
-        ]
-
-        torch.ops.aten._fused_adamw_.default(
-            d_params,
-            d_grads,
-            d_exp_avgs,
-            d_exp_avg_sqs,
-            [],
-            d_state_steps,
-            lr=0.1,
-            beta1=0.9,
-            beta2=0.999,
-            weight_decay=0.01,
-            eps=1e-8,
-            amsgrad=False,
-            maximize=False,
-        )
-
-        self.assertIsInstance(d_params[0], DTensor)
-        self.assertEqual(d_params[0].placements, tuple(placements))
-        self.assertEqual(d_params[0].device_mesh, mesh_2d)
-
-    @with_comms
-    def test_fused_adamw_tensor_lr(self):
-        """Test _fused_adamw_ with tensor lr kwarg."""
-        device_mesh = self.build_device_mesh()
-
-        d_params = [
-            distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
-            )
-        ]
-        d_grads = [
-            distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
-            )
-        ]
-        d_exp_avgs = [
-            distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
-            )
-        ]
-        d_exp_avg_sqs = [
-            distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
-            )
-        ]
-        d_state_steps = [
-            distribute_tensor(
-                torch.tensor(1.0, device=self.device_type),
-                device_mesh,
-                [Replicate()],
-            )
-        ]
-        d_lr = distribute_tensor(
-            torch.tensor(0.001, device=self.device_type),
-            device_mesh,
-            [Replicate()],
-        )
-
-        # tensor_lr variant passes lr as a tensor kwarg
-        torch.ops.aten._fused_adamw_.tensor_lr(
-            d_params,
-            d_grads,
-            d_exp_avgs,
-            d_exp_avg_sqs,
-            [],
-            d_state_steps,
-            lr=d_lr,
-            beta1=0.9,
-            beta2=0.999,
-            weight_decay=0.01,
-            eps=1e-8,
-            amsgrad=False,
-            maximize=False,
-        )
-
-        self.assertIsInstance(d_params[0], DTensor)
-        self.assertEqual(d_params[0].placements, (Shard(0),))
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)
