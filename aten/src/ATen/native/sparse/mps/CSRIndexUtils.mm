@@ -174,15 +174,16 @@ void expand_csr_rows_to_coo_out(
     bool out_int32,
     bool transpose,
     const Tensor& coo_indices) {
+  (void)out_int32;
   TORCH_CHECK(
       crow_indices.is_mps() && col_indices.is_mps() && coo_indices.is_mps(),
       "expand_csr_rows_to_coo: expected MPS tensors");
+  const auto crow_dtype = crow_indices.scalar_type();
+  const auto col_dtype = col_indices.scalar_type();
   TORCH_CHECK(
-      crow_indices.scalar_type() == at::kLong,
-      "expand_csr_rows_to_coo: crow_indices must be int64");
-  TORCH_CHECK(
-      col_indices.scalar_type() == (out_int32 ? at::kInt : at::kLong),
-      "expand_csr_rows_to_coo: col_indices dtype mismatch");
+      (crow_dtype == at::kInt || crow_dtype == at::kLong) &&
+          crow_dtype == col_dtype,
+      "expand_csr_rows_to_coo: crow_indices and col_indices must share the same int32 or int64 dtype");
 
   TORCH_CHECK(crow_indices.dim() >= 1, "expand_csr_rows_to_coo: expected batched crow_indices");
 
@@ -219,17 +220,23 @@ void expand_csr_rows_to_coo_out(
       total_nnz,
       "]");
 
-  Tensor crow_flat = crow_indices.reshape({batch_size, rows_plus_one}).contiguous();
-  Tensor starts = crow_flat.slice(/*dim=*/1, /*start=*/0, /*end=*/rows_plus_one - 1);
-
   auto options_long = crow_indices.options().dtype(at::kLong);
-  Tensor indicator = at::empty({batch_size, nnz_per_batch}, options_long);
-  indicator.zero_();
-  if (rows_per_batch > 0 && nnz_per_batch > 0) {
-    indicator.scatter_(1, starts, 1);
+  Tensor crow_flat = crow_indices.reshape({batch_size, rows_plus_one}).contiguous();
+  if (crow_flat.scalar_type() != at::kLong) {
+    crow_flat = crow_flat.to(at::kLong);
   }
-
-  Tensor rows_flat = (at::cumsum(indicator, 1) - 1).reshape({total_nnz});
+  Tensor row_counts =
+      crow_flat.slice(/*dim=*/1, /*start=*/1, /*end=*/rows_plus_one) -
+      crow_flat.slice(/*dim=*/1, /*start=*/0, /*end=*/rows_plus_one - 1);
+  Tensor row_ids = at::arange(rows_per_batch, options_long)
+                       .view({1, rows_per_batch})
+                       .expand({batch_size, rows_per_batch})
+                       .reshape({-1});
+  Tensor rows_flat = at::_ops::repeat_interleave_self_Tensor::call(
+      row_ids,
+      row_counts.reshape({-1}),
+      /*dim=*/0,
+      ::std::optional<int64_t>{});
   Tensor cols_flat = col_indices.reshape({total_nnz}).contiguous();
 
   Tensor linear_matrix = at::arange(batch_size, options_long).unsqueeze(1).expand({batch_size, nnz_per_batch});
@@ -277,10 +284,7 @@ Tensor expand_csr_rows_to_coo(
     bool out_int32,
     bool transpose) {
   auto batch_shape = crow_indices.sizes().slice(0, crow_indices.dim() - 1);
-  const int64_t batch_dim = std::accumulate(
-      batch_shape.begin(), batch_shape.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
   const int64_t total_nnz = col_indices.numel();
-  const int64_t nnz_per_batch = batch_dim > 0 ? total_nnz / std::max<int64_t>(batch_dim, int64_t{1}) : 0;
   const int64_t batch_ndim = static_cast<int64_t>(batch_shape.size());
   const int64_t expected_rows = batch_ndim + 2;
   auto options = crow_indices.options().dtype(out_int32 ? at::kInt : at::kLong);
@@ -322,5 +326,3 @@ void _validate_compressed_sparse_indices_mps(
 }
 
 } // namespace at::native
-
-

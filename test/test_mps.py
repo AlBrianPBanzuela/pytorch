@@ -830,58 +830,99 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(res, res_cpu)
 
     def test_sparse_csr_tensor_factory(self):
-        crow_indices = torch.tensor([0, 2, 3], dtype=torch.int64, device="mps")
-        col_indices = torch.tensor([0, 1, 0], dtype=torch.int64, device="mps")
-        values = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device="mps")
+        for index_dtype in (torch.int32, torch.int64):
+            crow_indices = torch.tensor([0, 2, 2, 3], dtype=index_dtype, device="mps")
+            col_indices = torch.tensor([0, 1, 2], dtype=index_dtype, device="mps")
+            values = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device="mps")
 
-        csr = torch.sparse_csr_tensor(
-            crow_indices,
-            col_indices,
-            values,
-            size=(2, 2),
-            device="mps",
-        )
+            csr = torch.sparse_csr_tensor(
+                crow_indices,
+                col_indices,
+                values,
+                size=(3, 3),
+                device="mps",
+            )
 
-        self.assertEqual(csr.device.type, "mps")
-        self.assertEqual(csr.layout, torch.sparse_csr)
-        self.assertEqual(csr.crow_indices().device.type, "mps")
-        self.assertEqual(csr.col_indices().device.type, "mps")
-        self.assertEqual(csr.values().device.type, "mps")
+            self.assertEqual(csr.device.type, "mps")
+            self.assertEqual(csr.layout, torch.sparse_csr)
+            self.assertEqual(csr.crow_indices().device.type, "mps")
+            self.assertEqual(csr.col_indices().device.type, "mps")
+            self.assertEqual(csr.values().device.type, "mps")
 
-        expected_dense = torch.tensor([[1.0, 2.0], [3.0, 0.0]], device="mps")
-        self.assertEqual(csr.to_dense(), expected_dense)
+            expected_dense = torch.tensor(
+                [[1.0, 2.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 3.0]],
+                device="mps",
+            )
+            self.assertEqual(csr.to_dense(), expected_dense)
 
-        # Ensure CSR round-trip remains on the CSR path (avoid COO conversion).
-        csr_roundtrip = csr.to_sparse_csr()
-        self.assertEqual(csr_roundtrip.layout, torch.sparse_csr)
-        self.assertEqual(csr_roundtrip.to_dense(), expected_dense)
+            expected_coo_indices = torch.tensor(
+                [[0, 0, 2], [0, 1, 2]],
+                dtype=index_dtype,
+            )
+            coo = csr.to_sparse()
+            coo_indices = torch.ops.aten._convert_indices_from_csr_to_coo(
+                crow_indices,
+                col_indices,
+                out_int32=index_dtype == torch.int32,
+                transpose=False,
+            )
+            coo_indices_t = torch.ops.aten._convert_indices_from_csr_to_coo(
+                crow_indices,
+                col_indices,
+                out_int32=index_dtype == torch.int32,
+                transpose=True,
+            )
+
+            self.assertEqual(coo.layout, torch.sparse_coo)
+            self.assertEqual(coo.device.type, "mps")
+            self.assertEqual(coo.indices().dtype, torch.int64)
+            self.assertEqual(coo.indices().to("cpu"), expected_coo_indices.to(torch.int64))
+            self.assertEqual(coo.values().to("cpu"), values.to("cpu"))
+            self.assertEqual(coo_indices.device.type, "mps")
+            self.assertEqual(coo_indices.to("cpu"), expected_coo_indices)
+            self.assertEqual(coo_indices_t.to("cpu"), expected_coo_indices.flip(0))
+
+            crow_roundtrip = torch.ops.aten._convert_indices_from_coo_to_csr(
+                expected_coo_indices[0].to("mps"),
+                csr.size(0),
+                out_int32=index_dtype == torch.int32,
+            )
+            self.assertEqual(crow_roundtrip.device.type, "mps")
+            self.assertEqual(crow_roundtrip.to("cpu"), crow_indices.to("cpu"))
+
+    def _to_sparse_csr_pair(self, dense_cpu):
+        cpu_sparse = dense_cpu.to_sparse_csr()
+        return cpu_sparse, cpu_sparse.to("mps")
+
+    def _assert_sparse_csr_matches(self, cpu_sparse, mps_sparse):
+        self.assertEqual(mps_sparse.layout, torch.sparse_csr)
+        self.assertEqual(mps_sparse.device.type, "mps")
+        self.assertEqual(cpu_sparse.crow_indices(), mps_sparse.crow_indices().to("cpu"))
+        self.assertEqual(cpu_sparse.col_indices(), mps_sparse.col_indices().to("cpu"))
+        self.assertEqual(cpu_sparse.values(), mps_sparse.values().to("cpu"))
+        self.assertEqual(cpu_sparse.to_dense(), mps_sparse.to_dense().to("cpu"))
 
     def test_sparse_csr_unary_ops(self):
-        def to_sparse_pair(dense_cpu):
-            cpu_sparse = dense_cpu.to_sparse_csr()
-            mps_sparse = cpu_sparse.to("mps")
-            return cpu_sparse, mps_sparse
-
         def check_sparse_unary_op(dense, op, *, check_inplace=True, check_out=True):
             dense_cpu = dense.to("cpu")
-            cpu_sparse, mps_sparse = to_sparse_pair(dense_cpu)
+            cpu_sparse, mps_sparse = self._to_sparse_csr_pair(dense_cpu)
 
             cpu_result = getattr(torch, op)(cpu_sparse)
             mps_result = getattr(torch, op)(mps_sparse)
-            self.assertEqual(cpu_result.to_dense(), mps_result.to_dense().to("cpu"))
+            self._assert_sparse_csr_matches(cpu_result, mps_result)
 
             inplace_name = f"{op}_"
             if check_inplace and hasattr(cpu_sparse, inplace_name):
-                cpu_in, mps_in = to_sparse_pair(dense_cpu)
+                cpu_in, mps_in = self._to_sparse_csr_pair(dense_cpu)
                 getattr(cpu_in, inplace_name)()
                 getattr(mps_in, inplace_name)()
-                self.assertEqual(cpu_in.to_dense(), mps_in.to_dense().to("cpu"))
+                self._assert_sparse_csr_matches(cpu_in, mps_in)
 
             if check_out:
-                cpu_sparse_out, mps_sparse_out = to_sparse_pair(dense_cpu)
+                cpu_sparse_out, mps_sparse_out = self._to_sparse_csr_pair(dense_cpu)
                 getattr(torch, op)(cpu_sparse, out=cpu_sparse_out)
                 getattr(torch, op)(mps_sparse, out=mps_sparse_out)
-                self.assertEqual(cpu_sparse_out.to_dense(), mps_sparse_out.to_dense().to("cpu"))
+                self._assert_sparse_csr_matches(cpu_sparse_out, mps_sparse_out)
 
         bounded_dense = torch.tensor(
             [[0.1, -0.2, 0.4], [-0.6, 0.0, 0.8]],
