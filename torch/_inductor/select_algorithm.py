@@ -2110,7 +2110,10 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             assert len(indices) == len(lengths)
             self.template_out = val
             self._setup_contiguous_index_state(
-                indices, index_symbols, lengths, mask,
+                indices,
+                index_symbols,
+                lengths,
+                mask,
                 xindex_name=f"x_epilogue{store_idx}_index",
             )
             self.template_out_shape = val
@@ -2201,9 +2204,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         for line in self._call_preamble:
             wrapper.writeline(line)
         output_name = tb.get_name()
-        wrapper.writeline(
-            f"{output_name} = {name}({', '.join(self._call_args)})"
-        )
+        wrapper.writeline(f"{output_name} = {name}({', '.join(self._call_args)})")
         # Unpack multi-output children from the kernel result
         for mo_name, mo in sorted(tb._multi_output_children.items()):
             if mo_name not in self.removed_buffers:

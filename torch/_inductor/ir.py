@@ -5401,6 +5401,7 @@ class TemplateBuffer(OperationBuffer):
 
         return tuple(walk(structured, []))
 
+
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
