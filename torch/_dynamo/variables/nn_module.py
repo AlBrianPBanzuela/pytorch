@@ -1328,9 +1328,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> VariableTracker:
         if (
             getattr_fn is unpatched_nn_module_getattr
-            and istype(self.value._parameters, dict)
-            and istype(self.value._buffers, dict)
-            and istype(self.value._modules, dict)
+            and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
+            and istype(self.value._buffers, dict)  # type: ignore[attr-defined]
+            and istype(self.value._modules, dict)  # type: ignore[attr-defined]
         ):
             out = self.manually_trace_nn_module_getattr(tx, name)
         else:

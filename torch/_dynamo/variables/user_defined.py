@@ -1200,9 +1200,7 @@ def generic_getattr(
     # otherwise we'd run arbitrary user code.
     if not instance_vt._object_has_getattribute:
         try:
-            resolved = type(instance_vt.value).__getattribute__(
-                instance_vt.value, name
-            )
+            resolved = type(instance_vt.value).__getattribute__(instance_vt.value, name)
             source = instance_vt.maybe_wrap_nn_module_source_for_instance(
                 tx, name, source
             )
