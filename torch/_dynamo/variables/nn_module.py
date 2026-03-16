@@ -1325,6 +1325,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         name: str,
         getattr_fn: types.FunctionType,
+        real_value: object,
     ) -> VariableTracker:
         if (
             getattr_fn is unpatched_nn_module_getattr
@@ -1334,7 +1335,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         ):
             out = self.manually_trace_nn_module_getattr(tx, name)
         else:
-            out = super().handle_getattr_fallback(tx, name, getattr_fn)
+            out = super().handle_getattr_fallback(tx, name, getattr_fn, real_value)
 
         if self.source and getattr_fn is torch.nn.Module.__getattr__:
             if isinstance(

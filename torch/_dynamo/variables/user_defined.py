@@ -1156,11 +1156,10 @@ def generic_getattr(
     value is the real Python object backing instance_vt.
 
     instance_vt must provide:
-        .fixup_type_attr(name, type_attr),
-        .resolve_data_descriptor(tx, name, type_attr, source),
-        .resolve_type_attr(tx, name, type_attr, source),
-        .maybe_wrap_nn_module_source_for_instance(tx, name, source),
-        .handle_getattr_fallback(tx, name, getattr_fn),
+        .resolve_data_descriptor(tx, name, type_attr, source, real_value),
+        .resolve_type_attr(tx, name, type_attr, source, real_value),
+        .maybe_wrap_nn_module_source_for_instance(tx, name, source, real_value),
+        .handle_getattr_fallback(tx, name, getattr_fn, real_value),
     """
     # Step 1: Single MRO walk on the type.
     type_attr = NO_SUCH_SUBOBJ
@@ -1171,21 +1170,26 @@ def generic_getattr(
 
     # Dynamo patches nn.Module.__init__ at import time to inject tracing
     # hooks.  Undo that here so the unpatched original is traced instead.
-    type_attr = instance_vt.fixup_type_attr(name, type_attr)
+    if type_attr is torch.nn.Module.__init__:
+        from ..mutation_guard import unpatched_nn_module_init
+
+        type_attr = unpatched_nn_module_init
 
     # Step 2: Data descriptors on the type take priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
-        return instance_vt.resolve_data_descriptor(tx, name, type_attr, source)
+        return instance_vt.resolve_data_descriptor(tx, name, type_attr, source, value)
 
     # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
     if hasattr(value, "__dict__") and name in value.__dict__:
         subobj = value.__dict__[name]
-        source = instance_vt.maybe_wrap_nn_module_source_for_instance(tx, name, source)
+        source = instance_vt.maybe_wrap_nn_module_source_for_instance(
+            tx, name, source, value
+        )
         return VariableTracker.build(tx, subobj, source)
 
     # Step 4-5: Non-data descriptor or plain class attribute.
     if type_attr is not NO_SUCH_SUBOBJ:
-        return instance_vt.resolve_type_attr(tx, name, type_attr, source)
+        return instance_vt.resolve_type_attr(tx, name, type_attr, source, value)
 
     # Step 5b: Dynamic fallback for attributes that exist on the live
     # object but aren't visible to the static MRO walk or instance
@@ -1205,7 +1209,7 @@ def generic_getattr(
         try:
             resolved = type(value).__getattribute__(value, name)
             source = instance_vt.maybe_wrap_nn_module_source_for_instance(
-                tx, name, source
+                tx, name, source, value
             )
             return VariableTracker.build(tx, resolved, source)
         except AttributeError:
@@ -1214,7 +1218,7 @@ def generic_getattr(
     # Step 6: __getattr__ fallback.
     getattr_fn = get_custom_getattr(value)
     if isinstance(getattr_fn, types.FunctionType):
-        return instance_vt.handle_getattr_fallback(tx, name, getattr_fn)
+        return instance_vt.handle_getattr_fallback(tx, name, getattr_fn, value)
 
     elif getattr_fn is not None:
         unimplemented(
@@ -1862,17 +1866,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
-    def fixup_type_attr(self, name: str, type_attr: object) -> object:
-        """Hook for subclasses to patch type attributes before descriptor checks.
-        Default: undo Dynamo's nn.Module.__init__ patching."""
-        from ..mutation_guard import unpatched_nn_module_init
-
-        if type_attr is torch.nn.Module.__init__:
-            return unpatched_nn_module_init
-        return type_attr
-
     def handle_getattr_fallback(
-        self, tx: "InstructionTranslator", name: str, getattr_fn: types.FunctionType
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        getattr_fn: types.FunctionType,
+        real_value: object,
     ) -> VariableTracker:
         """Trace __getattr__ as a UserMethodVariable call."""
         new_source = None
@@ -1939,6 +1938,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         name: str,
         type_attr: object,
         source: Source | None,
+        real_value: object,
     ) -> VariableTracker:
         """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
         if isinstance(type_attr, property) and not self._is_c_defined_property(
@@ -1963,10 +1963,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Uninitialized slots raise AttributeError which must be surfaced
         # as ObservedAttributeError so dynamo's try/except tracing works.
         try:
-            resolved = type(self.value).__getattribute__(self.value, name)
+            resolved = type(real_value).__getattribute__(real_value, name)
         except AttributeError:
             error_message = VariableTracker.build(
-                tx, f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                tx, f"'{type(real_value).__name__}' object has no attribute '{name}'"
             )
             raise_observed_exception(
                 AttributeError,
@@ -1981,6 +1981,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         name: str,
         type_attr: object,
         source: Source | None,
+        real_value: object,
     ) -> VariableTracker:
         """Handle non-data descriptors and plain class attributes from the type MRO."""
         from ..mutation_guard import unpatched_nn_module_init
@@ -2003,7 +2004,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = AttrSource(
                     self.get_source_by_walking_mro(tx, name), "__func__"
                 )
-            func = type_attr.__get__(self.value)
+            func = type_attr.__get__(real_value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(type_attr, classmethod):
             source_fn = None
@@ -2018,7 +2019,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source=source,
             )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
-            func = type_attr.__get__(self.value, None)
+            func = type_attr.__get__(real_value, None)
             return VariableTracker.build(tx, func, source)
         elif is_lru_cache_wrapped_function(type_attr):
             return variables.WrapperUserMethodVariable(
@@ -2095,6 +2096,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         name: str,
         source: Source | None,
+        real_value: object,
     ) -> Source | None:
         """Wrap source for nn.Module instance dict attribute access if needed."""
         if (
@@ -2972,6 +2974,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         name: str,
         type_attr: object,
         source: Source | None,
+        real_value: object,
     ) -> VariableTracker:
         if isinstance(type_attr, _collections._tuplegetter):
             # namedtuple fields are _tuplegetter descriptors implemented in C.
@@ -2979,7 +2982,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             # tuple items, because self.value may not hold actual runtime values.
             _, (idx, _) = type_attr.__reduce__()
             return self._tuple_vt.items[idx]  # type: ignore[union-attr]
-        return super().resolve_data_descriptor(tx, name, type_attr, source)
+        return super().resolve_data_descriptor(tx, name, type_attr, source, real_value)
 
     def call_method(
         self,

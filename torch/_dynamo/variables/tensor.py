@@ -57,7 +57,7 @@ from ..exc import (
 )
 from ..external_utils import _ApplyBackwardHook, call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, Source
+from ..source import AttrSource
 from ..utils import (
     fqn,
     get_fake_value,
@@ -124,16 +124,6 @@ supported_tensor_comparison_op_values = dict.fromkeys(
 supported_const_comparison_op_values = dict.fromkeys(
     supported_const_comparison_ops.values()
 )
-
-
-def is_bound_tensor_method(value: object) -> bool:
-    return bool(
-        callable(value)
-        and not torch._dynamo.utils.object_has_getattribute(value)
-        and hasattr(value, "__self__")
-        and isinstance(value.__self__, torch.Tensor)
-        and getattr(value.__self__, value.__name__, None)
-    )
 
 
 # instead of using inspect.getattr_static, we directly lookup the appropriate
@@ -317,76 +307,6 @@ class TensorVariable(VariableTracker):
                 )
         return props
 
-    def fixup_type_attr(self, name: str, type_attr: object) -> object:
-        return type_attr
-
-    def _install_hasattr_guard(self, name: str) -> None:
-        if self.source:
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-
-    def resolve_data_descriptor(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        type_attr: object,
-        source: Source | None,
-    ) -> VariableTracker:
-        self._install_hasattr_guard(name)
-        resolved = getattr(self._real_value, name)
-        return VariableTracker.build(tx, resolved, source)
-
-    def resolve_type_attr(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        type_attr: object,
-        source: Source | None,
-    ) -> VariableTracker:
-        # Inplace views on graph inputs: delay graph break to actual call.
-        if self.source is not None and hasattr(torch.ops.aten, name):
-            fn = getattr(torch.ops.aten, name)
-            if (
-                hasattr(fn, "overloads")
-                and hasattr(fn, fn.overloads()[0])
-                and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
-            ):
-                return variables.misc.DelayGraphBreakVariable(
-                    source=AttrSource(self.source, name),
-                    msg="Getting an inplace view on a graph input is not supported",
-                )
-
-        real_value = getattr(self._real_value, name)
-        if is_bound_tensor_method(real_value):
-            from .misc import GetAttrVariable
-
-            return GetAttrVariable(self, name, source=source, py_type=type(real_value))
-        self._install_hasattr_guard(name)
-        return VariableTracker.build(tx, real_value, source)
-
-    def handle_getattr_fallback(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        getattr_fn: types.FunctionType,
-    ) -> VariableTracker:
-        self._install_hasattr_guard(name)
-        resolved = getattr_fn(self._real_value, name)
-        attr_source = AttrSource(self.source, name) if self.source else None
-        return VariableTracker.build(tx, resolved, attr_source)
-
-    def maybe_wrap_nn_module_source_for_instance(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        source: Source | None,
-    ) -> Source | None:
-        self._install_hasattr_guard(name)
-        return source
-
     def method_attr_ndim(self, tx: "InstructionTranslator") -> VariableTracker:
         if self.ndim is not None:
             return VariableTracker.build(tx, self.ndim)
@@ -556,21 +476,36 @@ class TensorVariable(VariableTracker):
                 result.source = AttrSource(self.source, name)
             return result
 
-        # Proxy path for getset_descriptors that produce tensors (.real, .T, .H, etc.).
-        # Works for all tensors (sourced and sourceless) without needing a real value.
-        # Skip "grad" — its result can be None, not always a tensor.
-        if name != "grad":
-            static_attr = all_tensor_attrs.get(name, None)
-            if (
-                static_attr is not None
-                and type(static_attr) is types.GetSetDescriptorType
-            ):
+        # Handle type-level tensor attrs that don't need a real value.
+        static_attr = all_tensor_attrs.get(name, None)
+        if static_attr is not None:
+            # getset_descriptors that produce tensors (.real, .T, .H, etc.).
+            # Skip "grad" — its result can be None, not always a tensor.
+            if type(static_attr) is types.GetSetDescriptorType and name != "grad":
                 from .builder import wrap_fx_proxy
                 from .misc import GetAttrVariable
 
                 proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
                 source = AttrSource(self.source, name) if self.source else None
                 return wrap_fx_proxy(tx=tx, proxy=proxy, source=source)
+            elif type(static_attr) is types.MethodDescriptorType:
+                # Inplace views on graph inputs: delay graph break to actual call.
+                if self.source is not None and hasattr(torch.ops.aten, name):
+                    fn = getattr(torch.ops.aten, name)
+                    if (
+                        hasattr(fn, "overloads")
+                        and hasattr(fn, fn.overloads()[0])
+                        and torch.Tag.inplace_view
+                        in getattr(fn, fn.overloads()[0]).tags
+                    ):
+                        return variables.misc.DelayGraphBreakVariable(
+                            source=AttrSource(self.source, name),
+                            msg="Getting an inplace view on a graph input is not supported",
+                        )
+                from .misc import GetAttrVariable
+
+                source = AttrSource(self.source, name) if self.source else None
+                return GetAttrVariable(self, name, source=source)
 
         # Sourceless traceable subclass handling
         fake_val = self.proxy.node.meta["example_value"]
@@ -612,11 +547,7 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
 
         attr_source = AttrSource(self.source, name)
-        self._real_value = real_value
-        try:
-            return generic_getattr(tx, self, real_value, name, attr_source)
-        finally:
-            self._real_value = None
+        return generic_getattr(tx, self, real_value, name, attr_source)
 
     def call_id(self, tx: "InstructionTranslator") -> VariableTracker:
         if not self.source:
