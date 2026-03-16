@@ -1290,8 +1290,8 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend=cnts)
         def fn(x):
             x = x + 1
-            (x, inner(x))
-            return x
+            y = (x, inner(x))
+            return x, y
 
         x = torch.tensor([1.0, 2.0])
         self.assertEqual(fn(x), torch.tensor([2.0, 3.0]))

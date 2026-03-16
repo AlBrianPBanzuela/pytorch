@@ -6,6 +6,7 @@ f_globals from the compiled function that inlines them.
 
 import torch
 
+
 _MODULE_CONSTANT = 2
 
 
