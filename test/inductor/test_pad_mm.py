@@ -650,7 +650,6 @@ class PadMMTest(TestCase):
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
 
-
     @inductor_config.patch(force_shape_pad=True)
     def test_pad_mm_output_strides_preserved(self):
         """Regression test: pad_mm creates views with padded strides.
