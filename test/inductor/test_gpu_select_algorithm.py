@@ -36,12 +36,6 @@ except unittest.SkipTest:
         sys.exit(0)
     raise
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
-
 check_model = test_torchinductor.check_model
 BaseTestSelectAlgorithm = test_cpu_select_algorithm.BaseTestSelectAlgorithm
 
