@@ -1,6 +1,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 
 namespace {
 
@@ -28,23 +29,6 @@ static std::optional<c10::Device> get_common_device(
     }
   }
   return std::nullopt;
-}
-
-static std::shared_ptr<c10::FakeTensorMode> get_fake_tensor_mode(
-    torch::jit::Stack* stack,
-    size_t num_arguments) {
-  auto arguments = torch::jit::last(*stack, num_arguments);
-  for (size_t idx = 0; idx < num_arguments; ++idx) {
-    const auto& ivalue = arguments[idx];
-    if (ivalue.isTensor()) {
-      const auto& t = ivalue.toTensor();
-      if (t.defined() && t.is_fake()) {
-        auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
-        if (mode) return mode;
-      }
-    }
-  }
-  return nullptr;
 }
 
 // For factory ops: find Device args in the stack, rewrite to meta, return original.
@@ -122,7 +106,7 @@ void fakeFallback(
 
   // 1. Determine fake device and mode from inputs
   auto fake_device = get_common_device(stack, num_arguments);
-  auto mode = get_fake_tensor_mode(stack, num_arguments);
+  auto mode = c10::impl::FakeTensorModeTLS::get_state();
 
   // 2. For factory ops (no fake tensor inputs), rewrite device args to meta
   if (!fake_device.has_value()) {
@@ -136,7 +120,8 @@ void fakeFallback(
   // 3. Redispatch with Fake excluded
   {
     c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Fake);
-    op.callBoxed(stack);
+    c10::impl::IncludeDispatchKeyGuard meta_guard(c10::DispatchKey::Meta);
+    op.redispatchBoxed(dispatchKeySet.remove(c10::DispatchKey::Fake), stack);
   }
 
   // 4. Wrap outputs as fake tensors

@@ -1459,6 +1459,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     get_extra_meta().fake_device_ = fake_device;
     key_set_ = key_set_.add(DispatchKey::Fake);
     set_custom_device(true);
+    _change_backend_component_keys(fake_device);
   }
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
