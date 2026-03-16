@@ -78,7 +78,7 @@ class _SingleDimStrategyInfo:
     allow_uneven_sharding: bool = field(default=False)
     # Positions (in args_schema) of args that may live on a different mesh
     # than the op's compute mesh.  These args must be Replicate.
-    # See note [Different mesh args] in expand_to_full_mesh_op_strategy.
+    # See Note [Multi-mesh args] in expand_to_full_mesh_op_strategy.
     different_mesh_args: list[int] | None = field(default=None)
 
     # Delegate to func so this can be used interchangeably with a raw
