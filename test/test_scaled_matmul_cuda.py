@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     skipXPU,
     skipCUDAIf,
+    skipIfXpu
 )
 
 from torch.testing._internal.common_utils import (
@@ -1104,6 +1105,7 @@ class TestFP8Matmul(TestCase):
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 
+    @skipIfXpu(msg="AssertionError, torch-xpu-ops: 2862")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(SM100OrLater, "fast_accum is SM90-only")
     def test_float8_scale_fast_accum(self, device) -> None:
