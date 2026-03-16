@@ -546,7 +546,7 @@ if "__compile_source__" in globals():
     )
 
     def get_fn_name(kernel: Any) -> str:
-        fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
         return fn.__name__.split(".")[-1]
 
     def write_kernel_dependencies(
