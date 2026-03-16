@@ -1894,8 +1894,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         self._extra_inputs: dict[str, str] = {}
         # Prologue primary source buffers, populated by load_input
         self._prologue_source_buffers: dict[str, str | None] = {}
-        # Epilogues that could not be fused into the kernel
-        self._unfused_epilogues: list[Any] = []
         # Simplified epilogue interface: {output_param: epilogue_idx}
         self._epilogue_idx_by_param: dict[str, int] = {}
         # Output params that must keep their original tl.store
@@ -1909,6 +1907,11 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Call emission state, populated by _setup_fusion_hooks / external render
         self._call_preamble: list[str] = []
         self._call_args: list[str] = []
+        # Epilogues that could not be fused into the kernel
+        self._unfused_epilogues: list[Any] = []
+        # Reference to the scheduler, set by _compute_fusion_metadata;
+        # used in call_kernel() to codegen unfused epilogue nodes
+        self._scheduling_ref: Any = None
 
     def get_unfused_epilogues(self) -> list[Any]:
         return self._unfused_epilogues
