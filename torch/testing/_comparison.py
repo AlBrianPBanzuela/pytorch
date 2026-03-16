@@ -3,6 +3,7 @@ import abc
 import cmath
 import collections.abc
 import contextlib
+import typing
 from collections.abc import Callable, Collection, Sequence
 from typing import Any, NoReturn
 from typing_extensions import deprecated
@@ -328,10 +329,10 @@ def make_tensor_mismatch_msg(
         default_identifier="Tensor-likes",
         identifier=identifier,
         extra=extra,
-        abs_diff=float(max_abs_diff.item()),
+        abs_diff=typing.cast(float, max_abs_diff.item()),
         abs_diff_idx=unravel_flat_index(int(max_abs_diff_flat_idx)),
         atol=atol,
-        rel_diff=float(max_rel_diff.item()),
+        rel_diff=typing.cast(float, max_rel_diff.item()),
         rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
         rtol=rtol,
     )
