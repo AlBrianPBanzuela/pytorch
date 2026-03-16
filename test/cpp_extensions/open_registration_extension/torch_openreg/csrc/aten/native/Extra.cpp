@@ -169,27 +169,18 @@ static void abs_cpu_fallback(at::TensorIteratorBase& iter) {
 void abs_kernel(at::TensorIteratorBase& iter) {
   TORCH_CHECK(iter.ntensors() == 2, "Abs kernel expects 2 tensors");
 
-  // The custom kernel only handles contiguous float32 tensors. When
-  // OPENREG_DISABLE_FALLBACK_BLOCKLIST is set, unsupported cases delegate
+  // The custom kernel only handles float32. When
+  // OPENREG_DISABLE_FALLBACK_BLOCKLIST is set, unsupported dtypes delegate
   // to the CPU abs kernel instead of erroring. This is useful when running
   // PyTorch's full test suite against openreg.
-  static const bool disable_blocklist =
-      std::getenv("OPENREG_DISABLE_FALLBACK_BLOCKLIST") != nullptr;
-
-  bool can_handle = iter.common_dtype() == at::ScalarType::Float &&
-      iter.tensor(1).is_contiguous();
-
-  if (!can_handle) {
+  if (iter.common_dtype() != at::ScalarType::Float) {
+    static const bool disable_blocklist =
+        std::getenv("OPENREG_DISABLE_FALLBACK_BLOCKLIST") != nullptr;
     if (disable_blocklist) {
       abs_cpu_fallback(iter);
       return;
     }
-    TORCH_CHECK(
-        iter.common_dtype() == at::ScalarType::Float,
-        "Abs kernel only supports float type");
-    TORCH_CHECK(
-        iter.tensor(1).is_contiguous(),
-        "Input tensor must be contiguous.");
+    TORCH_CHECK(false, "Abs kernel only supports float type");
   }
 
   auto& output_tensor = iter.tensor(0);
@@ -213,17 +204,16 @@ void abs_kernel(at::TensorIteratorBase& iter) {
         static_cast<float*>(iter.data_ptr(1)),
         iter.numel());
   } else {
-    auto output = at::empty(
-        input_tensor.sizes(),
-        input_tensor.options().memory_format(
-            input_tensor.suggest_memory_format()));
+    // Non-contiguous: make a contiguous copy, compute abs, copy back.
+    auto contig_input = input_tensor.contiguous();
+    auto output = at::empty_like(contig_input);
 
-    MemoryGuard guard(output);
+    MemoryGuard inner_guard(contig_input, output);
 
     abs_loop(
         static_cast<float*>(output.data_ptr()),
-        static_cast<float*>(iter.data_ptr(1)),
-        iter.numel());
+        static_cast<float*>(contig_input.data_ptr()),
+        contig_input.numel());
 
     output_tensor.copy_(output);
   }
