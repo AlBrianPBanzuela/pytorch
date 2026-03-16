@@ -40,10 +40,12 @@ class TestNativeDSLOps(TestCase):
     def test_consistent_helper_interface(self):
         """triton_utils and cutedsl_utils expose the same public API."""
         # Import modules directly to avoid dependency issues
-        common_utils = _import_module_directly("torch._native.common_utils", "common_utils.py")
-        registry = _import_module_directly("torch._native.registry", "registry.py")
-        triton_utils = _import_module_directly("torch._native.triton_utils", "triton_utils.py")
-        cutedsl_utils = _import_module_directly("torch._native.cutedsl_utils", "cutedsl_utils.py")
+        triton_utils = _import_module_directly(
+            "torch._native.triton_utils", "triton_utils.py"
+        )
+        cutedsl_utils = _import_module_directly(
+            "torch._native.cutedsl_utils", "cutedsl_utils.py"
+        )
 
         REQUIRED_METHODS = {
             "runtime_available",
@@ -70,6 +72,7 @@ class TestNativeDSLOps(TestCase):
             ver = mod.runtime_version()
             if ver is not None:
                 from packaging.version import Version
+
                 self.assertIsInstance(ver, Version)
 
     def test_no_dsl_imports_after_import_torch(self):
@@ -134,15 +137,22 @@ class TestNativeDSLOps(TestCase):
 
     def test_unavailable_reason_missing(self):
         """Nonexistent package -> _unavailable_reason returns a string."""
-        common_utils = _import_module_directly("torch._native.common_utils", "common_utils.py")
-        reason = common_utils._unavailable_reason([("nonexistent_pkg_xyz", "nonexistent_pkg_xyz")])
+        common_utils = _import_module_directly(
+            "torch._native.common_utils", "common_utils.py"
+        )
+        reason = common_utils._unavailable_reason(
+            [("nonexistent_pkg_xyz", "nonexistent_pkg_xyz")]
+        )
         self.assertIsNotNone(reason)
         self.assertIn("nonexistent_pkg_xyz", reason)
 
     def test_available_version(self):
         """_available_version returns a packaging.version.Version"""
         from packaging.version import Version
-        common_utils = _import_module_directly("torch._native.common_utils", "common_utils.py")
+
+        common_utils = _import_module_directly(
+            "torch._native.common_utils", "common_utils.py"
+        )
 
         # Use typing_extensions which always has a clean major.minor.patch version,
         # unlike torch which may have pre-release suffixes in dev builds.
@@ -152,6 +162,7 @@ class TestNativeDSLOps(TestCase):
     def test_registry_mechanics(self):
         """_get_library caches Library instances per (lib, dispatch_key)."""
         import torch.library
+
         registry = _import_module_directly("torch._native.registry", "registry.py")
 
         key = ("_test_native_dsl_registry", "CPU")
@@ -302,8 +313,12 @@ class TestNativeDSLOps(TestCase):
     def test_available_version_prerelease(self):
         """_available_version parses valid versions and rejects unparsable ones."""
         from unittest.mock import patch
+
         from packaging.version import Version
-        common_utils = _import_module_directly("torch._native.common_utils", "common_utils.py")
+
+        common_utils = _import_module_directly(
+            "torch._native.common_utils", "common_utils.py"
+        )
 
         valid_versions = ["0.7.0rc1", "3.1.0.post1", "2.4.0a1", "1.2.3"]
         for version_str in valid_versions:
