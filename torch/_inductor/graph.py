@@ -1931,7 +1931,7 @@ class GraphLowering(torch.fx.Interpreter):
                             or isinstance(result.data, ir.BaseView)
                         ) and (
                             not is_user_visible
-                            or n.meta["val"].numel() in (0, 1)
+                            or V.graph.sizevars.statically_known_leq(result.get_numel(), 1)
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
