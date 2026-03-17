@@ -481,7 +481,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             # Figure out if self.value has overridden fromkeys.
             overridden_fromkeys = False
-            for klass in type(self.value).__mro__:
+            for klass in self.value.__mro__:
                 if klass in (dict, collections.OrderedDict, collections.defaultdict):
                     break
                 elif "fromkeys" in klass.__dict__:

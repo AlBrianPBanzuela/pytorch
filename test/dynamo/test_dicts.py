@@ -2085,6 +2085,28 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(A(), x), opt_f(A(), x)))
 
 
+    def test_dict_subclass_overridden_fromkeys_dispatches_to_override(self):
+        """Ensure dynamo calls the subclass's fromkeys, not dict.fromkeys."""
+
+        class MyDict(dict):
+            @classmethod
+            def fromkeys(cls, iterable, value=None):
+                # Custom behavior: reverse the keys
+                return cls({k: value for k in reversed(list(iterable))})
+
+        def fn():
+            return MyDict.fromkeys(["x", "y", "z"], 1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        eager = fn()
+        compiled = opt_fn()
+        self.assertIsInstance(compiled, MyDict)
+        self.assertEqual(eager, compiled)
+        # Verify the custom reversed-key behavior is present
+        self.assertEqual(list(compiled.keys()), ["z", "y", "x"])
+
+
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
@@ -2117,7 +2139,6 @@ class DictSubclassOverload(torch._dynamo.test_case.TestCase):
 
     thetype = DictSubclass
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_overload_fromkeys(self):
         p = self.thetype.fromkeys("a")
