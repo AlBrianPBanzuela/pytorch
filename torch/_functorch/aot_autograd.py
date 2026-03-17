@@ -25,6 +25,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
+from torch._inductor._config_enums import PreGradPassTiming
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
@@ -1130,11 +1131,20 @@ def aot_module_simplified(
 
         compiled_fn = None
 
+        pass_timing = torch._inductor.config.pre_grad_pass_timing
+        if pass_timing == PreGradPassTiming.DEFAULT:
+            custom = torch._inductor.config.pre_grad_custom_pass
+            has_uuid = not custom or (
+                hasattr(custom, "uuid") and custom.uuid() is not None
+            )
+            pass_timing = (
+                PreGradPassTiming.LATE if has_uuid else PreGradPassTiming.EARLY
+            )
+
         # "early" timing: run pre-grad passes before cache lookup so the
         # cache key is computed from the already-transformed graph.
         if (
-            torch._inductor.config.pre_grad_pass_timing
-            == torch._inductor.config.PreGradPassTiming.EARLY
+            pass_timing == PreGradPassTiming.EARLY
             and pre_grad_passes is not None
             and isinstance(mod, torch.fx.GraphModule)
         ):
@@ -1159,11 +1169,10 @@ def aot_module_simplified(
                 )
 
         if compiled_fn is None:
-            # "late" timing (default): run pre-grad passes after cache lookup,
-            # only on cache miss, to cache pre-grad transforms.
+            # "late" timing: run pre-grad passes after cache lookup, only on
+            # cache miss, to cache pre-grad transforms.
             if (
-                torch._inductor.config.pre_grad_pass_timing
-                == torch._inductor.config.PreGradPassTiming.LATE
+                pass_timing == PreGradPassTiming.LATE
                 and pre_grad_passes is not None
                 and isinstance(mod, torch.fx.GraphModule)
             ):

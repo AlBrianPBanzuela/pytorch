@@ -50,6 +50,7 @@ from torch._dynamo.utils import (
     get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
+from torch._inductor._config_enums import PreGradPassTiming
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
@@ -1586,7 +1587,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         """
         # Custom passes must implement the CustomGraphPass or we don't
         # know how to include them in the cache key calculation.
-        if config.pre_grad_pass_timing == config.PreGradPassTiming.LATE:
+        # When timing is EARLY, pre-grad passes already ran before the cache
+        # lookup so there's nothing to validate here.
+        if config.pre_grad_pass_timing != PreGradPassTiming.EARLY:
             if config.pre_grad_custom_pass and (
                 not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
                 or not config.pre_grad_custom_pass.uuid()

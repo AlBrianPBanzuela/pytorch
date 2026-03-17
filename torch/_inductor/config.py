@@ -664,7 +664,7 @@ use_pre_grad_passes: bool = True
 from torch._inductor._config_enums import PreGradPassTiming  # noqa: E402
 
 
-pre_grad_pass_timing: str = PreGradPassTiming.EARLY
+pre_grad_pass_timing: str = PreGradPassTiming.DEFAULT
 
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
