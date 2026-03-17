@@ -1571,6 +1571,93 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertTrue(result.placements[0].is_shard(0))
 
     @with_comms
+    @skip_unless_torch_gpu
+    def test_replicate_only_ops(self):
+        device_mesh = self.build_device_mesh()
+        replicate = [Replicate()]
+
+        # masked_scatter
+        src = torch.randn(4, 4, device=self.device_type)
+        mask = torch.tensor([[True, False], [False, True]], device=self.device_type)
+        vals = torch.randn(2, device=self.device_type)
+        dt_mask = distribute_tensor(mask, device_mesh, replicate)
+        dt_vals = distribute_tensor(vals, device_mesh, replicate)
+        dt_src = distribute_tensor(src[:2, :2], device_mesh, replicate)
+        expected = src[:2, :2].masked_scatter(mask, vals)
+        result = dt_src.masked_scatter(dt_mask, dt_vals)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # take
+        inp = torch.randn(12, device=self.device_type)
+        idx = torch.tensor([0, 3, 7], device=self.device_type)
+        dt_inp = distribute_tensor(inp, device_mesh, replicate)
+        dt_idx = distribute_tensor(idx, device_mesh, replicate)
+        expected = torch.take(inp, idx)
+        result = torch.take(dt_inp, dt_idx)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # put
+        dst = torch.zeros(6, device=self.device_type)
+        idx = torch.tensor([1, 3, 5], device=self.device_type)
+        src = torch.tensor([10.0, 20.0, 30.0], device=self.device_type)
+        dt_dst = distribute_tensor(dst, device_mesh, replicate)
+        dt_idx = distribute_tensor(idx, device_mesh, replicate)
+        dt_src = distribute_tensor(src, device_mesh, replicate)
+        expected = dst.put(idx, src)
+        result = dt_dst.put(dt_idx, dt_src)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # allclose: Shard both inputs, all_reduce(min) = AND
+        X = torch.randn(8, 4, device=self.device_type)
+        dt_X = distribute_tensor(X, device_mesh, [Shard(0)])
+        dt_X2 = distribute_tensor(X.clone(), device_mesh, [Shard(0)])
+        self.assertTrue(torch.allclose(dt_X, dt_X2))
+        Y = torch.randn(8, 4, device=self.device_type)
+        dt_Y = distribute_tensor(Y, device_mesh, [Shard(0)])
+        self.assertFalse(torch.allclose(dt_X, dt_Y))
+
+        # isin.Tensor_Tensor: Shard elements, Replicate test_elements
+        elements = torch.arange(8, device=self.device_type).float()
+        test_els = torch.tensor([1.0, 3.0, 5.0], device=self.device_type)
+        dt_elements = distribute_tensor(elements, device_mesh, [Shard(0)])
+        dt_test = distribute_tensor(test_els, device_mesh, [Replicate()])
+        expected = torch.isin(elements, test_els)
+        result = torch.isin(dt_elements, dt_test)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_more_ops(self):
+        device_mesh = self.build_device_mesh()
+
+        # kron: S(d) on A, R on B -> S(d) output
+        A = torch.randn(8, 4, device=self.device_type)
+        B = torch.randn(3, 2, device=self.device_type)
+        dt_A = distribute_tensor(A, device_mesh, [Shard(0)])
+        dt_B = distribute_tensor(B, device_mesh, [Replicate()])
+        expected = torch.kron(A, B)
+        result = torch.kron(dt_A, dt_B)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # searchsorted.Scalar: Shard(0) -> P(sum)
+        sorted_seq = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.device_type
+        )
+        dt_seq = distribute_tensor(sorted_seq, device_mesh, [Shard(0)])
+        expected = torch.searchsorted(sorted_seq, 2.5)
+        result = torch.searchsorted(dt_seq, 2.5)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # _pdist_forward: S(1) -> P(sum) for p=1
+        M = torch.randn(4, 8, device=self.device_type)
+        dt_M = distribute_tensor(M, device_mesh, [Shard(1)])
+        expected = torch.pdist(M, p=1.0)
+        result = torch.pdist(dt_M, p=1.0)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
     def test_normalization_ops(self):
         device_mesh = self.build_device_mesh()
         F = torch.nn.functional
@@ -1596,6 +1683,7 @@ class DistMathOpsTest(DTensorTestBase):
         )
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_replicate())
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,

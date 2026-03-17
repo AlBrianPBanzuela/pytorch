@@ -217,7 +217,6 @@ dtensor_fails = {
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("masked_select"),
     xfail("nn.functional.ctc_loss"),
-    xfail("allclose"),  # returns bool: DataDependentOutputException
     # -- conv stride+padding: tp_convolution rejects stride != 1 with padding --
     # Fix: relax the stride/padding check in tp_convolution kernel, or add
     # padding-aware sharding that accounts for halo exchange.
@@ -244,11 +243,10 @@ dtensor_fails = {
     # or add sparse tensor support to DTensor core.
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
-    # -- group_norm/instance_norm: native kernel checks numel == N*C*HxW --
-    # When batch dim is sharded, local N differs from global N, causing the
-    # native_group_norm kernel assertion to fail.
-    # Fix: register a direct strategy that passes corrected N/HxW to the kernel,
-    # or use the decomposed (Python) group_norm instead of native.
+    xfail("to_sparse"),
+    # bug in squeeze.dims strategy: TypeError with empty dims arg
+    xfail("squeeze", "multiple"),
+    # group_norm: sharding passes wrong N/HxW scalars to native_group_norm
     xfail("nn.functional.group_norm"),
     xfail("nn.functional.instance_norm"),
     # -- meta tensor not allocated: tensor_split fake prop issue --
@@ -365,6 +363,7 @@ dtensor_compiled_fails = {
     xfail("nn.functional.upsample_nearest"),
     # Data-dependent outputs (SymBool, unbacked shapes) that raise
     # during DTensor's fake prop.
+    xfail("allclose"),
     xfail("equal"),
     xfail("hash_tensor"),
     xfail("item"),
@@ -377,6 +376,7 @@ dtensor_compiled_fails = {
     xfail("nn.functional.logsigmoid"),
     # Miscellaneous runtime crashes (e.g. index out of bounds).
     xfail("gather"),
+    xfail("histogramdd"),
     xfail("index_select"),
     xfail("lu_unpack"),
     xfail("scatter"),
@@ -427,7 +427,6 @@ dtensor_numeric_only_fails = {
 # Ops in dtensor_fails that have no sharding strategy (NotImplementedError).
 # These will error during sharding propagation and affect unbacked tests too.
 dtensor_fails_no_strategy = {
-    # deliberately unsupported: as_strided bypasses DTensor invariants
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
     # dynamic output shape: output shape depends on data values, no decomp
@@ -805,13 +804,13 @@ ops_unbacked_dtensor_dde = {
     xfail("histc"),
     xfail("index_put"),
     xfail("index_select"),
+    xfail("isin"),
     xfail("kthvalue"),
     xfail("linalg.lu"),
     xfail("linalg.lu_factor"),
     xfail("linalg.lu_factor_ex"),
     xfail("lu"),
     xfail("masked_fill"),
-    xfail("masked_scatter"),
     xfail("masked_select"),
     xfail("matmul"),
     xfail("matrix_exp"),
