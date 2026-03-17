@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -1446,6 +1447,7 @@ class GraphModule(torch.nn.Module):
 
         self._test_leaf_function_helper(OuterModule, args_fn, loss_fn)
 
+    @skipIfCrossRef
     def test_leaf_function_data_dependent_item(self):
         @leaf_function
         def item_forward(mod, x):
