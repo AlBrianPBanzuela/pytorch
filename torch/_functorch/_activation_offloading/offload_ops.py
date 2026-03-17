@@ -90,22 +90,41 @@ def _(
     return torch.empty_like(tensor, device=device)
 
 
-@custom_op("ao::wait", mutates_args=())
-def wait(
+# ao::wait is defined via torch.library with an aliasing schema so the output
+# can alias the input (custom_op forbids this).
+_lib = torch.library.Library("ao", "DEF")
+_lib.define("wait(int current_stream_idx, int completion_event_idx, Tensor(a) tensor) -> Tensor(a)")
+
+
+@torch.library.impl("ao::wait", "cuda")
+def _ao_wait_cuda(
     current_stream_idx: int, completion_event_idx: int, tensor: torch.Tensor
 ) -> torch.Tensor:
-    """Wait for an async offload or reload to complete on the current stream."""
     completion_event = _get_event_by_index(completion_event_idx)
     current_stream = _get_stream_by_index(current_stream_idx)
     current_stream.wait_event(completion_event)
     return tensor
 
 
-@wait.register_fake
-def _(
+@torch.library.impl("ao::wait", "cpu")
+def _ao_wait_cpu(
     current_stream_idx: int, completion_event_idx: int, tensor: torch.Tensor
 ) -> torch.Tensor:
-    return torch.empty_like(tensor)
+    return tensor
+
+
+@torch.library.register_fake("ao::wait")
+def _ao_wait_fake(
+    current_stream_idx: int, completion_event_idx: int, tensor: torch.Tensor
+) -> torch.Tensor:
+    return tensor
 
 
 has_side_effect(torch.ops.ao.wait.default)
+
+
+def wait(
+    current_stream_idx: int, completion_event_idx: int, tensor: torch.Tensor
+) -> torch.Tensor:
+    """Callable wrapper so ``wait`` can be imported by name for op registration."""
+    return torch.ops.ao.wait.default(current_stream_idx, completion_event_idx, tensor)
