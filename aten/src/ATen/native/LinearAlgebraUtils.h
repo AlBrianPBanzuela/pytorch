@@ -127,7 +127,7 @@ inline int64_t batchCount(const Tensor& batched_matrices) {
 inline int64_t matrixStride(const Tensor& batched_matrices) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batched_matrices.dim() >= 2);
   // Note: this works for both col-major-/row-major-like matrices,
-  // i.e. (contigous cols/rows some stride apart, with potential holes
+  // i.e. (contiguous cols/rows some stride apart, with potential holes
   // between cols/rows).
   // TODO: do we call this function on row-major input?
   // If not, then simplify the function's body.
