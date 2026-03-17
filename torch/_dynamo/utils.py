@@ -4134,10 +4134,6 @@ def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
     d[name] = value
 
 
-def object_getattr_ignore_descriptor(obj: Any, name: str) -> Any:
-    return object.__getattribute__(obj, name)
-
-
 def class_has_getattribute(cls: type) -> bool:
     try:
         if isinstance(

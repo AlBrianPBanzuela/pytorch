@@ -49,7 +49,6 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
-    object_getattr_ignore_descriptor,
     raise_args_mismatch,
     specialize_symnode,
 )
@@ -1935,7 +1934,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     @staticmethod
     def get_example_value_dict(vt: VariableTracker) -> dict[str, object]:
         if isinstance(vt, variables.UserDefinedVariable):
-            return object_getattr_ignore_descriptor(vt.value, "__dict__")
+            return object.__getattribute__(vt.value, "__dict__")
         elif istype(vt, variables.BuiltinVariable):
             return vt.fn.__dict__
         elif istype(vt, variables.NestedUserFunctionVariable):
