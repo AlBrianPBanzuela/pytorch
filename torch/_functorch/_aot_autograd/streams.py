@@ -28,6 +28,7 @@ Graph: TypeAlias = torch.fx.Graph
 _SYNC_OPS = (
     torch.ops.streams.record_event.default,
     torch.ops.streams.wait_event.default,
+    torch.ops.streams.synchronize_event.default,
 )
 
 
@@ -457,8 +458,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
         raise RuntimeError("Expected a non-empty graph")
     stream_to_nodes: dict[int | None, list[Node]] = {}
     # Maps event_index -> control_deps node that wrapped its record_event,
-    # so the corresponding wait_event can depend on the record.
+    # so the corresponding wait_event/synchronize_event can depend on the record.
     event_to_ctrl: dict[int, Node] = {}
+    # Maps event_index -> stream that the event was recorded on,
+    # so synchronize_event can infer its stream.
+    event_to_stream: dict[int, int | None] = {}
     visited: set[Node] = set()
     found_sync = False
 
@@ -472,14 +476,25 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
         if node.op == "call_function":
             if node.target in _SYNC_OPS:
                 event_index: int = node.args[0]  # type: ignore[assignment]
-                sync_stream: int | None = node.args[1]  # type: ignore[assignment]
+
+                # synchronize_event only takes event_index, infer stream
+                # from the matching record_event.
+                if node.target is torch.ops.streams.synchronize_event.default:
+                    sync_stream: int | None = event_to_stream.get(event_index)
+                else:
+                    sync_stream = node.args[1]  # type: ignore[assignment]
+
                 deps_before_sync = stream_to_nodes.get(sync_stream, [])
 
-                # For wait_events, add a cross-event dependency on the
-                # matching record_event's control_deps node so the wait
-                # cannot be reordered before the record.
+                # For wait_event and synchronize_event, add a cross-event
+                # dependency on the matching record_event's control_deps node
+                # so they cannot be reordered before the record.
                 if (
-                    node.target is torch.ops.streams.wait_event.default
+                    node.target
+                    in (
+                        torch.ops.streams.wait_event.default,
+                        torch.ops.streams.synchronize_event.default,
+                    )
                     and event_index in event_to_ctrl
                 ):
                     deps_before_sync = [
@@ -493,11 +508,10 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                 else:
                     ctrl_node = None
 
-                if (
-                    node.target is torch.ops.streams.record_event.default
-                    and ctrl_node is not None
-                ):
-                    event_to_ctrl[event_index] = ctrl_node
+                if node.target is torch.ops.streams.record_event.default:
+                    event_to_stream[event_index] = sync_stream
+                    if ctrl_node is not None:
+                        event_to_ctrl[event_index] = ctrl_node
 
                 # Reset: ops between this sync and the next will accumulate
                 # fresh. Ordering with prior ops is already enforced because
