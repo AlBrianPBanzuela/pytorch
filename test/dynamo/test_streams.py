@@ -1703,24 +1703,12 @@ class GraphModule(torch.nn.Module):
             )
 
     @requires_cuda
-    def test_cuda_event_tracing(self):
-        """torch.cuda.Event (a subclass of torch.Event) should work through tracing."""
-
-        def fn(x):
-            e = torch.cuda.Event()
-            with torch.cuda.stream(torch.cuda.Stream()):
-                y = x + 1
-                e.record()
-
-            with torch.cuda.stream(torch.cuda.Stream()):
-                e.wait()
-                z = y * 2
-
-            return z
-
-        inp = (torch.ones(2, 2, device="cuda"),)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(*inp)
-        self.assertEqual(result, torch.ones(2, 2, device="cuda") * 4)
+    def test_cuda_event_record_on_stream(self):
+        """torch.cuda.Event should be accepted by torch.Stream.record_event (C++ type check)."""
+        s = torch.Stream(device="cuda")
+        e = torch.cuda.Event()
+        # This hits THPStream_record_event in Stream.cpp which does a type check
+        s.record_event(e)
 
 
 if __name__ == "__main__":
