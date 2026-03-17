@@ -364,11 +364,12 @@ def _wrap_sync_node(
     sync_node: Node,
     deps_before_sync: list[Node],
     visited: set[Node],
-) -> Node:
+) -> tuple[Node, list[Node]]:
     """
     Core logic: wrap a single sync node in control_deps.
 
-    Returns the control_deps node that replaced the sync node.
+    Returns (control_deps_node, passthrough_getitems) where passthrough_getitems
+    are the getitem nodes that thread dependencies through the control_deps node.
     ``visited`` is the set of nodes at or before the sync node in graph order,
     used to distinguish pre-sync vs post-sync users.
     """
@@ -441,7 +442,7 @@ def _wrap_sync_node(
     # Remove original sync node
     sync_node.replace_all_uses_with(control_deps_node)
     graph.erase_node(sync_node)
-    return control_deps_node
+    return control_deps_node, list(replacements.values())
 
 
 def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
@@ -460,6 +461,9 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
     # Maps event_index -> control_deps node that wrapped its record_event,
     # so the corresponding wait_event/synchronize_event can depend on the record.
     event_to_ctrl: dict[int, Node] = {}
+    # Maps event_index -> getitem nodes threaded through record_event's control_deps,
+    # so synchronize_event can thread them through to subsequent ops.
+    event_to_passthrough: dict[int, list[Node]] = {}
     # Maps event_index -> stream that the event was recorded on,
     # so synchronize_event can infer its stream.
     event_to_stream: dict[int, int | None] = {}
@@ -502,16 +506,33 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         *deps_before_sync,
                     ]
 
+                # For synchronize_event, also include the getitem nodes
+                # threaded through record_event's control_deps. This ensures
+                # subsequent ops that depend on recorded values get rewired
+                # through synchronize_event.
+                if (
+                    node.target is torch.ops.streams.synchronize_event.default
+                    and event_index in event_to_passthrough
+                ):
+                    deps_before_sync = [
+                        *deps_before_sync,
+                        *event_to_passthrough[event_index],
+                    ]
+
                 if deps_before_sync:
                     found_sync = True
-                    ctrl_node = _wrap_sync_node(gm, node, deps_before_sync, visited)
+                    ctrl_node, passthrough = _wrap_sync_node(
+                        gm, node, deps_before_sync, visited
+                    )
                 else:
                     ctrl_node = None
+                    passthrough = []
 
                 if node.target is torch.ops.streams.record_event.default:
                     event_to_stream[event_index] = sync_stream
                     if ctrl_node is not None:
                         event_to_ctrl[event_index] = ctrl_node
+                    event_to_passthrough[event_index] = passthrough
 
                 # Reset: ops between this sync and the next will accumulate
                 # fresh. Ordering with prior ops is already enforced because
