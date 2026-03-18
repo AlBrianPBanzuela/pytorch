@@ -112,7 +112,6 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .streams import EventVariable, StreamVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
