@@ -989,6 +989,16 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(coo_indices.to("cpu"), expected_coo_indices)
             self.assertEqual(coo_indices_t.to("cpu"), expected_coo_indices.flip(0))
 
+            dense_roundtrip = expected_dense.to_sparse_csr()
+            self.assertEqual(dense_roundtrip.device.type, "mps")
+            self.assertEqual(dense_roundtrip.layout, torch.sparse_csr)
+            self.assertEqual(dense_roundtrip.to_dense(), expected_dense)
+
+            coo_roundtrip = coo.to_sparse_csr()
+            self.assertEqual(coo_roundtrip.device.type, "mps")
+            self.assertEqual(coo_roundtrip.layout, torch.sparse_csr)
+            self.assertEqual(coo_roundtrip.to_dense(), expected_dense)
+
             crow_roundtrip = torch.ops.aten._convert_indices_from_coo_to_csr(
                 expected_coo_indices[0].to("mps"),
                 csr.size(0),
@@ -999,7 +1009,8 @@ class TestMPS(TestCaseMPS):
 
     def _to_sparse_csr_pair(self, dense_cpu):
         cpu_sparse = dense_cpu.to_sparse_csr()
-        return cpu_sparse, cpu_sparse.to("mps")
+        dense_mps = dense_cpu.to("mps")
+        return cpu_sparse, dense_mps.to_sparse_csr()
 
     def _assert_sparse_csr_matches(self, cpu_sparse, mps_sparse):
         self.assertEqual(mps_sparse.layout, torch.sparse_csr)
