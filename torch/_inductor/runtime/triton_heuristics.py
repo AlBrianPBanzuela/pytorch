@@ -1057,8 +1057,7 @@ class CachingAutotuner(KernelInterface):
 
         copies = {}
         try:
-            device = torch.accelerator.current_accelerator()
-            if device is None:
+            if torch.accelerator.current_accelerator() is None:
                 # No initialized accelerator; skip memory-optimized path
                 return {}
             budget = (
