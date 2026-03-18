@@ -484,6 +484,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return self.value.real_obj
         elif is_opaque_value_type(type(self.value)):
             return self.value
+        elif isinstance(self.value, torch.ScriptObject):
+            return self.value
         return super().as_python_constant()
 
     def is_python_hashable(self) -> bool:
