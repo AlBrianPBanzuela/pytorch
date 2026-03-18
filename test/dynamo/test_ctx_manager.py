@@ -1357,7 +1357,7 @@ class GraphModule(torch.nn.Module):
         # Recompiling will decompose the _enter_autocast and _exit_autocast calls to lower level autocast functions
         eager = EagerAndRecordGraphs()
         d = {}
-        exec(actual, globals=globals(), locals=d)
+        exec(actual, globals(), d)
         retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
         retraced_out = retraced()(x, y)[0]
         self.assertEqual(out, retraced_out)
