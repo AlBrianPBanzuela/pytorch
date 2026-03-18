@@ -2811,10 +2811,6 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
     unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
 
-    # Generate phase configs: vary one sub-kernel's block sizes at a time.
-    # Each heuristic (pointwise/reduction/etc.) returns multiple configs only
-    # when its max autotune flag is enabled, so len(phase_cfgs) <= 1
-    # naturally skips sub-kernels that shouldn't be autotuned.
     phase_configs: list[Config] = []
     base_num_warps = max(all_num_warps)
     base_num_stages = max(all_num_stages)
@@ -2843,7 +2839,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
     base_configs = [
         triton.Config(
-            dict(combined_kwargs),
+            combined_kwargs,
             num_warps=num_warps,
             num_stages=num_stages,
         )
