@@ -2345,7 +2345,6 @@ if sys.version_info >= (3, 13):
 # or captures global state, please add it to manual_torch_name_rule_map instead
 torch_non_c_binding_in_graph_functions = dict.fromkeys(
     [
-        "torch.__future__.get_overwrite_module_params_on_conversion",
         "torch.__future__.set_overwrite_module_params_on_conversion",
         "torch.__getattr__",
         "torch._assert",
