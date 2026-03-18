@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     skipXPU,
     skipCUDAIf,
-    skipIfXpu
 )
 
 from torch.testing._internal.common_utils import (
@@ -52,6 +51,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA,
     TestCase,
+    skipIfXpu,
 )
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
