@@ -478,23 +478,33 @@ def expand_to_full_mesh_op_strategy(
                 f"{len(args_strategy)} args + {len(kwargs_strategy)} kwargs)"
             )
 
-        # Note on different_mesh_args:
+        # Note [Multi-mesh args]
         #
-        # Some ops have args that live on a different mesh than the op's
-        # compute mesh.  These args must be Replicate — you cannot
-        # meaningfully Shard a tensor across a mesh it doesn't belong to.
-        # We preserve the original mesh/placement here so the propagator
-        # doesn't try to redistribute them onto the compute mesh.
+        # Some ops accept args whose DTensor lives on a different DeviceMesh
+        # than the op's primary compute mesh.  We call these "multi-mesh
+        # args".  They arise in fused optimizer ops (e.g. _fused_adam_)
+        # where *state_steps* is a per-rank scalar counter allocated on a
+        # smaller sub-mesh (e.g. 1-D DP) while params and grads live on a
+        # larger mesh (e.g. 2-D DP × TP).
         #
-        # Currently used by fused optimizer ops (e.g. _fused_adam_) where
-        # state_steps is a scalar counter on a smaller sub-mesh (e.g. 1D
-        # DP) while params/grads are on a larger mesh (e.g. 2D DP+TP).
+        # Why must these args be Replicate?
+        #   Sharding implies a specific partitioning of a tensor's data
+        #   across the ranks of a mesh.  If a tensor doesn't even *exist*
+        #   on the compute mesh, there is no meaningful way to interpret a
+        #   Shard placement for it.  Replicate, on the other hand, is
+        #   mesh-agnostic: every rank already holds the full data, so the
+        #   op can simply read the value regardless of which mesh owns it.
         #
-        # This is distinct from the element_mesh handling in
+        # What we do here:
+        #   We preserve the original mesh and Replicate placement for these
+        #   args so the propagator does not try to redistribute them onto
+        #   the compute mesh (which would fail or produce wrong results).
+        #
+        # This is distinct from the *element_mesh* handling in
         # single_dim_strategy.py, which deals with foreach ops where
         # different *elements* in a tensor list may live on different
-        # sub-meshes (e.g. param group A on 2D mesh, param group B on
-        # 1D mesh).
+        # sub-meshes (e.g. param group A on 2-D mesh, param group B on
+        # 1-D mesh).
         if different_mesh_args is not None:
             for idx in different_mesh_args:
                 if idx < len(input_args_strategy):
