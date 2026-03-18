@@ -17,6 +17,20 @@ inline uint lower_bound_i64(device const long* arr, uint lo, uint hi, long key) 
   return l;
 }
 
+inline uint upper_bound_i64(device const long* arr, uint lo, uint hi, long key) {
+  uint l = lo, r = hi;
+  while (l < r) {
+    uint m = (l + r) >> 1;
+    long v = arr[m];
+    if (v <= key) {
+      l = m + 1;
+    } else {
+      r = m;
+    }
+  }
+  return l;
+}
+
 kernel void build_row_ptr_from_sorted_rows_by_batch(
     device const long* rows        [[buffer(0)]],
     device const long* batch_ptr   [[buffer(1)]],
