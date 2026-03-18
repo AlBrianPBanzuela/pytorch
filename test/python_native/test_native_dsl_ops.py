@@ -11,9 +11,12 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 def _subprocess_lastline(script, env=None):
     """Run script in a fresh interpreter and return the last line of stdout."""
+    # Run from PyTorch root directory so torch._native imports work correctly
+    test_dir = os.path.dirname(os.path.realpath(__file__))
+    pytorch_root = os.path.dirname(os.path.dirname(test_dir))
     result = subprocess.check_output(
         [sys.executable, "-c", script],
-        cwd=os.path.dirname(os.path.realpath(__file__)),
+        cwd=pytorch_root,
         env=env,
         stderr=subprocess.DEVNULL,
         text=True,
@@ -97,22 +100,10 @@ class TestNativeDSLOps(TestCase):
         """TORCH_DISABLE_NATIVE_JIT unset -> check returns False."""
         script = textwrap.dedent("""\
             import os
-            import importlib.util
-            import sys
+            from torch._native.common_utils import check_native_jit_disabled
 
             os.environ.pop("TORCH_DISABLE_NATIVE_JIT", None)
-
-            # Import common_utils directly
-            import os
-            test_dir = os.getcwd()
-            pytorch_root = os.path.dirname(os.path.dirname(test_dir))
-            common_utils_path = os.path.join(pytorch_root, "torch", "_native", "common_utils.py")
-
-            spec = importlib.util.spec_from_file_location("common_utils", common_utils_path)
-            common_utils = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(common_utils)
-
-            print(common_utils.check_native_jit_disabled())
+            print(check_native_jit_disabled())
         """)
         result = _subprocess_lastline(script)
         self.assertEqual(result, "False")
@@ -120,20 +111,8 @@ class TestNativeDSLOps(TestCase):
     def test_check_native_jit_disabled_set(self):
         """TORCH_DISABLE_NATIVE_JIT=1 -> check returns True."""
         script = textwrap.dedent("""\
-            import importlib.util
-            import sys
-
-            # Import common_utils directly
-            import os
-            test_dir = os.getcwd()
-            pytorch_root = os.path.dirname(os.path.dirname(test_dir))
-            common_utils_path = os.path.join(pytorch_root, "torch", "_native", "common_utils.py")
-
-            spec = importlib.util.spec_from_file_location("common_utils", common_utils_path)
-            common_utils = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(common_utils)
-
-            print(common_utils.check_native_jit_disabled())
+            from torch._native.common_utils import check_native_jit_disabled
+            print(check_native_jit_disabled())
         """)
         env = os.environ.copy()
         env["TORCH_DISABLE_NATIVE_JIT"] = "1"
@@ -253,18 +232,10 @@ class TestNativeDSLOps(TestCase):
         """TORCH_NATIVE_SKIP_VERSION_CHECK unset -> returns False."""
         script = textwrap.dedent("""\
             import os
-            import importlib.util
+            from torch._native.common_utils import check_native_version_skip
 
             os.environ.pop("TORCH_NATIVE_SKIP_VERSION_CHECK", None)
-
-            test_dir = os.getcwd()
-            pytorch_root = os.path.dirname(os.path.dirname(test_dir))
-            common_utils_path = os.path.join(pytorch_root, "torch", "_native", "common_utils.py")
-            spec = importlib.util.spec_from_file_location("common_utils", common_utils_path)
-            common_utils = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(common_utils)
-
-            print(common_utils.check_native_version_skip())
+            print(check_native_version_skip())
         """)
         result = _subprocess_lastline(script)
         self.assertEqual(result, "False")
@@ -272,17 +243,8 @@ class TestNativeDSLOps(TestCase):
     def test_check_native_version_skip_set(self):
         """TORCH_NATIVE_SKIP_VERSION_CHECK=1 -> returns True."""
         script = textwrap.dedent("""\
-            import importlib.util
-            import os
-
-            test_dir = os.getcwd()
-            pytorch_root = os.path.dirname(os.path.dirname(test_dir))
-            common_utils_path = os.path.join(pytorch_root, "torch", "_native", "common_utils.py")
-            spec = importlib.util.spec_from_file_location("common_utils", common_utils_path)
-            common_utils = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(common_utils)
-
-            print(common_utils.check_native_version_skip())
+            from torch._native.common_utils import check_native_version_skip
+            print(check_native_version_skip())
         """)
         env = os.environ.copy()
         env["TORCH_NATIVE_SKIP_VERSION_CHECK"] = "1"
