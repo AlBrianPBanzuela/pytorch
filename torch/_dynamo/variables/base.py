@@ -222,8 +222,6 @@ def is_side_effect_safe(m: MutationType) -> bool:
 class NO_SUCH_SUBOBJ:
     """Sentinel indicating no concrete Python object is available."""
 
-    pass
-
 
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
