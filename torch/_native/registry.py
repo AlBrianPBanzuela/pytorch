@@ -130,8 +130,9 @@ def build_key_set(
         _entries = _resolve_iterable(entries)
 
         for entry in _entries:
-            for key in graph_lib_dict[entry]:
-                key_set.add(key)
+            if entry in graph_lib_dict:
+                for key in graph_lib_dict[entry]:
+                    key_set.add(key)
 
     _append_to_set(dsl_names, _dsl_name_to_lib_graph)
     _append_to_set(op_symbols, _op_symbol_to_lib_graph)
