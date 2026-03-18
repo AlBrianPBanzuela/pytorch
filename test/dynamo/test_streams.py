@@ -1707,6 +1707,14 @@ class GraphModule(torch.nn.Module):
             )
 
     @requires_cuda
+    def test_cuda_event_record_on_stream(self):
+        """torch.cuda.Event should be accepted by torch.Stream.record_event (C++ type check)."""
+        s = torch.Stream(device="cuda")
+        e = torch.cuda.Event()
+        # This hits THPStream_record_event in Stream.cpp which does a type check
+        s.record_event(e)
+
+    @requires_cuda
     def test_event_synchronize_tracing(self):
         def fn(x):
             e = torch.Event()
