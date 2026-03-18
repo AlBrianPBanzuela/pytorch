@@ -86,23 +86,30 @@ class CacheSizeRelevantForFrame:
     num_cache_entries_with_same_id_matched_objs: int = 0
 
     # Per-region recompile limit set via torch.compile(region_recompile_limit=N).
-    # None means use global config limits.
+    # None means use global config limits only.
+    #
+    # Unlike the global config.recompile_limit (which checks each code object
+    # independently), region_recompile_limit uses max semantics across all code
+    # objects in the region: once ANY code object (the original function or any
+    # of its resume functions from graph breaks) reaches N compilations, ALL
+    # compilation in the region stops. This prevents the total compilations
+    # from growing unboundedly when resume functions recompile independently.
+    #
+    # Each torch.compile() call gets its own independent budget tracked via
+    # ConvertFrameAssert._region_compilation_counts, so two torch.compile()
+    # calls on the same function don't interfere with each other's limits.
     region_recompile_limit: int | None = None
 
-    # Number of compilations this specific compile region has done for this
-    # code object. Unlike num_cache_entries (which counts ALL entries on the
-    # code object across all regions), this only counts entries from the
-    # current torch.compile() call.
+    # The max number of compilations across all code objects in this compile
+    # region. Set by ConvertFrameAssert from max(_region_compilation_counts).
+    # This is the value checked against region_recompile_limit.
     region_num_compilations: int = 0
 
     @property
     def exceeds_region_recompile_limit(self) -> bool:
-        # Cap at num_cache_entries so that after torch._dynamo.reset() clears
-        # the cache, the region can compile again.
-        effective = min(self.region_num_compilations, self.num_cache_entries)
         return (
             self.region_recompile_limit is not None
-            and effective >= self.region_recompile_limit
+            and self.region_num_compilations >= self.region_recompile_limit
         )
 
     def will_compilation_exceed(self, limit: int) -> bool:
@@ -192,7 +199,13 @@ def exceeds_recompile_limit(
     cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
 ) -> tuple[bool, str]:
     """
-    Checks if we are exceeding the cache size limit.
+    Checks if we are exceeding the global cache size limit.
+
+    The global recompile_limit is per-code-object: each code object (including
+    resume functions from graph breaks) independently gets up to N recompilations.
+    The region_recompile_limit iterates on this by using the max recompilations
+    among all code objects in the region, so that once any code object in the
+    region hits the limit, all compilation in the region stops.
     """
     if cache_size.will_compilation_exceed_accumulated_limit():
         return True, "accumulated_recompile_limit"
