@@ -2849,12 +2849,9 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    is_tf32 = (
-        torch.backends.cuda.matmul.allow_tf32
-        if torch.cuda.is_available()
-        else torch.xpu.is_tf32_supported()
+    ds_tops = datasheet_tops(
+        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
     )
-    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
     if ds_tops is not None:
         return ds_tops
 
@@ -3201,6 +3198,22 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
 
     assert static_arg_idxs == list(range(len(static_arg_idxs)))
     return len(static_arg_idxs)
+
+
+def get_static_bw_input_idxs(fx_g: torch.fx.GraphModule) -> list[int]:
+    """
+    Returns indices of backward graph inputs that are always at fixed
+    addresses: primals (parameters/buffers/user inputs saved for backward).
+    Excludes saved activations which may not be at fixed addresses when
+    the forward is partitioned for CUDA graphs.
+    """
+    static_idxs = []
+    for idx, n in enumerate(fx_g.graph.nodes):
+        if n.op != "placeholder":
+            break
+        if n.name.startswith("primals_"):
+            static_idxs.append(idx)
+    return static_idxs
 
 
 @dataclasses.dataclass

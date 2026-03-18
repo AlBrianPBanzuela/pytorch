@@ -1058,7 +1058,9 @@ class CachingAutotuner(KernelInterface):
         copies = {}
         try:
             device = torch.accelerator.current_accelerator()
-            assert device is not None
+            if device is None:
+                # No initialized accelerator; skip memory-optimized path
+                return {}
             budget = (
                 torch.accelerator.max_memory_allocated()
                 - torch.accelerator.memory_allocated()
@@ -1068,7 +1070,7 @@ class CachingAutotuner(KernelInterface):
             return {}
 
         def maybe_copy(name, arg):
-            if name in self.mutated_arg_names and self.device_props.type in (
+            if name in self.mutated_arg_names and arg.device.type in (
                 "cuda",
                 "xpu",
             ):
