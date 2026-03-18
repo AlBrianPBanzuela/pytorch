@@ -24,12 +24,16 @@ static bool _cuda_graphs_debug = false;
 static std::mutex _currently_capturing_graphs_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
 
+
 #if defined(USE_ROCM)
+// Returns true when at least one CUDAGraph capture is currently active in this
+// process. Uses the same mutex-protected capture map as capture lifecycle
+// bookkeeping.
 bool is_graph_capture_active() {
   std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
   return !_currently_capturing_graphs.empty();
 }
-#endif
+#endif // defined(USE_ROCM)
 
 CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id) {
   std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -155,8 +159,10 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream.stream() == capture_stream_.stream(),
               "Capture must end on the same stream it began on.");
 
+  // Capture is over once cudaStreamEndCapture returns (success or failure).
+  // Clear bookkeeping before propagating the return status so watchdog-side
+  // checks cannot observe stale "capture active" state on error paths.
   cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
-
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
     TORCH_CHECK(
