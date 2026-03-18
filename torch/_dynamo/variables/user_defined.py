@@ -316,6 +316,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
+        # Check if the class has had this attr set via side_effects (e.g.,
+        # functools.total_ordering adds comparison methods via setattr).
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
+
         obj = None
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -1382,6 +1387,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return VariableTracker.build(tx, len(self.value))  # type: ignore[arg-type]
 
+        # Check if the class has had this method set via side_effects (e.g.,
+        # functools.total_ordering adds comparison methods via setattr on the class).
+        cls_vt = tx.output.side_effects.id_to_variable.get(id(type(self.value)))
+        if cls_vt is not None and tx.output.side_effects.has_pending_mutation_of_attr(
+            cls_vt, name
+        ):
+            method_vt = tx.output.side_effects.load_attr(cls_vt, name)
+            return method_vt.call_function(tx, [self] + list(args), kwargs)
+
         return super().call_method(tx, name, args, kwargs)
 
     def method_setattr_standard(
@@ -1855,6 +1869,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = self.value.__dict__[name]
             source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
             return VariableTracker.build(tx, subobj, source)
+
+        # Check if the class has had this attr set via side_effects (e.g.,
+        # functools.total_ordering adds comparison methods via setattr). This
+        # takes priority over the real MRO result since the mutation is more
+        # recent.
+        cls_vt = tx.output.side_effects.id_to_variable.get(id(type(self.value)))
+        if cls_vt is not None and tx.output.side_effects.has_pending_mutation_of_attr(
+            cls_vt, name
+        ):
+            method_vt = tx.output.side_effects.load_attr(cls_vt, name)
+            if isinstance(method_vt, variables.UserFunctionVariable):
+                return variables.UserMethodVariable(method_vt.fn, self, source=source)
+            return method_vt
 
         # Step 4-5: Non-data descriptor or plain class attribute.
         if type_attr is not NO_SUCH_SUBOBJ:
