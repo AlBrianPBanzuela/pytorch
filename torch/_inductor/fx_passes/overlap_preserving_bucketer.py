@@ -290,6 +290,147 @@ class OverlapPreservingBucketer:
                 checked_pgs.add(pg)
         return internode_pgs
 
+    def _find_uneven_sharding(self) -> list[str]:
+        """Find all-gather inputs with different shard sizes across ranks.
+
+        Inspects all-gather input tensor shapes to detect uneven Shard(0)
+        splits caused by dimensions not divisible by world_size. This is
+        the most common root cause of per-rank graph divergence.
+        """
+        import torch.distributed as dist
+
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+        from torch.distributed.distributed_c10d import _get_default_group
+
+        # Collect sorted list of input shapes for all all-gathers
+        local_shapes: list[list[int]] = []
+        for start_node in self.collective_info:
+            if not is_all_gather(start_node):
+                continue
+            inp = start_node.args[0]
+            if isinstance(inp, fx.Node):
+                val = inp.meta.get("val", None)
+                if isinstance(val, torch.Tensor):
+                    local_shapes.append(list(val.shape))
+        local_shapes.sort()
+
+        pg = _get_default_group()
+        world_size = dist.get_world_size()
+        with unset_fake_temporarily():
+            all_shapes: list[list[list[int]]] = [[] for _ in range(world_size)]
+            dist.all_gather_object(all_shapes, local_shapes, pg)
+
+        lines: list[str] = []
+
+        # Check count mismatch
+        counts = [len(s) for s in all_shapes]
+        if len(set(counts)) > 1:
+            lines.append(
+                f"  all-gather count differs: "
+                + ", ".join(f"rank{r}={c}" for r, c in enumerate(counts))
+            )
+
+        # Compare sorted shape lists to find uneven shards
+        min_len = min(counts)
+        for i in range(min_len):
+            shapes_i = [tuple(all_shapes[r][i]) for r in range(world_size)]
+            if len(set(shapes_i)) > 1:
+                rank_strs = ", ".join(
+                    f"rank{r}={list(shapes_i[r])}" for r in range(world_size)
+                )
+                lines.append(f"  all_gather input[{i}]: {rank_strs}")
+        return lines
+
+    def _bucketing_matches_across_ranks(
+        self,
+        all_buckets: list[CollBucket],
+    ) -> bool:
+        """Verify all ranks made identical bucketing decisions.
+
+        We only support SPMD graphs for bucketing. When FX graphs differ across
+        ranks (e.g. uneven DTensor sharding), bucketing can diverge and cause
+        NCCL collective ordering mismatches. Detect and skip with diagnostics.
+        """
+        import torch.distributed as dist
+
+        if not dist.is_initialized() or dist.get_world_size() <= 1:
+            return True
+
+        local_details: list[tuple[str, int, int, list[str]]] = []
+        for b in all_buckets:
+            if len(b.collectives) <= 1:
+                continue
+            key = str(get_full_bucket_key(b.collectives[0], self.bucket_mode))
+            local_details.append(
+                (key, len(b.collectives), b.total_bytes,
+                 [n.name for n in b.collectives])
+            )
+        local_details.sort()
+
+        # Fingerprint for comparison (drop node names — they differ per rank)
+        fingerprint = [(d[0], d[1], d[2]) for d in local_details]
+
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+        from torch.distributed.distributed_c10d import _get_default_group
+
+        pg = _get_default_group()
+        world_size = dist.get_world_size()
+        with unset_fake_temporarily():
+            all_fingerprints: list[list[tuple[str, int, int]]] = [
+                [] for _ in range(world_size)
+            ]
+            dist.all_gather_object(all_fingerprints, fingerprint, pg)
+
+            all_details: list[list[tuple[str, int, int, list[str]]]] = [
+                [] for _ in range(world_size)
+            ]
+            dist.all_gather_object(all_details, local_details, pg)
+
+        if all(fp == all_fingerprints[0] for fp in all_fingerprints):
+            return True
+
+        # Build detailed report for tlparse and stdout
+        lines = [
+            "=" * 80,
+            "OVERLAP BUCKETING MISMATCH — skipping bucketing to prevent NCCL timeout",
+            "=" * 80,
+            "FX graphs differ across ranks, causing different scheduling and",
+            "bucketing decisions. Common cause: uneven Shard(0) from parameter",
+            "dimensions not divisible by world_size.",
+            "",
+        ]
+
+        # Detect uneven all-gather sizes across ranks
+        uneven_lines = self._find_uneven_sharding()
+        if uneven_lines:
+            lines.append("UNEVEN ALL-GATHER SIZES (likely root cause):")
+            lines.extend(uneven_lines)
+            lines.append("")
+
+        for r in range(world_size):
+            lines.append(f"--- Rank {r}: {len(all_details[r])} buckets ---")
+            for key, n, total_bytes, names in all_details[r]:
+                mb = total_bytes / (1024 * 1024)
+                lines.append(
+                    f"  key={key}  n_colls={n}  size={mb:.1f}MiB  "
+                    f"nodes=[{', '.join(names)}]"
+                )
+            lines.append("")
+        lines.append("=" * 80)
+        report = "\n".join(lines)
+
+        bucket_log.warning("\n%s", report)
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_overlap_bucketing_mismatch",
+                "encoding": "string",
+            },
+            payload_fn=lambda: report,
+        )
+        return False
+
     def _bucket_collectives_impl(self) -> list[CollBucket]:
         """Find and apply bucket transformations for collectives."""
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -323,6 +464,10 @@ class OverlapPreservingBucketer:
                 )
                 buckets = self._find_buckets(collective_group, internode_pgs)
                 all_buckets.extend(buckets)
+
+        # Verify all ranks produced identical bucket decisions before applying.
+        if not self._bucketing_matches_across_ranks(all_buckets):
+            return []
 
         for coll_bucket in all_buckets:
             if len(coll_bucket.collectives) <= 1:
@@ -1037,18 +1182,20 @@ class OverlapPreservingBucketer:
         # Handle convert_element_type nodes that were fused and erased
         # The bucketed operation may have a _pre_bucket op that handles dtype conversion
         if fused_convert_dtypes:
-            # all gather bucketing may fuse in dtype conversion into the bucketing
-            # if so, we need to transfer hiding deps from the old dtype conversion
-            # to the new bucketing node
-            new_convert_dtypes_node = new_start.kwargs["out"]
-            assert isinstance(new_convert_dtypes_node, fx.Node)
-            assert (
-                new_convert_dtypes_node.target
+            # In custom_ops mode, the _pre_bucket_all_gather node handles dtype conversion
+            # In default mode, convert nodes are just erased — map them to new_start
+            new_convert_dtypes_node = new_start.kwargs.get("out")
+            if (
+                isinstance(new_convert_dtypes_node, fx.Node)
+                and new_convert_dtypes_node.target
                 == torch.ops.bucketing._pre_bucket_all_gather.default
-            )
+            ):
+                replacement = new_convert_dtypes_node
+            else:
+                replacement = new_start
 
             for n in fused_convert_dtypes:
-                erased_to_new[n] = new_convert_dtypes_node
+                erased_to_new[n] = replacement
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
