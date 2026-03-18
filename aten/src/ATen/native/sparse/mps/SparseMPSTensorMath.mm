@@ -972,7 +972,7 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
   {
     auto batch_ptr = at::tensor({0LL, nnzB}, at::device(device).dtype(at::kLong));
     row_ptr_B = at::empty({K + 1}, at::device(device).dtype(at::kLong));
-    build_row_ptr_per_batch_mps(B_k, batch_ptr, /*B=*/1, /*I=*/K, row_ptr_B);
+    csr_utils::build_row_ptr_per_batch_mps_out(B_k, batch_ptr, /*B=*/1, /*I=*/K, row_ptr_B);
   }
 
   auto row_ptr_B_lo = row_ptr_B.narrow(0, 0, K);
@@ -1232,7 +1232,7 @@ Tensor index_select_sparse_mps(const Tensor& self_, int64_t dim, const Tensor& i
   // Build row_ptr for lower/upper bound lookups
   auto batch_ptr = tensor({0LL, nnz}, at::device(self_.device()).dtype(kLong));
   auto row_ptr = empty({I + 1}, at::device(self_.device()).dtype(kLong));
-  build_row_ptr_per_batch_mps(sorted_dim_indices, batch_ptr, /*B=*/1, /*I=*/I, row_ptr);
+  csr_utils::build_row_ptr_per_batch_mps_out(sorted_dim_indices, batch_ptr, /*B=*/1, /*I=*/I, row_ptr);
 
   auto lower = row_ptr.index_select(0, nneg_index);
   auto nneg_index_plus1 = nneg_index.add(1);
