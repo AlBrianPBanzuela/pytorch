@@ -2068,7 +2068,9 @@ def cat(inputs, dim=0):
                 # Case 1: other consumer is pointwise → fusion opportunity
                 if any(is_pointwise_use(u) for u in arg.users if u is not current_node):
                     return True
-                # Case 2: input is unrealized Pointwise → avoid recomputation
+                # Case 2: input is unrealized Pointwise with multiple
+                # consumers, lower to ConcatKernel to avoid inline
+                # recomputation by pointwise_cat
                 inner = ir_input
                 while isinstance(inner, (TensorBox, ir.StorageBox)):
                     inner = unwrap_tensor(inner)
@@ -4812,13 +4814,12 @@ def _pad_as_cat(
     pad_shape = list(sizes)
     pad_shape[pad_dim] = pad_amount
     dtype = x.get_dtype()
-    device = x.get_device()
     fill_value_typed = dtype_to_type(dtype)(fill_value)
     pad_tensor = tensor_constructor(fill_value_typed)(
         pad_shape, dtype=dtype, device=device
     )
 
-    counters["inductor"]["pad_as_cat"] += 1
+    counters["inductor"]["pad_rewritten_as_cat"] += 1
     return cat([x, pad_tensor], pad_dim)
 
 

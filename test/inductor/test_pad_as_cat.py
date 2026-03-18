@@ -100,7 +100,7 @@ class TestPadAsCat(TestCase):
         self.assertEqual(result[0], ref[0])
         self.assertEqual(result[1], ref[1], atol=1e-2, rtol=1e-2)
         self.assertIn("reinterpret_tensor", code)
-        self.assertGreater(counters["inductor"]["pad_as_cat"], 0)
+        self.assertGreater(counters["inductor"]["pad_rewritten_as_cat"], 0)
 
     @requires_gpu()
     def test_single_consumer_pad(self):
@@ -118,7 +118,7 @@ class TestPadAsCat(TestCase):
         ref = fn(x, scale)
 
         self.assertEqual(result, ref)
-        self.assertGreater(counters["inductor"]["pad_as_cat"], 0)
+        self.assertGreater(counters["inductor"]["pad_rewritten_as_cat"], 0)
 
 
 if __name__ == "__main__":

@@ -5976,16 +5976,22 @@ class ConcatKernel(NopKernel):
         fx_node_args = V.graph.current_node.args[0]
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         # Skip this check when fx_node_args is not a list (e.g., called from _pad_as_cat).
-        if any_input_is_storage_and_layout is False and isinstance(fx_node_args, list) and any(
-            # pyrefly: ignore [missing-attribute]
-            "val" in arg.meta
-            and (
+        if (
+            any_input_is_storage_and_layout is False
+            and isinstance(fx_node_args, list)
+            and any(
                 # pyrefly: ignore [missing-attribute]
-                arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
-                # pyrefly: ignore [missing-attribute]
-                or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+                "val" in arg.meta
+                and (
+                    # pyrefly: ignore [missing-attribute]
+                    arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                    # pyrefly: ignore [missing-attribute]
+                    or arg.meta["val"].is_contiguous(
+                        memory_format=torch.channels_last_3d
+                    )
+                )
+                for arg in fx_node_args
             )
-            for arg in fx_node_args
         ):
             output_stride = make_channels_last_strides_for(new_size)
 
