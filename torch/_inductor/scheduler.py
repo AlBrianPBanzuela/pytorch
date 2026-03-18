@@ -7431,6 +7431,25 @@ class Scheduler:
         if self.default_device_context and config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.write_get_raw_stream_header()
 
+        # In multi-stream scenarios, open the device guard eagerly so that
+        # device-less sync ops (record_event, wait_event) that precede compute
+        # nodes in topological order are emitted inside the guard where stream
+        # variables are declared.
+        if self._has_multi_stream_nodes() and self.current_device is None:
+            for n in nodes:
+                if d := n.get_device():
+                    if device_need_guard(d.type):
+                        assert d.index is not None
+                        unique_streams = OrderedSet(self.node_to_stream.values())
+                        num_streams = max(unique_streams) + 1 if unique_streams else 1
+                        V.graph.wrapper_code.codegen_device_guard_enter(
+                            d.index,
+                            num_streams,
+                            self.stream_idx_to_user_obj_idx,
+                        )
+                        self.current_device = d
+                    break
+
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
@@ -7479,10 +7498,13 @@ class Scheduler:
                             self.stream_idx_to_user_obj_idx,
                         )
 
-                # Handle stream context switching for multi-stream scheduling
-                # Only do this for nodes with a device, inside the device guard
-                if self._has_multi_stream_nodes():
-                    self.generate_stream_ctx_switching(node)
+            # Handle stream context switching for multi-stream scheduling.
+            # This runs for all nodes (including device-less sync ops like
+            # record_event/wait_event) so they are placed inside the correct
+            # stream context. Only switch when inside a device guard (i.e.
+            # current_device is set), since stream variables are declared there.
+            if self._has_multi_stream_nodes() and self.current_device is not None:
+                self.generate_stream_ctx_switching(node)
 
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)

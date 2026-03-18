@@ -472,7 +472,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
         if node.op == "call_function":
             if node.target in _SYNC_OPS:
                 event_index: int = node.args[0]  # type: ignore[assignment]
-                sync_stream: int | None = node.args[1]  # type: ignore[assignment]
+                # Use the node's stream annotation (from meta["custom"]["stream"])
+                # to look up preceding compute nodes on the same stream.
+                # This handles the inference path where default-stream nodes
+                # have get_stream() == None rather than a user_obj_idx.
+                sync_stream: int | None = get_stream(node)
                 deps_before_sync = stream_to_nodes.get(sync_stream, [])
 
                 # For wait_events, add a cross-event dependency on the
