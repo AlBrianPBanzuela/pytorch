@@ -1745,7 +1745,7 @@ class <lambda>(torch.nn.Module):
         #
         synchronize_event = torch.ops.streams.synchronize_event.default(0);  synchronize_event = None
         return (add,)
-""",
+""",  # noqa: B950
         )
 
     @requires_cuda
