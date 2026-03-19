@@ -279,11 +279,53 @@ class _PreparedSingleDimStrategy:
         if isinstance(strategy_fn, _SingleDimStrategyInfo):
             self.allow_unbacked_sharding = strategy_fn.allow_unbacked_sharding
             self.allow_uneven_sharding = strategy_fn.allow_uneven_sharding
+            different_mesh_args = strategy_fn.different_mesh_args
             func = strategy_fn.func
         else:
             self.allow_unbacked_sharding = None
             self.allow_uneven_sharding = False
+            different_mesh_args = None
             func = strategy_fn
+
+        # Determine element_mesh from the first OpStrategy arg.  For foreach
+        # per-element schemas the element's inputs may live on a smaller
+        # sub-mesh than the global compute_mesh.
+        self.element_mesh: DeviceMesh | None = None
+        for arg in op_schema.args_schema:
+            if isinstance(arg, OpStrategy):
+                self.element_mesh = arg.strategies[0].output_spec.mesh
+                break
+
+        # Validate that all inputs are on the same mesh (except
+        # different_mesh_args which are explicitly allowed to differ).
+        if self.element_mesh is not None:
+            allowed = set(different_mesh_args or [])
+            for i, arg in enumerate(op_schema.args_schema):
+                if isinstance(arg, OpStrategy) and i not in allowed:
+                    arg_mesh = arg.strategies[0].output_spec.mesh
+                    if arg_mesh != self.element_mesh:
+                        raise ValueError(
+                            f"Cannot run {op_schema.op} on inputs with different "
+                            f"meshes: got {self.element_mesh} and {arg_mesh}"
+                        )
+
+        # Remap different_mesh_args from args_schema positions to
+        # OpStrategy-only positions.  Non-OpStrategy args (e.g. empty lists)
+        # are filtered out by expand_to_full_mesh_op_strategy, shifting later
+        # indices.
+        self.remapped_different_mesh_args: list[int] | None = None
+        if different_mesh_args is not None:
+            schema_to_strategy: dict[int, int] = {}
+            strategy_pos = 0
+            for schema_pos, arg in enumerate(op_schema.args_schema):
+                if isinstance(arg, OpStrategy):
+                    schema_to_strategy[schema_pos] = strategy_pos
+                    strategy_pos += 1
+            self.remapped_different_mesh_args = [
+                schema_to_strategy[i]
+                for i in different_mesh_args
+                if i in schema_to_strategy
+            ]
 
         if num_inputs is None:
             num_inputs = _get_num_tensor_inputs(op_schema)
@@ -461,35 +503,7 @@ def _expand_single_dim_strategy_to_mesh(
             base_name = op_name.split("::")[1].split(".")[0]
             is_inplace = base_name.endswith("_")
 
-            # For per-element foreach schemas, the element's inputs may be on a
-            # different (smaller) mesh than the global compute_mesh.  Use the
-            # element's own mesh so that strategy expansion matches the runtime
-            # placements (e.g. 1D sub-mesh elements in a mixed-mesh tensor list).
-            element_mesh = mesh
-            for arg in op_schema.args_schema:
-                if isinstance(arg, OpStrategy):
-                    element_mesh = arg.strategies[0].output_spec.mesh
-                    break
-
-            # different_mesh_args are defined as positions in
-            # args_schema (the full arg list), but
-            # expand_to_full_mesh_op_strategy indexes into args_strategy
-            # (OpStrategy items only).  Non-OpStrategy args like empty lists
-            # (e.g. max_exp_avg_sqs=[] when amsgrad=False) are filtered out,
-            # shifting later indices.  Remap here.
-            remapped_different_mesh_args = strategy_info.different_mesh_args
-            if remapped_different_mesh_args is not None:
-                schema_to_strategy: dict[int, int] = {}
-                strategy_pos = 0
-                for schema_pos, arg in enumerate(op_schema.args_schema):
-                    if isinstance(arg, OpStrategy):
-                        schema_to_strategy[schema_pos] = strategy_pos
-                        strategy_pos += 1
-                remapped_different_mesh_args = [
-                    schema_to_strategy[i]
-                    for i in remapped_different_mesh_args
-                    if i in schema_to_strategy
-                ]
+            element_mesh = prepared_strategy.element_mesh or mesh
 
             return expand_to_full_mesh_op_strategy(
                 element_mesh,
@@ -500,7 +514,7 @@ def _expand_single_dim_strategy_to_mesh(
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
                 allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
-                different_mesh_args=remapped_different_mesh_args,
+                different_mesh_args=prepared_strategy.remapped_different_mesh_args,
             )
 
         return expanded_strategy
