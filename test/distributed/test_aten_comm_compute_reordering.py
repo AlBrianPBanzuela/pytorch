@@ -1181,6 +1181,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             # Convert inputs to float16 before all_gather
             a_fp16 = a.to(torch.float16)
             b_fp16 = b.to(torch.float16)
+            d_fp16 = d.to(torch.float16)
 
             # Two all_gathers with converted dtypes
             ag1 = _functional_collectives.all_gather_tensor(a_fp16, 0, ranks)
@@ -1188,7 +1189,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
             # same dtype
             ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d, 0, ranks)
+            ag4 = _functional_collectives.all_gather_tensor(d_fp16, 0, ranks)
 
             return ag1, ag2, ag3, ag4
 
