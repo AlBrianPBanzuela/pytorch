@@ -4806,6 +4806,29 @@ def forward(self, tangents_1):
         loss.backward()
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_user_provided(self):
+        """Scenario: user provides tangents via out.backward(tangents).
+
+        Unlike torchtitan, user holds a Python ref to the tangent. The boxed
+        convention cannot free it — resize_(0) via
+        force_bw_tangent_early_storage_release is needed to reclaim memory."""
+        model, x, _labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        out = compiled_model(x)
+        tangents = torch.randn_like(out)
+        tangent_storage = tangents.untyped_storage()
+        self.assertGreater(tangent_storage.nbytes(), 0)
+
+        out.backward(tangents)
+        # User still holds 'tangents' — TensorImpl alive, storage has data.
+        # Only resize_(0) in codegen can free CUDA memory in this case.
+        # Without resize_(0), storage keeps its original size.
+        del tangents
+        # After del, tensor is gone but storage object is still held by us.
+        # Storage nbytes stays at original size (no resize_(0) applied).
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_tangent_refcount_during_backward(self):
         """Verify tangent refcount drops at model/loss boundary.
 
@@ -4849,6 +4872,31 @@ def forward(self, tangents_1):
             "expected <= 6 with boxed calling convention",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @torch._inductor.config.patch(force_bw_tangent_early_storage_release=True)
+    def test_tangent_storage_resize_zero(self):
+        """With force_bw_tangent_early_storage_release, tangent storage is
+        resized to 0 after last use even when user holds a ref.
+
+        Not needed for torchtitan simple_fsdp (boxed convention suffices),
+        but needed when user calls out.backward(user_tangent)."""
+        torch._dynamo.reset()
+        model, x, _labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        out = compiled_model(x)
+        tangents = torch.randn_like(out)
+        tangent_storage = tangents.untyped_storage()
+        self.assertGreater(tangent_storage.nbytes(), 0)
+
+        out.backward(tangents)
+        del tangents
+
+        self.assertEqual(
+            tangent_storage.nbytes(),
+            0,
+            "Tangent storage should be resized to 0 with force_bw_tangent_early_storage_release",
+        )
 
 
 def extract_graph(fx_g, _, graph_cell):
