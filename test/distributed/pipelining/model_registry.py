@@ -8,8 +8,7 @@ from torch.distributed.pipelining import pipe_split, SplitPoint
 
 class ExampleCode(torch.nn.Module):
     def __init__(self, d_hid, splits=2):
-        if not (splits <= 8):
-            raise AssertionError(f"Expected splits <= 8, got {splits}")
+        assert splits <= 8
         super().__init__()
         self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -64,8 +63,7 @@ class ModelWithKwargs(torch.nn.Module):
     DEFAULT_BATCH_SIZE = 256
 
     def __init__(self, d_hid: int = DEFAULT_DHID, splits=2):
-        if not (splits <= 8):
-            raise AssertionError(f"Expected splits <= 8, got {splits}")
+        assert splits <= 8
         super().__init__()
         self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))

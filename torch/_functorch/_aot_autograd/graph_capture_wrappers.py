@@ -23,7 +23,6 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
-from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
@@ -241,7 +240,7 @@ def fn_prepped_for_autograd(
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, Tensor)
-            and meta.output_info[i].requires_grad_for_backward
+            and meta.output_info[i].requires_grad
             for (i, x) in enumerate(outs)
         ]
 
@@ -672,15 +671,7 @@ def sc_visit(
             return
 
         for a in e.__tensor_flatten__()[0]:
-            match getattr(e, a):
-                case torch.Tensor() as inner:
-                    visit(inner)
-                case OpaqueBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
-                    )
+            visit(getattr(e, a))
 
     visit(t)
     return accum
@@ -969,11 +960,7 @@ def create_functionalized_fn(
                                 raise AssertionError(
                                     f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
                                 )
-                            # no_grad prevents the FakeTensor's requires_grad from
-                            # triggering check_inplace during tracing.  The
-                            # requires_grad case is checked at runtime instead
-                            with torch.no_grad():
-                                before.copy_(after)
+                            before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
                         )
@@ -1284,11 +1271,6 @@ def handle_effect_tokens_fn(
     else:
         args = [*additional_fwd_token_inputs, *args]
         args_descs = [*additional_fwd_token_inputs_descs, *args_descs]
-
-        if num_tokens > 0:
-            meta.static_input_indices = [
-                idx + num_tokens for idx in meta.static_input_indices
-            ]
     return inner_fn, args, args_descs
 
 
@@ -1401,7 +1383,7 @@ def aot_dispatch_subclass(
             append_symints=True,
         )
         # We pass append_symints=False here because the partitioner will
-        # capture and add any extra argument.
+        # capture and add any extra argument
         tangents_unwrapped_pair = unwrap_tensor_subclasses(
             args[1],  # type: ignore[arg-type]
             args_descs[1],  # type: ignore[arg-type]

@@ -39,6 +39,7 @@ from typing import (
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
+    Union,
 )
 from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
@@ -52,8 +53,8 @@ if TYPE_CHECKING:
 __all__ = [
     "PyTree",
     "Context",
-    "FlattenFn",
-    "UnflattenFn",
+    "FlattenFunc",
+    "UnflattenFunc",
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
@@ -125,20 +126,15 @@ class EnumEncoder(json.JSONEncoder):
 
 Context = Any
 PyTree = Any
-FlattenFn = Callable[[PyTree], tuple[list[Any], Context]]
-UnflattenFn = Callable[[Iterable[Any], Context], PyTree]
+FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
-ToStrFunc = Callable[["TreeSpec", list[str]], str]  # deprecated
-MaybeFromStrFunc = Callable[[str], tuple[Any, Context, str] | None]  # deprecated
+ToStrFunc = Callable[["TreeSpec", list[str]], str]
+MaybeFromStrFunc = Callable[[str], tuple[Any, Context, str] | None]
 KeyPath = tuple[KeyEntry, ...]
-FlattenWithKeysFn = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
-
-# Keep deprecated alias for backward compatibility
-FlattenFunc = FlattenFn  # deprecated
-UnflattenFunc = UnflattenFn  # deprecated
-FlattenWithKeysFunc = FlattenWithKeysFn  # deprecated
+FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
 
 
 # A NodeDef holds two callables:
@@ -152,9 +148,9 @@ FlattenWithKeysFunc = FlattenWithKeysFn  # deprecated
 #   pytree and returns a list of (keypath, value) pairs and a context.
 class NodeDef(NamedTuple):
     type: type[Any]
-    flatten_fn: FlattenFn
-    unflatten_fn: UnflattenFn
-    flatten_with_keys_fn: FlattenWithKeysFn | None
+    flatten_fn: FlattenFunc
+    unflatten_fn: UnflattenFunc
+    flatten_with_keys_fn: FlattenWithKeysFunc | None
 
 
 _NODE_REGISTRY_LOCK = threading.RLock()
@@ -205,13 +201,13 @@ _cxx_pytree_pending_imports: list[Any] = []
 
 def register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFn,
-    unflatten_fn: UnflattenFn,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
@@ -531,15 +527,15 @@ def _register_namedtuple(
 )
 def _register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFn,
-    unflatten_fn: UnflattenFn,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     to_str_fn: ToStrFunc | None = None,  # deprecated
     maybe_from_str_fn: MaybeFromStrFunc | None = None,  # deprecated
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
 ) -> None:
     """Register a container-like type as pytree node for the Python pytree only.
 
@@ -600,13 +596,13 @@ def _deregister_pytree_node(
 
 def _private_register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFn,
-    unflatten_fn: UnflattenFn,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
 ) -> None:
     """This is an internal function that is used to register a pytree node type
     for the Python pytree only. End-users should use :func:`register_pytree_node`
@@ -614,7 +610,7 @@ def _private_register_pytree_node(
     """
     from torch._library.opaque_object import is_opaque_type
 
-    if isinstance(cls, type) and is_opaque_type(cls):
+    if is_opaque_type(cls):
         raise ValueError(
             f"{cls} cannot be registered as a pytree as it has been "
             "registered as an opaque object. Opaque objects must be pytree leaves."
@@ -1337,20 +1333,14 @@ PyTreeSpec: TypeAlias = TreeSpec
     "use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.",
     category=FutureWarning,
 )
-@dataclasses.dataclass(init=False, frozen=True, eq=False, repr=False, slots=True)
+@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False, slots=True)
 class LeafSpec(TreeSpec):
     type: Any = dataclasses.field(default=None, init=False)
     _context: Context = dataclasses.field(default=None, init=False)
     _children: list[Self] = dataclasses.field(default_factory=list, init=False)
 
-    def __init__(self) -> None:
-        # On Python 3.10.0, the dataclass-generated __init__ for frozen+slots
-        # dataclasses doesn't populate init=False fields with simple defaults,
-        # causing copy.deepcopy to fail with AttributeError. Avoid the bug by
-        # providing a custom __init__ (init=False above) instead.
-        object.__setattr__(self, "type", None)
-        object.__setattr__(self, "_context", None)
-        object.__setattr__(self, "_children", [])
+    def __post_init__(self) -> None:
+        # Override `__post_init__` for `num_leaves` derivation.
         object.__setattr__(self, "num_nodes", 1)
         object.__setattr__(self, "num_leaves", 1)
         object.__setattr__(self, "num_children", 0)
@@ -1395,7 +1385,7 @@ def treespec_dict(
 
 def _is_pytreespec_instance(
     obj: Any,
-) -> TypeIs["TreeSpec | cxx_pytree.PyTreeSpec"]:
+) -> TypeIs[Union[TreeSpec, "cxx_pytree.PyTreeSpec"]]:
     if isinstance(obj, TreeSpec):
         return True
     if "torch.utils._cxx_pytree" in sys.modules:
@@ -1417,7 +1407,7 @@ def _is_pytreespec_instance(
 
 
 def _ensure_python_treespec_instance(
-    treespec: "TreeSpec | cxx_pytree.PyTreeSpec",
+    treespec: Union[TreeSpec, "cxx_pytree.PyTreeSpec"],
 ) -> TreeSpec:
     if isinstance(treespec, TreeSpec):
         return treespec

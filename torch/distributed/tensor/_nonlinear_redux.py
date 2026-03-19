@@ -1,6 +1,6 @@
 import operator
 from functools import reduce
-from typing import cast
+from typing import cast, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -32,8 +32,7 @@ def _get_output_sharding(
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
-    if output_sharding is None:
-        raise AssertionError("output sharding should not be None")
+    assert output_sharding is not None, "output sharding should not be None"
     return output_sharding
 
 
@@ -46,7 +45,7 @@ def _prep_arguments(
     torch.Size,
     "torch.distributed.device_mesh.DeviceMesh",
     tuple[Placement, ...],
-    int | None,
+    Optional[int],
     bool,
 ]:
     """
@@ -61,7 +60,7 @@ def _prep_arguments(
         keepdim: Whether to keep the reduced dimension
     """
     input_dtensor = cast(dtensor.DTensor, args[0])
-    dim: int | None = None
+    dim: Optional[int] = None
     keepdim: bool = False
 
     if not isinstance(input_dtensor, dtensor.DTensor):
@@ -94,7 +93,7 @@ def _prep_arguments(
 
 
 def _get_expected_shape(
-    local_tensor: torch.Tensor, dim: int | None, keepdim: bool
+    local_tensor: torch.Tensor, dim: Optional[int], keepdim: bool
 ) -> torch.Size:
     """Compute the expected output shape after reduction."""
     input_shape = list(local_tensor.shape)
@@ -118,7 +117,7 @@ def _collect_shard_mesh_dims(
     op_call_repr: str,
     local_tensor: torch.Tensor,
     placements: tuple[Placement, ...],
-    dim: int | None,
+    dim: Optional[int],
 ) -> list[int]:
     """Collect mesh dimensions that are sharded along the reduction dimension."""
     shard_mesh_dims: list[int] = []
@@ -136,7 +135,7 @@ def _convert_to_global_idxs(
     global_shape: torch.Size,
     device_mesh: "torch.distributed.device_mesh.DeviceMesh",
     placements: tuple[Placement, ...],
-    dim: int | None,
+    dim: Optional[int],
 ) -> tuple[int, torch.Tensor]:
     """Convert local indices to global indices."""
     local_shape, global_offset = compute_local_shape_and_global_offset(
@@ -272,8 +271,7 @@ def minmax_dim_handler(
     )
 
     # Compute local reduction - min/max with dim always requires dim
-    if dim is None:
-        raise AssertionError
+    assert dim is not None
     local_redux, local_idx = op_call(local_tensor, dim=dim, keepdim=True)
 
     if not shard_mesh_dims:

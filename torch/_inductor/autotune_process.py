@@ -343,13 +343,10 @@ class TuningProcessPool:
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
-            # Sticky CUDA errors corrupt the context, making it unrecoverable.
-            # The process must be restarted to restore CUDA functionality.
-            error_msg = str(process_exception)
-            if (
-                "cudaErrorLaunchFailure" in error_msg
-                or "cudaErrorIllegalAddress" in error_msg
-            ):
+            # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
+            # CUDA context, making it unrecoverable. All subsequent CUDA calls will
+            # fail as well. The process must be restarted to restore CUDA functionality.
+            if "cudaErrorLaunchFailure" in str(process_exception):
                 process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
@@ -387,8 +384,6 @@ class TensorMeta:
     def from_irnodes(
         cls, irnodes: LayoutOrBuffer | Sequence[LayoutOrBuffer]
     ) -> TensorMeta | list[TensorMeta]:
-        from torch._inductor.select_algorithm import get_strides_with_layout_constraints
-
         if isinstance(irnodes, Sequence):
             result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
@@ -407,9 +402,7 @@ class TensorMeta:
             device=device,
             dtype=dtype,
             sizes=V.graph.sizevars.optimization_hints(node.get_size()),
-            strides=V.graph.sizevars.optimization_hints(
-                get_strides_with_layout_constraints(node)
-            ),
+            strides=V.graph.sizevars.optimization_hints(node.get_stride()),
             offset=V.graph.sizevars.optimization_hint(node.get_layout().offset),
             name=node.get_name(),
         )
@@ -722,10 +715,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        kernel = getattr(mod, self.kernel_name)
-        kernel.precompile()
-
-        self.n_regs = kernel.launchers[0].n_regs
+        getattr(mod, self.kernel_name).precompile()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
@@ -978,16 +968,6 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
-    def __getstate__(self) -> dict[str, Any]:
-        state = self.__dict__.copy()
-        state["DLL"] = None
-        state["workspace"] = None
-        state["_workspace_size_updated"] = False
-        return state
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        self.__dict__.update(state)
-
 
 class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
     # Important: Instances of this class have to be serializable
@@ -1202,7 +1182,7 @@ class AutotuneProcessPool:
                     self._warmup_start_time = time.perf_counter()
                     self._warmup_future = self.pool.submit(
                         _init_autotune_subprocess,
-                        fp32_precision=torch.backends.cuda.matmul.fp32_precision,
+                        allow_tf32=torch.backends.cuda.matmul.allow_tf32,
                     )
                     self._warmup_future.add_done_callback(self._on_warmup_complete)
                     autotuning_log.info("Warmup job submitted")
@@ -1222,7 +1202,6 @@ class AutotuneProcessPool:
                 warmup_elapsed_time,
                 result,
             )
-            self._record_activity()
         except Exception as e:
             autotuning_log.error(
                 "AutotuneProcessPool warmup failed after %.4f seconds",
@@ -1263,7 +1242,7 @@ def use_pipelined_autotuning() -> bool:
     )
 
 
-def _init_autotune_subprocess(fp32_precision: str) -> bool:
+def _init_autotune_subprocess(allow_tf32: bool) -> bool:
     """
     Warmup function run in the autotune subprocess.
     """
@@ -1273,7 +1252,7 @@ def _init_autotune_subprocess(fp32_precision: str) -> bool:
     if torch.cuda.is_available():
         torch.zeros(1, device="cuda")
 
-    torch.backends.cuda.matmul.fp32_precision = fp32_precision
+    torch.backends.cuda.matmul.allow_tf32 = allow_tf32
 
     return True
 

@@ -9,11 +9,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, ParamSpec
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch._opaque_base import OpaqueBase
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -178,11 +177,6 @@ def assume_constant_result(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
-@deprecated(
-    "torch._dynamo.allow_in_graph is deprecated and will be removed in a future version. "
-    "Use torch._dynamo.nonstrict_trace instead.",
-    category=FutureWarning,
-)
 def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
@@ -1037,16 +1031,9 @@ def _apply_func_to_inner_tensors_of_same_dim(
     attrs, _ctx = t.__tensor_flatten__()
     assert isinstance(t, torch.Tensor)
     for attr in attrs:
-        match getattr(t, attr):
-            case torch.Tensor() as inner:
-                if inner.dim() == t.dim():
-                    func(inner, *args, **kwargs)
-            case OpaqueBase():
-                pass
-            case unexpected:
-                raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(unexpected)}"
-                )
+        inner = getattr(t, attr)
+        if inner.dim() == t.dim():
+            func(inner, *args, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1070,8 +1057,6 @@ def mark_unbacked(
     strict: bool = False,
     specialize_on: list[Any] | None = None,
     shape_id: str | None = None,
-    min: int | None = None,
-    max: int | None = None,
 ) -> None:
     """
     Mark a tensor as having an unbacked dimension. This changes the semantics of operations:
@@ -1096,10 +1081,6 @@ def mark_unbacked(
             All unbacked dimensions with the same shape_id will share the same unbacked symbol. This is useful when multiple tensors
             are known to have the same batch size at runtime. A runtime assertion is added
             to ensure this property at runtime.
-        min (Optional[int], default=None): Minimum value constraint for this dimension.
-            If provided, a runtime check will be added to ensure the dimension is >= min.
-        max (Optional[int], default=None): Maximum value constraint for this dimension.
-            If provided, a runtime check will be added to ensure the dimension is <= max.
     """
     if torch.distributed.is_available() and isinstance(
         t, torch.distributed.tensor.DTensor
@@ -1133,12 +1114,6 @@ def mark_unbacked(
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
 
-        if min is not None or max is not None:
-            if not hasattr(t, "_dynamo_unbacked_bounds"):
-                # pyrefly: ignore [implicit-any]
-                t._dynamo_unbacked_bounds = {}
-            t._dynamo_unbacked_bounds[index] = (min, max)
-
         if shape_id is not None:
             if not hasattr(t, "_dynamo_shape_ids"):
                 # pyrefly: ignore [implicit-any]
@@ -1156,7 +1131,7 @@ def mark_unbacked(
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_unbacked(t, i, shape_id=shape_id, min=min, max=max)
+        mark_unbacked(t, i, shape_id=shape_id)
 
 
 @forbid_in_graph
@@ -1360,25 +1335,6 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
         t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
-def _patch_einops_symint_compat(einops_mod: Any) -> None:
-    """Backport the SymInt lru_cache fix from einops 0.7.0 into einops <= 0.6.1."""
-    for name in ("_reconstruct_from_shape", "_prepare_transformation_recipe"):
-        cached = getattr(einops_mod, name)
-        uncached = cached.__wrapped__
-
-        def make_wrapper(cached_fn: Any, uncached_fn: Any) -> Any:
-            @functools.wraps(cached_fn)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                try:
-                    return cached_fn(*args, **kwargs)
-                except TypeError:
-                    return uncached_fn(*args, **kwargs)
-
-            return wrapper
-
-        setattr(einops_mod, name, make_wrapper(cached, uncached))
-
-
 # One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
 # Note that PyTorch supports multiple versions of einops, so when that day comes,
 # we still need to be really careful about version matches.
@@ -1403,10 +1359,7 @@ def _allow_in_graph_einops() -> None:
 
         # einops > 0.6.1 will call the op registration logic as it is imported.
     except ImportError:
-        # einops <= 0.6.1 doesn't handle unhashable SymInt in its lru_cache'd
-        # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
-        # so allow_in_graph works during fake tensor validation.
-        _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
+        # einops <= 0.6.1
         allow_in_graph(einops.rearrange)
         allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):

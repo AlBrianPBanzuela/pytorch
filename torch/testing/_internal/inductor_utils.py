@@ -43,6 +43,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_FBCODE,
     IS_WINDOWS,
     LazyVal,
     TestCase,
@@ -56,7 +57,7 @@ log: logging.Logger = logging.getLogger(__name__)
 def test_cpu():
     try:
         CppCodeCache.load("")
-        return True
+        return not IS_FBCODE
     except (
         CalledProcessError,
         OSError,

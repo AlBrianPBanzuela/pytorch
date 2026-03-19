@@ -8,7 +8,7 @@ import shutil
 import unittest
 from collections import defaultdict
 from threading import Lock
-from typing import IO
+from typing import IO, Optional
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -97,7 +97,9 @@ Observed error: {!r}
 """
 
 
-def _test_fail(path: str, error: str, expected_error: str | None, lineno: int) -> None:
+def _test_fail(
+    path: str, error: str, expected_error: Optional[str], lineno: int
+) -> None:
     if expected_error is None:
         raise AssertionError(_FAIL_MSG1.format(lineno, error))
     elif error not in expected_error:
@@ -159,7 +161,7 @@ def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> N
 @unittest.skipIf(NO_MYPY, reason="Mypy is not installed")
 class TestTyping(TestCase):
     _lock = Lock()
-    _cached_output: dict[str, list[str]] | None = None
+    _cached_output: Optional[dict[str, list[str]]] = None
 
     @classmethod
     def get_mypy_output(cls) -> dict[str, list[str]]:

@@ -7,7 +7,7 @@ import sys
 from test_cuda import (  # noqa: F401
     TestBlockStateAbsorption,
     TestCuda,
-    TestCudaAllocator,
+    TestCudaMallocAsync,
 )
 
 import torch

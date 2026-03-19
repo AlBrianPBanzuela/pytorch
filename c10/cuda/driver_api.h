@@ -52,7 +52,6 @@
 #define C10_LIBCUDA_DRIVER_API_REQUIRED(_)         \
   _(cuDeviceGet, 12000)                            \
   _(cuDeviceGetAttribute, 12000)                   \
-  _(cuMemGetAddressRange, 12000)                   \
   _(cuMemAddressReserve, 12000)                    \
   _(cuMemRelease, 12000)                           \
   _(cuMemMap, 12000)                               \
@@ -104,7 +103,7 @@
   _(nvmlDeviceGetComputeRunningProcesses) \
   _(nvmlSystemGetCudaDriverVersion_v2)
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12040)
+#if defined(CUDA_VERSION)
 #define C10_NVML_DRIVER_API_OPTIONAL(_) _(nvmlDeviceGetGpuFabricInfoV)
 #else
 #define C10_NVML_DRIVER_API_OPTIONAL(_)

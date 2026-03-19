@@ -179,8 +179,7 @@ its type to `common_constant_types`.
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
-            name_variable = variables.ConstantVariable.create(name)
-            raise_observed_exception(AttributeError, tx, args=[name_variable])
+            raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError

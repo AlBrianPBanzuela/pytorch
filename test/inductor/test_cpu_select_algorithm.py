@@ -3,6 +3,7 @@ import contextlib
 import functools
 import sys
 import unittest
+from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -26,8 +27,6 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
-    IS_ARM64,
-    IS_CPU_EXT_SVE_SUPPORTED,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
@@ -101,7 +100,7 @@ def verify(dtype):
         yield atol, rtol
 
 
-def _get_epilogue(epilogue: str, other: torch.Tensor | None = None):
+def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
     if epilogue == "none":
         return lambda x: x
     elif epilogue == "relu":
@@ -1632,9 +1631,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
-    @unittest.skipIf(
-        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
-    )
     def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1697,9 +1693,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
-    @unittest.skipIf(
-        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
-    )
     def test_int8_woq_mm_concat(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):
@@ -2295,8 +2288,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.mlp(x)
 
-        if torch._inductor.config.freezing is not False:
-            raise AssertionError
+        assert torch._inductor.config.freezing is False
 
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
@@ -2444,7 +2436,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             ["silu", "mul"],
         ),
     )
-    @parametrize("loop_ordering_after_fusion", (True, False))
     def test_grouped_linear_epilogue(
         self,
         batch_size,
@@ -2453,7 +2444,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         input_3d,
         bias,
         epilogue,
-        loop_ordering_after_fusion,
     ):
         class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, bias, epilogue):
@@ -2494,9 +2484,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 verify(dtype) as (atol, rtol),
                 torch.autocast(device_type="cpu", dtype=dtype),
                 torch.no_grad(),
-                inductor_config.patch(
-                    {"loop_ordering_after_fusion": loop_ordering_after_fusion}
-                ),
             ):
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
@@ -2542,8 +2529,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 )
                 return self.relu(tmp)
 
-        if torch._inductor.config.freezing is not False:
-            raise AssertionError
+        assert torch._inductor.config.freezing is False
 
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
@@ -2848,7 +2834,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 super().__init__()
 
             def forward(self, x, w):
-                assert x.dim() == 2, f"Expected x to be 2D, got {x.dim()}D"  # noqa: S101
+                assert x.dim() == 2, f"Expected x to be 2D, got {x.dim()}D"
                 x_expanded = x.unsqueeze(0).expand(bs, -1, -1)
                 return x_expanded @ w
 
@@ -3112,8 +3098,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 exact_dtype=True,
             )
             # Check that only 2 kernels are in the generated code
-            if code.count("AMXState amx_state") != 2:
-                raise AssertionError
+            assert code.count("AMXState amx_state") == 2
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

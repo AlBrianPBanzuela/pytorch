@@ -63,7 +63,6 @@ from torch._library.opaque_object import (
     is_opaque_value_type,
     should_hoist,
 )
-from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -176,7 +175,6 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import (
-    AttributeMutationExisting,
     AttributeMutationNew,
     typestr,
     ValueMutationExisting,
@@ -212,9 +210,10 @@ from .functions import (
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
     SysFunctionVariable,
     TritonKernelVariable,
-    TritonSetAllocatorVariable,
+    TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
     WrapperUserFunctionVariable,
 )
@@ -488,7 +487,6 @@ class VariableBuilder:
             )
 
     def _call_impl(self, value: object) -> VariableTracker:
-        self.tx.output.current_tracer.traced_sources.add(self.source)
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -643,20 +641,9 @@ class VariableBuilder:
         )
 
     def wrap_jit_function(self, value: Any) -> WrapperUserFunctionVariable:
-        if not hasattr(value, "_torchdynamo_inline"):
-            unimplemented(
-                gb_type="wrap_jit_function: missing _torchdynamo_inline",
-                context=f"type: {type(value).__name__}",
-                explanation="Dynamo expected a JIT function with a _torchdynamo_inline attribute, "
-                "but the object does not have one.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
         self.install_guards(GuardBuilder.TYPE_MATCH)
         return WrapperUserFunctionVariable(
-            value,
-            "_torchdynamo_inline",
-            source=self.source,
-            mutation_type=AttributeMutationExisting(),
+            value, "_torchdynamo_inline", source=self.source
         )
 
     def wrap_mapping_proxy(self, value: Any) -> VariableTracker:
@@ -1183,6 +1170,7 @@ class VariableBuilder:
             # type: ignore[arg-type]
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
+            # This refers to the device-agnostic torch.Stream
             self.install_guards(GuardBuilder.TYPE_MATCH)
             index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
@@ -1229,11 +1217,7 @@ class VariableBuilder:
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)
-            return OptimizerVariable(
-                value,
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            return OptimizerVariable(value, source=self.source)
         elif isinstance(value, torch.DispatchKeySet):
             self.install_guards(GuardBuilder.DISPATCH_KEY_SET_MATCH)
             return DispatchKeySetVariable(value)
@@ -1370,7 +1354,7 @@ class VariableBuilder:
         elif value is TensorDescriptor.from_tensor:
             return CreateTMADescriptorStableVariable()
         elif value is set_allocator:
-            return TritonSetAllocatorVariable(value)
+            return TritonSetAllocatorSkipVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1391,19 +1375,11 @@ class VariableBuilder:
         elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(
-                value,
-                "__original_fn",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
+                value, "__original_fn", source=self.source
             )
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__wrapped__",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
         elif value is sys.exc_info or (
             sys.version_info >= (3, 11) and value is sys.exception
         ):
@@ -1413,11 +1389,11 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(
-                value,
-                "_torchdynamo_inline",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
+                value, "_torchdynamo_inline", source=self.source
             )
+        elif value is functools.wraps:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return FunctoolsWrapsVariable(value, source=self.source)
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
@@ -1542,12 +1518,6 @@ class VariableBuilder:
                 ScriptObjectQualifiedNameSource,
             )
 
-            # Unwrap FakeScriptObject to the underlying real object so the
-            # rest of this branch (guards, graph inputs, etc.) operates on
-            # the real opaque object type.
-            if isinstance(value, torch._library.fake_class_registry.FakeScriptObject):
-                value = value.real_obj
-
             # type: ignore[arg-type]
             if torch._library.fake_class_registry.tracing_with_real(value):
                 proxy = self.tx.output.root_tracer.create_graph_input(
@@ -1609,18 +1579,7 @@ class VariableBuilder:
                 self.tx.output.fake_mode, value
             )
             if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
-                fake_script_obj = value
                 proxy = value
-
-            elif config.install_free_tensors and (
-                is_from_global_source(self.source)
-                or is_from_nonlocal_source(self.source)
-                or is_from_unspecialized_nn_module_source(self.source)
-            ):
-                return self.tx.output.register_attr_or_module(
-                    value, self.name, source=self.source
-                )
-
             else:
                 proxy = self.tx.output.root_tracer.create_graph_input(
                     re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -2035,19 +1994,6 @@ class VariableBuilder:
             self.source = AttrSource(self.source, "_orig_mod")
             return self.wrap_module(value._orig_mod)
 
-        if type(value) is torch.jit._script.RecursiveScriptModule:
-            unimplemented(
-                gb_type="torch.jit.script/freeze modules unsupported",
-                context=str(value),
-                explanation="Dynamo does not support tracing into torch.jit.script or "
-                "torch.jit.freeze modules because they execute in the TorchScript "
-                "runtime, not Python. Replace the ScriptModule submodule with the "
-                "original eager nn.Module.",
-                hints=[
-                    *graph_break_hints.FUNDAMENTAL,
-                ],
-            )
-
         if (
             isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
             and not config.allow_rnn
@@ -2458,12 +2404,6 @@ class VariableBuilder:
             **options,
         )
 
-        # Track input tensors for attribute mutation, matching how
-        # handle_traced_output tracks intermediate tensors with AttributeMutationNew.
-        # This enables setattr on input tensors (e.g. tensor.custom_attr = val)
-        # without graph breaking.
-        self.tx.output.side_effects.track_object_existing(value, tensor_variable)
-
         if value._is_view():
             # If value is a view, add its base tensor to the tracked fakes list.
             # This is so we are able to access the correct source for its symbolic
@@ -2548,15 +2488,6 @@ class VariableBuilder:
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
-                if not isinstance(
-                    inner_value, torch.Tensor
-                ) and not is_opaque_reference_type(type(inner_value)):
-                    raise RuntimeError(
-                        f"{type(inner_value).__name__!r} found in tensor attrs of "
-                        f"{type(value).__name__}.__tensor_flatten__(). "
-                        "Only tensors and reference-type opaques are allowed "
-                        "in tensor attrs."
-                    )
                 inner_source = AttrSource(self.source, attr)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
@@ -3151,7 +3082,7 @@ def wrap_fx_proxy_cls(
         )
         and proxy.node.op != "placeholder"
     ):
-        tx.output.current_tracer.record_proxyable_vt(out)
+        tx.output.current_tracer.record_tensor_or_symint_vt(out)
     return out
 
 
@@ -3441,8 +3372,6 @@ def handle_traced_output(
         proxy.node.target
         in [
             torch.sym_int,
-            torch.sym_max,
-            torch.sym_min,
             getattr,
             operator.getitem,
             torch._utils._element_size,
@@ -3499,21 +3428,10 @@ def handle_traced_output(
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif isinstance(example_value, torch._library.fake_class_registry.FakeScriptObject):
-        # example_value is already a FakeScriptObject (e.g. returned by getitem
-        # on a container whose fake kernel returns a FakeScriptObject).  No need
-        # to convert it — just wrap the proxy directly.
-        return TorchScriptObjectVariable.create(
-            proxy,
-            example_value,
-        )
     elif is_opaque_type(type(example_value)):
         # This is for handling opaque objects in custom ops
         if is_opaque_value_type(type(example_value)):
-            return TorchScriptObjectVariable.create(
-                example_value,  # pyrefly: ignore[bad-argument-type]
-                example_value,
-            )
+            proxy = example_value  # pyrefly: ignore[bad-assignment]
         fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
             tx.output.fake_mode, example_value
         )
@@ -3771,18 +3689,11 @@ def _automatic_dynamic(
         inner_contexts = {}  # mapping from attr -> symbolic context
         attrs, _ = type(e).__tensor_flatten__(e)
         for attr in attrs:
-            match getattr(e, attr):
-                case torch.Tensor() as inner_value:
-                    inner_source = AttrSource(source, attr)
-                    inner_contexts[attr] = _automatic_dynamic(
-                        inner_value, tx, inner_source, static_shapes
-                    )
-                case OpaqueBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
-                    )
+            inner_tensor = getattr(e, attr)
+            inner_source = AttrSource(source, attr)
+            inner_contexts[attr] = _automatic_dynamic(
+                inner_tensor, tx, inner_source, static_shapes
+            )
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,
@@ -4014,7 +3925,6 @@ def _automatic_dynamic(
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         shape_ids=getattr(e, "_dynamo_shape_ids", None),
-        unbacked_bounds=getattr(e, "_dynamo_unbacked_bounds", None),
     )
 
 
@@ -4099,16 +4009,8 @@ def _wrap_to_fake_tensor_and_record_impl(
             and isinstance(fake_e, FakeTensor)
             and (sym_val := fake_e.item_memo) is not None
         ):
-            # Match the peephole in FakeTensorConverter.from_real_tensor that
-            # strips FloatTensorSource before calling create_symbol.  Without
-            # this, the tracked fake source name won't match source_to_var and
-            # produce_guards_verbose will report "(unknown source)".
-            if isinstance(source, FloatTensorSource):
-                item_source = source.base
-            else:
-                item_source = CallMethodItemSource(source)
             tx.output.tracked_fakes.append(
-                TrackedFake(sym_val, item_source, symbolic_context)
+                TrackedFake(sym_val, CallMethodItemSource(source), symbolic_context)
             )
 
         if is_traceable_wrapper_subclass(fake_e):
@@ -4216,9 +4118,7 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_value_type(type(value)):
-            return TorchScriptObjectVariable.create(value, value)
-        elif is_opaque_reference_type(type(value)):
+        elif is_opaque_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 tx.output.fake_mode, value
@@ -4275,6 +4175,8 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
+        elif value is functools.wraps:
+            return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
             return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):

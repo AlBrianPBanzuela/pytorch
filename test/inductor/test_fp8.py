@@ -2,6 +2,7 @@
 
 import functools
 import unittest
+from typing import Union
 
 import torch
 from torch import Tensor
@@ -55,8 +56,8 @@ def _is_cuda_device(device) -> bool:
 
 
 def _fix_fp8_dtype_for_rocm(
-    dtype: torch.dtype | list[torch.dtype] | tuple[torch.dtype], device
-) -> torch.dtype | list[torch.dtype] | tuple[torch.dtype]:
+    dtype: Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]], device
+) -> Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]]:
     # This function is used to change FP8 data types
     # with MI300 supported FP8 types if device is GPU:
     #    e4m3fn -> e4m3fnuz
@@ -1034,20 +1035,9 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-
-        # On gfx120x, autotuned kernels have issues with small M
-        compile_mode = "max-autotune"
-        if (
-            torch.version.hip is not None
-            and M < 16
-            and torch.cuda.is_available()
-            and "gfx120" in torch.cuda.get_device_properties(0).gcnArchName
-        ):
-            compile_mode = "default"
-
         with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
-                linear, backend="inductor", mode=compile_mode
+                linear, backend="inductor", mode="max-autotune"
             )
             y_compiled = linear_compiled(
                 x_fp8,
@@ -1289,8 +1279,7 @@ class TestFP8Lowering(TestCase):
                 with config.patch({"loop_index_inversion_in_fusion": False}):
                     torch.compile(forward)(A, B)
 
-                if len(input_values) != 2:
-                    raise AssertionError
+                assert len(input_values) == 2
                 for i in range(4):
                     self.assertEqual(
                         input_values[0][i],
@@ -1345,20 +1334,9 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-
-        # On gfx120x, autotuned kernels have issues with small M
-        compile_mode = "max-autotune"
-        if (
-            torch.version.hip is not None
-            and M < 16
-            and torch.cuda.is_available()
-            and "gfx120" in torch.cuda.get_device_properties(0).gcnArchName
-        ):
-            compile_mode = "default"
-
         with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
-                linear, backend="inductor", mode=compile_mode
+                linear, backend="inductor", mode="max-autotune"
             )
             y_compiled = linear_compiled(
                 x_fp8,

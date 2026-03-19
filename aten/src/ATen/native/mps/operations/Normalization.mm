@@ -886,7 +886,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   const Tensor& weight = *weight_maybe_owned;
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
-  auto bias_contig = bias.expect_contiguous();
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
@@ -923,11 +922,11 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
 
       mps::mtl_setArgs(computeEncoder, *X, out, mean, rstd, axis_size, epsilon_buf, use_weight_buf, use_bias_buf);
       if (use_weight_and_bias_buf) {
-        mps::mtl_setArgs<8>(computeEncoder, *gamma, *bias_contig);
+        mps::mtl_setArgs<8>(computeEncoder, *gamma, bias);
       } else if (use_weight_buf) {
         mps::mtl_setArgs<8>(computeEncoder, *gamma);
       } else if (use_bias_buf) {
-        mps::mtl_setArgs<9>(computeEncoder, *bias_contig);
+        mps::mtl_setArgs<9>(computeEncoder, bias);
       }
       MTLSize numThreads = MTLSizeMake(std::min((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
       MTLSize numThreadgroups = MTLSizeMake(M, 1, 1);

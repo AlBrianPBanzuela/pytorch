@@ -14,7 +14,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
-from typing import TypeVar
+from typing import Optional, TypeVar, Union
 from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
@@ -96,7 +96,7 @@ M = TypeVar("M", bound=Callable)
 
 
 def large_tensor_test_class(
-    size: str, device: torch.device | str | None = None
+    size: str, device: Optional[Union[torch.device, str]] = None
 ) -> Callable[[type[T]], type[T]]:
     def decorator(cls: type[T]) -> type[T]:
         for name, method in list(cls.__dict__.items()):
@@ -427,7 +427,7 @@ def query_key_value_clones(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
 ):
     """Clones the query, key, and value tensors and moves them to the specified dtype."""
     if dtype is None:
@@ -462,7 +462,7 @@ class TestFlexAttention(InductorTestCase):
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
         fudge_factor: float,
-        tensor_name: str | None = None,
+        tensor_name: Optional[str] = None,
         fudge_atol: float = 0,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
@@ -548,11 +548,11 @@ class TestFlexAttention(InductorTestCase):
         Q_H: int = H,
         Q_S: int = S,
         Q_D: int = D,
-        KV_B: int | None = None,
-        KV_H: int | None = None,
-        KV_S: int | None = None,
-        V_D: int | None = None,
-        block_mask: BlockMask | None = None,
+        KV_B: Optional[int] = None,
+        KV_H: Optional[int] = None,
+        KV_S: Optional[int] = None,
+        V_D: Optional[int] = None,
+        block_mask: Optional[BlockMask] = None,
     ):
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         if KV_B is None:
@@ -599,12 +599,9 @@ class TestFlexAttention(InductorTestCase):
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        if not isinstance(golden_out, torch.Tensor):
-            raise AssertionError(f"Expected torch.Tensor, got {type(golden_out)}")
-        if not isinstance(ref_out, torch.Tensor):
-            raise AssertionError(f"Expected torch.Tensor, got {type(ref_out)}")
-        if not isinstance(compiled_out, torch.Tensor):
-            raise AssertionError(f"Expected torch.Tensor, got {type(compiled_out)}")
+        assert isinstance(golden_out, torch.Tensor)
+        assert isinstance(ref_out, torch.Tensor)
+        assert isinstance(compiled_out, torch.Tensor)
 
         if not requires_grad:
             self._check_out(
@@ -639,7 +636,7 @@ class TestFlexAttention(InductorTestCase):
 
     def preprocess_paged_attention(
         self,
-        score_mod: Callable | None,
+        score_mod: Optional[Callable],
         q: Tensor,
         k: Tensor,
         v: Tensor,
@@ -648,8 +645,7 @@ class TestFlexAttention(InductorTestCase):
         device: str,
         page_size: int = 128,
     ) -> tuple[Tensor, Tensor, BlockMask, _score_mod_signature]:
-        if block_mask is None:
-            raise AssertionError("Must provide block_mask")
+        assert block_mask is not None, "Must provide block_mask"
         Q_B, Q_H, Q_S, _ = q.shape
         KV_B, KV_H, KV_S, QK_D = k.shape
         _, _, _, V_D = v.shape
@@ -730,14 +726,14 @@ class TestFlexAttention(InductorTestCase):
 
     def run_paged_attention(
         self,
-        score_mod: Callable | None,
+        score_mod: Optional[Callable],
         q: Tensor,
         k: Tensor,
         v: Tensor,
         dtype: torch.dtype,
         device: str,
-        block_mask: BlockMask | None = None,
-        kernel_options: dict | None = None,
+        block_mask: Optional[BlockMask] = None,
+        kernel_options: Optional[dict] = None,
     ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
@@ -792,7 +788,7 @@ class TestFlexAttention(InductorTestCase):
 
     def run_test_with_paged_attention(
         self,
-        score_mod: Callable | None,
+        score_mod: Optional[Callable],
         dtype: torch.dtype,
         device,
         Q_B: int = B,
@@ -803,12 +799,9 @@ class TestFlexAttention(InductorTestCase):
         KV_H: int = H,
         KV_S: int = S,
         V_D: int = D,
-        block_mask: BlockMask | None = None,
+        block_mask: Optional[BlockMask] = None,
     ):
-        if Q_H % KV_H != 0:
-            raise AssertionError(
-                f"Expected Q_H % KV_H == 0, got {Q_H} % {KV_H} = {Q_H % KV_H}"
-            )
+        assert Q_H % KV_H == 0
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
 
@@ -1370,7 +1363,7 @@ class TestFlexAttention(InductorTestCase):
         device,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: int | tuple[int, int],
+        BLOCK_SIZE: Union[int, tuple[int, int]],
     ):
         block_mask = create_block_mask(
             noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=device
@@ -1396,16 +1389,10 @@ class TestFlexAttention(InductorTestCase):
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
-        if Hq % Hkv != 0:
-            raise AssertionError(
-                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
-            )
+        assert Hq % Hkv == 0
 
         Bq, Bkv = batch_dims
-        if not (Bq > 1 and Bkv == 1):
-            raise AssertionError(
-                f"Expected Bq > 1 and Bkv == 1, got Bq={Bq}, Bkv={Bkv}"
-            )
+        assert Bq > 1 and Bkv == 1
 
         block_mask = create_block_mask(noop_mask, Bq, 1, S, S, device=device)
 
@@ -1527,16 +1514,10 @@ class TestFlexAttention(InductorTestCase):
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
-        if Hq % Hkv != 0:
-            raise AssertionError(
-                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
-            )
+        assert Hq % Hkv == 0
 
         Bq, Bkv = batch_dims
-        if not (Bq > 1 and Bkv == 1):
-            raise AssertionError(
-                f"Expected Bq > 1 and Bkv == 1, got Bq={Bq}, Bkv={Bkv}"
-            )
+        assert Bq > 1 and Bkv == 1
 
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -1605,13 +1586,8 @@ class TestFlexAttention(InductorTestCase):
         def coerce_to_strides(val, shape, strides):
             strides, offset = strides
             val_max = [x * (y - 1) for x, y in zip(strides, shape)]
-            if sum(val_max) + offset >= B * H * S * D * 2:
-                raise AssertionError(
-                    f"Expected sum(val_max) + offset < B * H * S * D * 2, "
-                    f"got {sum(val_max) + offset} >= {B * H * S * D * 2}"
-                )
-            if strides[-1] != 1:
-                raise AssertionError(f"Expected strides[-1] == 1, got {strides[-1]}")
+            assert sum(val_max) + offset < B * H * S * D * 2
+            assert strides[-1] == 1
             return torch.as_strided(val, shape, strides, offset).requires_grad_(
                 requires_grad
             )
@@ -1978,8 +1954,7 @@ class TestFlexAttention(InductorTestCase):
         H = 32
         W = S // H
         WINDOW = 3
-        if W * H != S:
-            raise AssertionError(f"Expected W * H == S, got {W * H} != {S}")
+        assert W * H == S
 
         def get_x_y(idx):
             # This should be a floor divide, but we don't support that properly
@@ -2163,109 +2138,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         head_counts = [4, 8, 4, 16, 4]
         for head_count in head_counts:
             run_with_head_count(compiled_fa, head_count)
-
-    @supported_platform
-    @skip_on_cpu
-    @dtypes(torch.bfloat16)
-    @dtypesIfCUDA(torch.bfloat16)
-    def test_compacted_block_mask_matches_reference_after_recompile(
-        self, device, dtype
-    ):
-        block_size = 128
-        seq_len = 512
-        head_dim = 64
-        batch_size = 1
-
-        def mask_fn(b, h, q_idx, kv_idx, document_id):
-            causal = q_idx >= kv_idx
-            same_document = document_id[b, q_idx] == document_id[b, kv_idx]
-            return causal | same_document
-
-        def make_block_mask(document_id, compact):
-            ref = create_block_mask(
-                functools.partial(mask_fn, document_id=document_id),
-                B=batch_size,
-                H=None,
-                Q_LEN=seq_len,
-                KV_LEN=seq_len,
-                device=device,
-                BLOCK_SIZE=block_size,
-            )
-            if not compact:
-                return ref
-
-            nums = [
-                ref.kv_num_blocks,
-                ref.full_kv_num_blocks,
-                ref.q_num_blocks,
-                ref.full_q_num_blocks,
-            ]
-            indices = [
-                ref.kv_indices,
-                ref.full_kv_indices,
-                ref.q_indices,
-                ref.full_q_indices,
-            ]
-            compact_indices = [
-                index[..., : max(int(num.max()), 1)].contiguous()
-                for num, index in zip(nums, indices, strict=True)
-            ]
-            return BlockMask(
-                seq_lengths=ref.seq_lengths,
-                kv_num_blocks=ref.kv_num_blocks,
-                kv_indices=compact_indices[0],
-                full_kv_num_blocks=ref.full_kv_num_blocks,
-                full_kv_indices=compact_indices[1],
-                q_num_blocks=ref.q_num_blocks,
-                q_indices=compact_indices[2],
-                full_q_num_blocks=ref.full_q_num_blocks,
-                full_q_indices=compact_indices[3],
-                BLOCK_SIZE=ref.BLOCK_SIZE,
-                mask_mod=ref.mask_mod,
-            )
-
-        document_id_1 = torch.arange(seq_len, dtype=torch.int64, device=device).repeat(
-            batch_size, 1
-        )
-        document_id_1[:, :400] = 0
-        document_id_2 = torch.arange(seq_len, dtype=torch.int64, device=device).repeat(
-            batch_size, 1
-        )
-
-        query = torch.randn(
-            (batch_size, 1, seq_len, head_dim), device=device, dtype=dtype
-        )
-        key = torch.randn_like(query)
-        value = torch.randn_like(query)
-
-        def run(mask, attention):
-            q, k, v = [
-                x.detach().clone().requires_grad_(True) for x in (query, key, value)
-            ]
-            out = attention(q, k, v, block_mask=mask)
-            return out, torch.autograd.grad(out.sum(), (q, k, v))
-
-        ref_mask_1 = make_block_mask(document_id_1, compact=False)
-        ref_mask_2 = make_block_mask(document_id_2, compact=False)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            ref_out_1, ref_grads_1 = run(ref_mask_1, flex_attention)
-            ref_out_2, ref_grads_2 = run(ref_mask_2, flex_attention)
-
-        compact_mask_1 = make_block_mask(document_id_1, compact=True)
-        compact_mask_2 = make_block_mask(document_id_2, compact=True)
-
-        torch._dynamo.reset()
-        compiled_fa = torch.compile(flex_attention, fullgraph=True, dynamic=False)
-        out_1, grads_1 = run(compact_mask_1, compiled_fa)
-        out_2, grads_2 = run(compact_mask_2, compiled_fa)
-
-        torch.testing.assert_close(ref_out_1, out_1, atol=2e-2, rtol=2e-2)
-        torch.testing.assert_close(ref_out_2, out_2, atol=2e-2, rtol=2e-2)
-        for ref_grad, grad in zip(ref_grads_1, grads_1):
-            torch.testing.assert_close(ref_grad, grad, atol=3e-2, rtol=3e-2)
-        for ref_grad, grad in zip(ref_grads_2, grads_2):
-            torch.testing.assert_close(ref_grad, grad, atol=3e-2, rtol=3e-2)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -4486,10 +4358,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query, key, value, return_lse=True, kernel_options=kernel_options
         )
 
-        if not torch.equal(out_eager, out_compiled):
-            raise AssertionError("out_eager and out_compiled are not equal")
-        if not torch.equal(lse_eager, lse_compiled):
-            raise AssertionError("lse_eager and lse_compiled are not equal")
+        assert torch.equal(out_eager, out_compiled)
+        assert torch.equal(lse_eager, lse_compiled)
 
         grads_eager = torch.autograd.grad(out_eager.sum(), (query, key, value))
         grads_compile = torch.autograd.grad(out_compiled.sum(), (query, key, value))
@@ -4549,10 +4419,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             l = torch.randint(0, T, (B,), device=device)
             model(x, l)
 
-        if counter.frame_count != 1:
-            raise AssertionError(
-                f"Expected 1 graph, but got {counter.frame_count} graphs"
-            )
+        assert counter.frame_count == 1, (
+            f"Expected 1 graph, but got {counter.frame_count} graphs"
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -4913,8 +4782,7 @@ class GraphModule(torch.nn.Module):
         class AsStridedErrorTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
-                if not isinstance(elem, torch.Tensor):
-                    raise AssertionError(f"Expected torch.Tensor, got {type(elem)}")
+                assert isinstance(elem, torch.Tensor)
                 return torch.Tensor._make_wrapper_subclass(
                     cls,
                     elem.shape,
@@ -4937,8 +4805,7 @@ class GraphModule(torch.nn.Module):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                if meta is not None:
-                    raise AssertionError(f"Expected meta to be None, got {meta}")
+                assert meta is None
                 elem = inner_tensors["elem"]
                 return AsStridedErrorTensor(elem)
 
@@ -5106,8 +4973,7 @@ class GraphModule(torch.nn.Module):
             def _init_tables(self, N: int, R: int) -> None:
                 P = N - R
                 S = int(P**0.5)
-                if S * S != P:
-                    raise AssertionError(f"Expected S * S == P, got {S * S} != {P}")
+                assert S * S == P
                 rng = torch.arange(-(S - 1), S, dtype=torch.float32)
                 dY, dX = torch.meshgrid(rng, rng, indexing="ij")
                 rel = torch.stack(
@@ -5450,21 +5316,21 @@ class GraphModule(torch.nn.Module):
             *positional_args,
             **keyword_args,
         )
-        if kernel_code is None:
-            raise AssertionError("Failed to retrieve compiled kernel code")
-        if "num_consumer_groups" not in kernel_code[0]:
-            raise AssertionError("num_consumer_groups missing in kernel definition")
-        if "num_buffers_warp_spec" not in kernel_code[0]:
-            raise AssertionError("num_buffers_warp_spec missing in kernel definition")
+        assert kernel_code is not None, "Failed to retrieve compiled kernel code"
+        assert "num_consumer_groups" in kernel_code[0], (
+            "num_consumer_groups missing in kernel definition"
+        )
+        assert "num_buffers_warp_spec" in kernel_code[0], (
+            "num_buffers_warp_spec missing in kernel definition"
+        )
 
         # Validate correctness
         C1 = flex_compiled(q, k, v)
         C2 = flex_attention(q, k, v)
 
-        if not torch.allclose(C1, C2, atol=1e-2, rtol=1e-2):
-            raise AssertionError(
-                "Warp specialized kernel result differs from reference"
-            )
+        assert torch.allclose(C1, C2, atol=1e-2, rtol=1e-2), (
+            "Warp specialized kernel result differs from reference"
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -5697,10 +5563,7 @@ class GraphModule(torch.nn.Module):
             result = orig_stride_call(self, node)
             if flexible_layout:
                 flexible_layout_called = True
-                if not isinstance(node.data.layout, ir.FixedLayout):
-                    raise AssertionError(
-                        f"Expected FixedLayout, got {type(node.data.layout)}"
-                    )
+                assert isinstance(node.data.layout, ir.FixedLayout)
             return result
 
         with patch.object(
@@ -5746,7 +5609,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
-    def test_block_size_changes(self, device, BLOCK_SIZE: int | tuple[int, int]):
+    def test_block_size_changes(self, device, BLOCK_SIZE: Union[int, tuple[int, int]]):
         B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048
 
         if isinstance(BLOCK_SIZE, int):
@@ -5770,77 +5633,41 @@ class TestBlockMask(InductorTestCase):
             return (q + (offset[b] * 128)) >= kv
 
         block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device=device)
-        if block_mask.kv_num_blocks.shape != (4, 2, 4):
-            raise AssertionError(
-                f"Expected shape (4, 2, 4), got {block_mask.kv_num_blocks.shape}"
-            )
-        if block_mask.kv_indices.shape != (4, 2, 4, 4):
-            raise AssertionError(
-                f"Expected shape (4, 2, 4, 4), got {block_mask.kv_indices.shape}"
-            )
+        assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+        assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
         # Index on batch dimension
         new_block_mask = block_mask[0]
-        if new_block_mask.kv_num_blocks.shape != (1, 2, 4):
-            raise AssertionError(
-                f"Expected shape (1, 2, 4), got {new_block_mask.kv_num_blocks.shape}"
-            )
-        if new_block_mask.kv_indices.shape != (1, 2, 4, 4):
-            raise AssertionError(
-                f"Expected shape (1, 2, 4, 4), got {new_block_mask.kv_indices.shape}"
-            )
+        assert new_block_mask.kv_num_blocks.shape == (1, 2, 4)
+        assert new_block_mask.kv_indices.shape == (1, 2, 4, 4)
 
         # Index on batch and head dimension
         new_block_mask = block_mask[0, 1]
-        if new_block_mask.kv_num_blocks.shape != (
+        assert new_block_mask.kv_num_blocks.shape == (
             1,
             1,
             4,
-        ):
-            raise AssertionError(
-                f"Expected shape (1, 1, 4), got {new_block_mask.kv_num_blocks.shape}"
-            )
-        if new_block_mask.kv_indices.shape != (1, 1, 4, 4):
-            raise AssertionError(
-                f"Expected shape (1, 1, 4, 4), got {new_block_mask.kv_indices.shape}"
-            )
+        )
+        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
 
         # Index on batch and head dimension with -1 semantics
         new_block_mask = block_mask[-1, -2]
-        if new_block_mask.kv_num_blocks.shape != (
+        assert new_block_mask.kv_num_blocks.shape == (
             1,
             1,
             4,
-        ):
-            raise AssertionError(
-                f"Expected shape (1, 1, 4), got {new_block_mask.kv_num_blocks.shape}"
-            )
-        if new_block_mask.kv_indices.shape != (1, 1, 4, 4):
-            raise AssertionError(
-                f"Expected shape (1, 1, 4, 4), got {new_block_mask.kv_indices.shape}"
-            )
+        )
+        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
 
         # slicing on batch and head dimension
         new_block_mask = block_mask[0:2, 1:2]
-        if new_block_mask.kv_num_blocks.shape != (2, 1, 4):
-            raise AssertionError(
-                f"Expected shape (2, 1, 4), got {new_block_mask.kv_num_blocks.shape}"
-            )
-        if new_block_mask.kv_indices.shape != (2, 1, 4, 4):
-            raise AssertionError(
-                f"Expected shape (2, 1, 4, 4), got {new_block_mask.kv_indices.shape}"
-            )
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+        assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
 
         # slicing on batch, head, and query dimension
         new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
-        if new_block_mask.kv_num_blocks.shape != (2, 1, 1):
-            raise AssertionError(
-                f"Expected shape (2, 1, 1), got {new_block_mask.kv_num_blocks.shape}"
-            )
-        if new_block_mask.kv_indices.shape != (2, 1, 1, 4):
-            raise AssertionError(
-                f"Expected shape (2, 1, 1, 4), got {new_block_mask.kv_indices.shape}"
-            )
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+        assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
 
         # slicing on batch, head, and query dimension
         q_index = torch.tensor([0], dtype=torch.int32)
@@ -5857,10 +5684,8 @@ class TestBlockMask(InductorTestCase):
         )
 
         if block_mask.full_kv_num_blocks is not None:
-            if new_block_mask.full_kv_num_blocks is None:
-                raise AssertionError("Expected full_kv_num_blocks to not be None")
-            if new_block_mask.full_kv_indices is None:
-                raise AssertionError("Expected full_kv_indices to not be None")
+            assert new_block_mask.full_kv_num_blocks is not None
+            assert new_block_mask.full_kv_indices is not None
             torch.testing.assert_close(
                 new_block_mask.full_kv_num_blocks,
                 block_mask.full_kv_num_blocks[:, :, q_index],
@@ -5901,50 +5726,22 @@ class TestBlockMask(InductorTestCase):
             return (q + (offset[b] * 128)) >= kv
 
         block_mask = create_block_mask(causal_mask, 1, 1, 512, 512, device=device)
-        if block_mask.kv_indices.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.kv_indices.device.type}"
-            )
-        if block_mask.kv_num_blocks.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.kv_num_blocks.device.type}"
-            )
-        if block_mask.q_indices.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.q_indices.device.type}"
-            )
-        if block_mask.q_num_blocks.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.q_num_blocks.device.type}"
-            )
+        assert block_mask.kv_indices.device.type == device.type
+        assert block_mask.kv_num_blocks.device.type == device.type
+        assert block_mask.q_indices.device.type == device.type
+        assert block_mask.q_num_blocks.device.type == device.type
 
         block_mask = block_mask.to("cpu")
-        if not block_mask.kv_indices.is_cpu:
-            raise AssertionError("Expected kv_indices to be on CPU")
-        if not block_mask.kv_num_blocks.is_cpu:
-            raise AssertionError("Expected kv_num_blocks to be on CPU")
-        if not block_mask.q_indices.is_cpu:
-            raise AssertionError("Expected q_indices to be on CPU")
-        if not block_mask.q_num_blocks.is_cpu:
-            raise AssertionError("Expected q_num_blocks to be on CPU")
+        assert block_mask.kv_indices.is_cpu
+        assert block_mask.kv_num_blocks.is_cpu
+        assert block_mask.q_indices.is_cpu
+        assert block_mask.q_num_blocks.is_cpu
 
         block_mask = block_mask.to(device)
-        if block_mask.kv_indices.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.kv_indices.device.type}"
-            )
-        if block_mask.kv_num_blocks.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.kv_num_blocks.device.type}"
-            )
-        if block_mask.q_indices.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.q_indices.device.type}"
-            )
-        if block_mask.q_num_blocks.device.type != device.type:
-            raise AssertionError(
-                f"Expected device type {device.type}, got {block_mask.q_num_blocks.device.type}"
-            )
+        assert block_mask.kv_indices.device.type == device.type
+        assert block_mask.kv_num_blocks.device.type == device.type
+        assert block_mask.q_indices.device.type == device.type
+        assert block_mask.q_num_blocks.device.type == device.type
 
     @supported_platform
     def test_compiling_create_block_mask(self, device):
@@ -6199,7 +5996,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 torch.arange(len(counts), device=device, dtype=torch.int32), counts
             )
 
-        def length_to_offsets(lengths: list[int], device: str | torch.device) -> Tensor:
+        def length_to_offsets(
+            lengths: list[int], device: Union[str, torch.device]
+        ) -> Tensor:
             offsets = [0]
             offsets.extend(lengths)
             offsets = torch.tensor(offsets, device=device, dtype=torch.int32)
@@ -6442,14 +6241,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
         out.sum().backward()
 
-        if not out.isfinite().all().item():
-            raise AssertionError("out contains non-finite values")
-        if not q.grad.isfinite().all().item():
-            raise AssertionError("q.grad contains non-finite values")
-        if not k.grad.isfinite().all().item():
-            raise AssertionError("k.grad contains non-finite values")
-        if not v.grad.isfinite().all().item():
-            raise AssertionError("v.grad contains non-finite values")
+        assert out.isfinite().all().item()
+        assert q.grad.isfinite().all().item()
+        assert k.grad.isfinite().all().item()
+        assert v.grad.isfinite().all().item()
 
     @supported_platform
     @skip_on_cpu
@@ -6476,13 +6271,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v, score_mod=score_mod, block_mask=block_mask
         )
         out.sum().backward()
-        if not out.isfinite().all().item():
-            raise AssertionError("out contains non-finite values")
-        if not q.grad.isfinite().all().item():
-            raise AssertionError("q.grad contains non-finite values")
+        assert out.isfinite().all().item()
+        assert q.grad.isfinite().all().item()
         # assert k.grad.isfinite().all().item()
-        if not v.grad.isfinite().all().item():
-            raise AssertionError("v.grad contains non-finite values")
+        assert v.grad.isfinite().all().item()
 
     @supported_platform
     @skip_on_cpu
@@ -6509,13 +6301,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v, score_mod=score_mod, block_mask=block_mask
         )
         out.sum().backward()
-        if not out.isfinite().all().item():
-            raise AssertionError("out contains non-finite values")
-        if not q.grad.isfinite().all().item():
-            raise AssertionError("q.grad contains non-finite values")
+        assert out.isfinite().all().item()
+        assert q.grad.isfinite().all().item()
         # assert k.grad.isfinite().all().item()
-        if not v.grad.isfinite().all().item():
-            raise AssertionError("v.grad contains non-finite values")
+        assert v.grad.isfinite().all().item()
 
     @supported_platform
     @skip_on_cpu
@@ -6796,7 +6585,7 @@ class TestPagedAttention(InductorTestCase):
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
         fudge_factor: float,
-        tensor_name: str | None = None,
+        tensor_name: Optional[str] = None,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
@@ -7218,7 +7007,7 @@ class Params:
     seq_length: int
     head_dim: int
     dtype: torch.dtype
-    config_str: str | None = None
+    config_str: Optional[str] = None
 
     def __str__(self):
         return f"batch:{self.batch_size}_head:{self.num_heads}_seq_len:{self.seq_length}_headdim:{self.head_dim}_dtype:{str(self.dtype).split('.')[-1]}"
@@ -7839,10 +7628,8 @@ class TestLearnableBiases(InductorTestCase):
         loss = torch.nn.functional.mse_loss(attn_output, random_target)
         loss.backward()
 
-        if bias.grad is None:
-            raise AssertionError("No gradient computed for bias")
-        if not torch.any(bias.grad != 0):
-            raise AssertionError("Gradient for bias is 0")
+        assert bias.grad, "No gradient computed for bias"
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"
 
     @skip_on_cpu
     def test_backprop_error_case(self, device):
@@ -7870,10 +7657,8 @@ class TestLearnableBiases(InductorTestCase):
 
         _ = test(x, y).mean().backward()
 
-        if not (x.grad.norm() > 0):
-            raise AssertionError(f"Expected x.grad.norm() > 0, got {x.grad.norm()}")
-        if not (y.grad.norm() > 0):
-            raise AssertionError(f"Expected y.grad.norm() > 0, got {y.grad.norm()}")
+        assert x.grad.norm() > 0
+        assert y.grad.norm() > 0
 
     @skip_on_cpu
     @common_utils.parametrize(

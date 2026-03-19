@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import unittest
+from typing import Optional
 
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ from torch.testing._internal.static_module import StaticModule
 
 
 def linear_shim(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
     output = input.matmul(weight.t())
     if bias is not None:

@@ -43,15 +43,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         "-Wno-error=incompatible-pointer-types-discards-qualifiers",
     ]
 
-    WASM_EMSCRIPTEN_COMPILER_FLAGS = select({
-        "DEFAULT": [],
-        "ovr_config//runtime:wasm-emscripten": [
-            "-pthread",
-            "-matomics",
-            "-mbulk-memory",
-        ],
-    })
-
     XNN_COMMON_MICROKERNEL_EXPORTED_DEPS = [
         ":interface",
         third_party("FP16"),
@@ -82,7 +73,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
-        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
+        ],
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -109,7 +100,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
-        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
+        ],
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -136,7 +127,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-fno-fast-math",
             "-fno-math-errno",
             "-ffp-contract=off",
-        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
+        ],
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1852,7 +1843,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = select({
             "DEFAULT": [],
             "ovr_config//os:macos": ["-fvisibility=default"],
-        }) + WASM_EMSCRIPTEN_COMPILER_FLAGS,
+        }),
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS + [
             "-DXNN_NO_Q8_OPERATORS",

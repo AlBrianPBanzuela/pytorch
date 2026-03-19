@@ -14,7 +14,7 @@ import copy
 import inspect
 import logging
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 from onnxscript import evaluator
 
@@ -29,18 +29,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ValidAttributeType = (
-    ir.TensorProtocol
-    | int
-    | float
-    | bool
-    | str
-    | Sequence[int]
-    | Sequence[float]
-    | None
-)
+ValidAttributeType = Union[
+    ir.TensorProtocol, int, float, bool, str, Sequence[int], Sequence[float], None
+]
 
-AllowedArgType = ir.Value | Sequence[ir.Value | ValidAttributeType] | ValidAttributeType
+AllowedArgType = Union[
+    ir.Value, Sequence[Union[ir.Value, ValidAttributeType]], ValidAttributeType
+]
 
 
 # Logic for adapting inputs from general Python or PyTorch inputs to ONNX ir.Value

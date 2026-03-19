@@ -282,10 +282,7 @@ graph():
         schedulable = {"wait_tensor_default", "wait_tensor_default_1"}
         for node in list(graph.nodes):
             expected = node.name in schedulable
-            if _schedulable_wait_node(node) is not expected:
-                raise AssertionError(
-                    f"Expected _schedulable_wait_node({node.name}) is {expected}"
-                )
+            assert _schedulable_wait_node(node) is expected
 
     @torch._inductor.config.patch(get_patches())
     def test_reorder_compute_for_overlap_mul(self):
@@ -947,8 +944,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             with FakeTensorMode():
                 nonlocal estimation_calls
                 estimation_calls += 1
-                if not isinstance(torch.rand([20]), torch._subclasses.FakeTensor):
-                    raise AssertionError("Expected FakeTensor")
+                assert isinstance(torch.rand([20]), torch._subclasses.FakeTensor)
 
             return 1.0
 
@@ -1477,7 +1473,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             [
                 "l_func_self_modules_layers_modules_0_modules_wq_parameters_weight_",
                 "l_func_self_modules_layers_modules_0_modules_wq_parameters_bias_",
-                "l_args_0_",
                 "linear",
             ],
         )
@@ -1489,7 +1484,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             [
                 "l_func_self_modules_layers_modules_0_modules_wq_parameters_weight_",
                 "l_func_self_modules_layers_modules_0_modules_wq_parameters_bias_",
-                "l_args_0_",
                 "linear",
                 "l_func_self_modules_layers_modules_0_modules_proj_parameters_weight_",
                 "l_func_self_modules_layers_modules_0_modules_proj_parameters_bias_",
@@ -1510,7 +1504,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             [
                 "l_func_self_modules_layers_modules_0_modules_wq_parameters_weight_",
                 "l_func_self_modules_layers_modules_0_modules_wq_parameters_bias_",
-                "l_args_0_",
                 "linear",
             ],
         )

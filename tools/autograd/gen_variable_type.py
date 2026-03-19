@@ -376,7 +376,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "_neg_view",
     "_reshape_alias",
     "_reshape_copy",
-    "narrow_copy",
     "_linalg_det",
     "lu_solve",
     "linalg_solve_triangular",

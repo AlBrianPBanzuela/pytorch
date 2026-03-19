@@ -1125,10 +1125,9 @@ void _trace_post_record(
   // to the original tuple type.
   if (!unpack_output) {
     std::vector<at::TypePtr> new_tuple_values;
-    new_tuple_values.reserve(num_outputs);
     for (const auto i : c10::irange(num_outputs)) {
       auto ptr = node->outputs()[i]->type();
-      new_tuple_values.push_back(std::move(ptr));
+      new_tuple_values.push_back(ptr);
     }
     auto tuple_type = at::TupleType::create(std::move(new_tuple_values));
     // The i-th tuple element receives a new tensor type with element type and

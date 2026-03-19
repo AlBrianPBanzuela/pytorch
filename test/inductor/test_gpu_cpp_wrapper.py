@@ -117,13 +117,6 @@ test_failures_gpu_wrapper = {
     ),
 }
 
-# Skip only on CUDA as wrapper dynamic shapes passes on ROCm.
-# Per https://github.com/pytorch/pytorch/pull/172780
-if not torch.version.hip:
-    test_failures_gpu_wrapper["test_mm_plus_mm3_dynamic_shapes"] = (
-        test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False)
-    )
-
 
 def make_test_case(
     name,
@@ -140,8 +133,7 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    if not callable(func):
-        raise AssertionError("not a callable")
+    assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
     @config.patch(cpp_wrapper=True)

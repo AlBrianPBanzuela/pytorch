@@ -334,8 +334,7 @@ with torch.jit.fuser("fuser2"):
   minifier(fx.symbolic_trace(mod), inps, check_nvfuser_subprocess)
 """
     )
-    # pyrefly: ignore[missing-import, missing-module-attribute]
-    from foo import FxModule
+    from foo import FxModule  # pyrefly: ignore[missing-import]
 
     FxModule().cuda()(*inps)
 

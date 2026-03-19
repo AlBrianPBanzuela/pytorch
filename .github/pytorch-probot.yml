@@ -7,7 +7,6 @@ ciflow_push_tags:
 - ciflow/binaries
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
-- ciflow/dtensor
 - ciflow/dynamo
 - ciflow/h100
 - ciflow/h100-cutlass-backend
@@ -47,7 +46,6 @@ ciflow_push_tags:
 - ciflow/slow
 - ciflow/slow-rocm-mi200
 - ciflow/torchbench
-- ciflow/torchtitan
 - ciflow/triton_binaries
 - ciflow/trunk
 - ciflow/unstable

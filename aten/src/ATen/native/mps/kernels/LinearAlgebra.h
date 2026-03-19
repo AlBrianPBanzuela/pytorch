@@ -21,8 +21,3 @@ struct UnpackPivotsParams {
   uint32_t pivots_batch_stride;
   uint32_t dim_size;
 };
-
-struct QrParams {
-  uint32_t m;
-  uint32_t n;
-};
