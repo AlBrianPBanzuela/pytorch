@@ -484,9 +484,7 @@ class TracebackVariable(VariableTracker):
 
     @staticmethod
     def is_valid_traceback(obj: VariableTracker) -> bool:
-        return istype(obj, TracebackVariable) or (
-            istype(obj, ConstantVariable) and obj.is_constant_none()
-        )
+        return istype(obj, TracebackVariable) or obj.is_constant_none()
 
     def extract_tb(self) -> list[traceback.FrameSummary | FrameSummaryVariable]:
         if istype(self.tb_next, ConstantVariable):
@@ -630,7 +628,14 @@ class ExceptionVariable(VariableTracker):
         name = name_var.as_python_constant()
         if name == "__context__":
             # Constant can be either an Exceptior or None
-            assert isinstance(val, (ExceptionVariable, ConstantVariable)), f"{val}, {type(val)}"
+            assert isinstance(
+                val,
+                (
+                    variables.ExceptionVariable,
+                    variables.UserDefinedExceptionClassVariable,
+                    variables.UserDefinedExceptionObjectVariable,
+                ),
+            ), f"{val} is not a valid exception context"
             self.set_context(val)
         elif name == "__cause__":
             if val.is_constant_none() or isinstance(
