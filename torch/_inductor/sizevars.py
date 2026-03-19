@@ -423,13 +423,23 @@ class SizeVarAllocator:
         # This handles cases like symbolic products and sums more robustly.
         if denominator == 0:
             return False
-        gcd_result = sympy.gcd(numerator, denominator)
         
-        # If the GCD is equal to the denominator, it confirms divisibility.
-        if gcd_result == denominator:
-            return True
-            
-        return False
+        try:
+            # Use Greatest Common Divisor (GCD) to verify if the numerator is a 
+            # statically known multiple of the denominator. This approach natively 
+            # handles symbolic products (sympy.Mul), sums (sympy.Add), and complex 
+            # composite expressions without requiring explicit type checks.
+            gcd_result = sympy.gcd(numerator, denominator)
+    
+            # If the GCD is equal to the denominator, the divisibility is 
+            # mathematically guaranteed for the given symbolic expression.
+            return gcd_result == denominator
+
+        except (AttributeError, TypeError):
+            # Defensive fallback for internal or dummy symbols that may lack 
+            # expected metadata (e.g., symbols without 'backed_var_to_val'). 
+            # This ensures stability during compilation and prevents CI regressions.
+            return False
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
         """
