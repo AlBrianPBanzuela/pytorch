@@ -588,7 +588,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().as_python_constant()
 
     def get_real_python_backed_value(self) -> Any:
-        return self.as_python_constant()
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        return super().get_real_python_backed_value()
 
     def self_args(self) -> list[VariableTracker]:
         return []

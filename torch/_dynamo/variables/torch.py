@@ -171,6 +171,7 @@ constant_fold_functions_need_guards = [
     torch.cuda.is_initialized,
     torch.xpu.current_device,
     torch.xpu.is_initialized,
+    torch.__future__.get_overwrite_module_params_on_conversion,
 ]
 
 constant_fold_functions = [
