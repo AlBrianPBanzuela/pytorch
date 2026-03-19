@@ -54,6 +54,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void* diff_guard_root_mgr{nullptr};
   // backend used to create this cache entry
   py::object backend;
+  // region_id for per-torch.compile() cache isolation (-1 = no region)
+  int64_t region_id{-1};
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list

@@ -199,13 +199,7 @@ def exceeds_recompile_limit(
     cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
 ) -> tuple[bool, str]:
     """
-    Checks if we are exceeding the global cache size limit.
-
-    The global recompile_limit is per-code-object: each code object (including
-    resume functions from graph breaks) independently gets up to N recompilations.
-    The region_recompile_limit iterates on this by using the max recompilations
-    among all code objects in the region, so that once any code object in the
-    region hits the limit, all compilation in the region stops.
+    Checks if we are exceeding the cache size limit.
     """
     if cache_size.will_compilation_exceed_accumulated_limit():
         return True, "accumulated_recompile_limit"

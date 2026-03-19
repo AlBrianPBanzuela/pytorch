@@ -576,6 +576,9 @@ def get_compile_id(
     )
 
 
+_next_region_id = 0
+
+
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -595,6 +598,12 @@ class ConvertFrameAssert:
         self._package = package
         self._region_recompile_limit = region_recompile_limit
         self._region_compilation_counts: dict[CodeType, int] = {}
+        if region_recompile_limit is not None:
+            global _next_region_id
+            self._region_id = _next_region_id
+            _next_region_id += 1
+        else:
+            self._region_id = -1
         self._box = ConvertFrameBox()
 
     @property
@@ -747,6 +756,7 @@ class ConvertFrameAssert:
                     skip=skip + 1,
                     package=self._package,
                     convert_frame_box=self._box,
+                    region_id=self._region_id,
                 )
         finally:
             # Restore the previous initial_global_state for nested compilation handling
@@ -1486,6 +1496,7 @@ def _compile(
     # Can be used to record things for the caller, both
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
+    region_id: int = -1,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         BisectValidationException,
@@ -1714,6 +1725,7 @@ def _compile(
             check_fn.guard_manager,  # type: ignore[arg-type]
             compile_id,
             annotation_str,
+            region_id=region_id,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
