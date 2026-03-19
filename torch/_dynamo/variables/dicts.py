@@ -1935,6 +1935,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # __dict__ starts empty. Any mutation will actually be recorded in
             # the side effects table
             return {}
+        elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
+            return SideEffectsProxyDict.get_example_value_dict(vt.vt)
         else:
             value = vt.python_value_for_identity()
             if value is not NO_SUCH_SUBOBJ:

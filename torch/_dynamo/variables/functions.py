@@ -1507,6 +1507,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             source=self.source,
         )
 
+    def python_value_for_identity(self):
+        return self.vt.python_value_for_identity()
+
 
 class FunctionDecoratedByContextlibContextManagerVariable(
     LocalGeneratorFunctionVariable
@@ -2435,6 +2438,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
             kwargs,
         )
+
+    def python_value_for_identity(self):
+        return getattr(self.wrapper_obj, self.attr_to_trace)
 
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):
