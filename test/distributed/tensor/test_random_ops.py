@@ -1060,13 +1060,11 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
     @skip_if_lt_x_gpu(8)
     def test_randn_matches_torch_with_same_seed(self):
         """
-        Test that DTensor randn produces identical results to torch.randn when using the same seed.
+        Test that DTensor random ops produce identical results to single-GPU torch
+        ops when using the same seed.
 
-        This verifies that:
-        1. DTensor random operations respect torch.manual_seed()
-        2. DTensor randn produces the same global tensor as torch.randn with identical seeds
-        3. Multiple consecutive random operations maintain consistency
-        4. _StridedShard placement raises an error (not yet supported)
+        Covers randn, rand, normal_, and uniform_ across multiple placements and
+        both even (8, 8) and uneven (7, 8) tensor shapes.
         """
         from torch.distributed.tensor._random import set_use_thread_based_rng
         from torch.distributed.tensor.placement_types import _StridedShard
@@ -1074,44 +1072,72 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
         mesh = torch.arange(self.world_size).view(2, 2, 2)
         device_mesh = DeviceMesh(self.device_type, mesh)
 
-        set_use_thread_based_rng(True, device=torch.device(self.device_type))
-        # Generate reference tensors using regular torch.randn
-        torch.manual_seed(42)
-        reference_tensor_1 = torch.randn(8, 8, device=self.device_type)
-        reference_tensor_2 = torch.randn(8, 8, device=self.device_type)
+        set_use_thread_based_rng(True)
 
-        placements_list = [  # this list of placements should be enough to cover
+        placements_list = [
             [Shard(0), Shard(0), Shard(1)],
             [Shard(0), Shard(1), Replicate()],
             [Replicate(), Shard(0), Replicate()],
             [Replicate(), Shard(1), Replicate()],
             [Replicate(), Replicate(), Replicate()],
         ]
-        for placements in placements_list:
-            # Generate DTensor tensors with the same seed
-            torch.manual_seed(42)
-            dtensor_1 = torch.distributed.tensor.randn(
-                (8, 8), device_mesh=device_mesh, placements=placements
-            )
-            # Gather distributed tensor to replicate for comparison
-            gathered_tensor_1 = dtensor_1.full_tensor()
+        shapes = [(8, 8), (7, 8)]
 
-            dtensor_2 = torch.distributed.tensor.randn(
-                (8, 8), device_mesh=device_mesh, placements=placements
-            )
-            gathered_tensor_2 = dtensor_2.full_tensor()
+        for shape in shapes:
+            for placements in placements_list:
+                # --- randn ---
+                torch.manual_seed(42)
+                ref = torch.randn(*shape, device=self.device_type)
+                torch.manual_seed(42)
+                dt = torch.distributed.tensor.randn(
+                    shape, device_mesh=device_mesh, placements=placements
+                )
+                self.assertTrue(
+                    torch.equal(ref, dt.full_tensor()),
+                    f"randn mismatch for shape={shape}, placements={placements}",
+                )
 
-            # Verify DTensor produces identical results to regular torch tensors
-            self.assertTrue(
-                torch.equal(reference_tensor_1, gathered_tensor_1),
-                f"First DTensor at randn call does not match torch.randn with same seed. "
-                f"Expected: {reference_tensor_1.tolist()}, Got: {gathered_tensor_1.tolist()}",
-            )
-            self.assertTrue(
-                torch.equal(reference_tensor_2, gathered_tensor_2),
-                f"Second DTensor randn call does not match torch.randn with same seed. "
-                f"Expected: {reference_tensor_2.tolist()}, Got: {gathered_tensor_2.tolist()}",
-            )
+                # --- rand ---
+                torch.manual_seed(42)
+                ref = torch.rand(*shape, device=self.device_type)
+                torch.manual_seed(42)
+                dt = torch.distributed.tensor.rand(
+                    shape, device_mesh=device_mesh, placements=placements
+                )
+                self.assertTrue(
+                    torch.equal(ref, dt.full_tensor()),
+                    f"rand mismatch for shape={shape}, placements={placements}",
+                )
+
+                # --- normal_ ---
+                torch.manual_seed(42)
+                ref = torch.empty(*shape, device=self.device_type).normal_()
+                torch.manual_seed(42)
+                dt = distribute_tensor(
+                    torch.empty(*shape, device=self.device_type),
+                    device_mesh,
+                    placements,
+                )
+                dt.normal_()
+                self.assertTrue(
+                    torch.equal(ref, dt.full_tensor()),
+                    f"normal_ mismatch for shape={shape}, placements={placements}",
+                )
+
+                # --- uniform_ ---
+                torch.manual_seed(42)
+                ref = torch.empty(*shape, device=self.device_type).uniform_()
+                torch.manual_seed(42)
+                dt = distribute_tensor(
+                    torch.empty(*shape, device=self.device_type),
+                    device_mesh,
+                    placements,
+                )
+                dt.uniform_()
+                self.assertTrue(
+                    torch.equal(ref, dt.full_tensor()),
+                    f"uniform_ mismatch for shape={shape}, placements={placements}",
+                )
 
         # Test that _StridedShard placement raises an error (not yet supported)
         strided_shard_placements = [
@@ -1127,7 +1153,7 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
             torch.distributed.tensor.randn(
                 (8, 8), device_mesh=device_mesh, placements=strided_shard_placements
             )
-        set_use_thread_based_rng(False, device=torch.device(self.device_type))
+        set_use_thread_based_rng(False)
 
     @with_comms
     @skip_if_lt_x_gpu(8)
@@ -1147,7 +1173,7 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
         mesh = torch.arange(self.world_size).view(2, 2, 2)
         device_mesh = DeviceMesh(self.device_type, mesh)
 
-        set_use_thread_based_rng(True, device=torch.device(self.device_type))
+        set_use_thread_based_rng(True)
         # Generate reference tensors using regular torch.randn
         torch.manual_seed(42)
         torch.randn(8, 8, device=self.device_type)
@@ -1186,7 +1212,7 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
                 f"Second DTensor randn call does not match torch.randn with same seed. "
                 f"Expected: {reference_tensor.tolist()}, Got: {gathered_tensor.tolist()}",
             )
-        set_use_thread_based_rng(False, device=torch.device(self.device_type))
+        set_use_thread_based_rng(False)
 
 
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(

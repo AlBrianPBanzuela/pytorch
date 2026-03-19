@@ -4,7 +4,6 @@ import contextlib
 import warnings
 from collections.abc import Sequence
 from logging import getLogger
-from typing import Optional
 
 import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
@@ -23,41 +22,24 @@ __all__ = [
     "set_use_shard_aware_rng",
     "ThreadBasedRNGTracker",
     "set_use_thread_based_rng",
-    "_USE_THREAD_RNG_TRACKER",
 ]
 
-_rng_tracker: Optional["_RNGStateTracker"] = None
-
-# When True, use the sharding-aware RNG kernel that produces globally
-# reproducible random sequences regardless of tensor partitioning.
-# When False, use the standard offset-based RNG kernel.
-_USE_SHARD_AWARE_RNG: bool = False
+_rng_tracker: "_RNGStateTracker | None" = None
 
 # When True, use ThreadBasedRNGTracker instead of OffsetBasedRNGTracker.
 _USE_THREAD_RNG_TRACKER: bool = False
 
 
-def set_use_thread_based_rng(
-    use_thread_based: bool, device: Optional[torch.device] = None
-) -> None:
+def set_use_thread_based_rng(use_thread_based: bool) -> None:
     """Sets whether to use ThreadBasedRNGTracker or OffsetBasedRNGTracker for random ops."""
     global _USE_THREAD_RNG_TRACKER
     _USE_THREAD_RNG_TRACKER = use_thread_based
 
-    if device is not None and device.type == "cuda":
-        device_handle = _get_device_handle(device.type)
-        if device_handle is not None:
-            for generator in device_handle.default_generators:
-                generator.set_use_thread_based_rng(use_thread_based)
-
 
 def set_use_shard_aware_rng(
-    use_shard_aware: bool, device: Optional[torch.device] = None
+    use_shard_aware: bool, device: torch.device | None = None
 ) -> None:
-    """Sets whether to use shard-aware RNG mode for random ops."""
-    global _USE_SHARD_AWARE_RNG
-    _USE_SHARD_AWARE_RNG = use_shard_aware
-
+    """Toggles the shard-aware RNG kernel flag on CUDA generators."""
     if device is not None and device.type == "cuda":
         device_handle = _get_device_handle(device.type)
         if device_handle is not None:
@@ -65,7 +47,7 @@ def set_use_shard_aware_rng(
                 generator.set_use_shard_aware_rng(use_shard_aware)
 
 
-def _get_rng_tracker(device_mesh: DeviceMesh) -> Optional["_RNGStateTracker"]:
+def _get_rng_tracker(device_mesh: DeviceMesh) -> "_RNGStateTracker | None":
     """Get or create the RNG tracker based on the global config flag."""
     global _rng_tracker
     if _rng_tracker is None and is_rng_supported_mesh(device_mesh):
@@ -547,7 +529,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
 
     @contextlib.contextmanager
     def _distribute_region(
-        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
     ):
         """Context manager that sets up the RNG state for distributed random operations.
 
@@ -579,13 +561,16 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         if self.distribute_region_enabled:
             old_offset = state.offset.clone()
             self._set_pre_op_sharding_spec(state, spec)
+            cuda_gen = self._device_handle.default_generators[self._device.index]
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
                 self._device_handle.set_rng_state(state.state)
+                cuda_gen.set_use_shard_aware_rng(True)
                 try:
                     yield  # execute the region code
                 finally:
+                    cuda_gen.set_use_shard_aware_rng(False)
                     # update offset to synchronize among ranks
                     self._set_post_op_offset(state, spec, old_offset)
         else:
@@ -657,34 +642,26 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
                     mesh_dim_size = mesh.size(idx)
                     if isinstance(placement, Shard):
                         shard_dim = placement.dim
-                        local_offset = [0] * len(global_shape)
                         size_on_dim = local_shape[shard_dim]
                         num_chunks = mesh_dim_size
                         rank = my_coordinate[idx]
                         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
 
-                        # Compute chunk size for each chunk on the dimension.
                         chunk_sizes = [
                             max(
-                                min(size_on_dim, full_chunk_size * (idx + 1))
-                                - full_chunk_size * idx,
+                                min(size_on_dim, full_chunk_size * (i + 1))
+                                - full_chunk_size * i,
                                 0,
                             )
-                            for idx in range(num_chunks)
+                            for i in range(num_chunks)
                         ]
-                        local_shard_size = chunk_sizes[rank]
 
-                        local_offset_on_dim = sum(chunk_sizes[:rank])
-
-                        shard_size, shard_offset = local_shard_size, local_offset_on_dim
-
-                        local_shape[shard_dim] = shard_size
-                        local_offset[shard_dim] = shard_offset
-
-                        if global_offset[shard_dim] <= local_offset[shard_dim]:
-                            global_offset[shard_dim] = local_offset[shard_dim]
-                        else:
-                            global_offset[shard_dim] += local_offset[shard_dim]
+                        # When the same dim is sharded across multiple mesh dims,
+                        # each level further subdivides the previous shard. The
+                        # offset within the current level is relative to the
+                        # already-narrowed slice, so we always accumulate.
+                        global_offset[shard_dim] += sum(chunk_sizes[:rank])
+                        local_shape[shard_dim] = chunk_sizes[rank]
 
                 local_shape, global_offset = tuple(local_shape), tuple(global_offset)
 
@@ -699,10 +676,6 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
                 )
                 for dim in reversed(shape_for_strides[1:]):
                     global_strides = (global_strides[0] * dim,) + global_strides
-
-            if (local_shape, global_offset) == ((), ()):  # a out-of-mesh rank
-                local_shape = tuple([0] * len(global_shape))
-                global_offset = tuple([0] * len(global_shape))
 
             sharding_spec = (local_shape, global_offset, global_shape, global_strides)
             offset = state.offset

@@ -344,6 +344,7 @@ class OpDispatcher:
                     if (
                         maybe_user_generator is not None
                         or first_local_arg.device.type != "cuda"
+                        or isinstance(random._rng_tracker, random.ThreadBasedRNGTracker)
                         or (
                             not _are_we_tracing()
                             and type(first_local_arg) is not torch.Tensor
