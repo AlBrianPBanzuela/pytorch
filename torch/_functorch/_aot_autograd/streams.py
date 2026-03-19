@@ -481,14 +481,24 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
             if node.target in _SYNC_OPS:
                 event_index: int = node.args[0]  # type: ignore[assignment]
 
-                # synchronize_event only takes event_index, infer stream
-                # from the matching record_event.
+                # synchronize_event blocks the CPU thread, so it acts
+                # as a barrier across all streams. Collect deps from every
+                # stream and reset them all afterward. If the event was
+                # recorded externally, thread the graph inputs through so
+                # that any post-sync uses depend on the synchronize.
                 if node.target is torch.ops.streams.synchronize_event.default:
                     sync_stream: int | None = event_to_stream.get(event_index)
+                    all_stream_deps: list[Node] = [
+                        n for nodes in stream_to_nodes.values() for n in nodes
+                    ]
+                    if event_index not in event_to_stream:
+                        placeholders = [n for n in graph.nodes if n.op == "placeholder"]
+                        deps_before_sync = [*placeholders, *all_stream_deps]
+                    else:
+                        deps_before_sync = all_stream_deps
                 else:
                     sync_stream = node.args[1]  # type: ignore[assignment]
-
-                deps_before_sync = stream_to_nodes.get(sync_stream, [])
+                    deps_before_sync = list(stream_to_nodes.get(sync_stream, ()))
 
                 # For wait_event and synchronize_event, add a cross-event
                 # dependency on the matching record_event's control_deps node
@@ -526,7 +536,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     )
                 else:
                     ctrl_node = None
-                    passthrough = []
+                    passthrough: list[torch.fx.Node] = []
 
                 if node.target is torch.ops.streams.record_event.default:
                     event_to_stream[event_index] = sync_stream
@@ -537,7 +547,10 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                 # Reset: ops between this sync and the next will accumulate
                 # fresh. Ordering with prior ops is already enforced because
                 # their uses were rewired through getitems from control_deps.
-                stream_to_nodes[sync_stream] = []
+                if node.target is torch.ops.streams.synchronize_event.default:
+                    stream_to_nodes.clear()
+                else:
+                    stream_to_nodes[sync_stream] = []
             elif "val" in node.meta:
                 stream = get_stream(node)
                 stream_to_nodes.setdefault(stream, []).append(node)
