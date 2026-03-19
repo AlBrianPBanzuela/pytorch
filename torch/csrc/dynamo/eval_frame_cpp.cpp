@@ -387,6 +387,9 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
+    if (fullgraph_compiled_frame_count >= 0) {
+      fullgraph_compiled_frame_count++;
+    }
     // If we're attempting to run dynamo-generated code and eval frame override
     // is set to SKIP, then we should set the callback to None to skip.
     // If the override is set to ERROR, then we call

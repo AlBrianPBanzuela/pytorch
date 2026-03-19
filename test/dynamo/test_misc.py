@@ -385,9 +385,7 @@ graph():
 
         class YoloMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(func, backend=backend, fullgraph=True)(
-                    *args, **kwargs
-                )
+                out = torch.compile(func, backend=backend)(*args, **kwargs)
                 return out
 
         x = torch.randn(5)
@@ -407,7 +405,7 @@ graph():
 
         x = torch.ones(5)
         with YoloMode():
-            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+            out = torch.compile(torch.add, backend=backend)(x, x)
 
         self.assertEqual(out.sum().item(), 5.0)
         self.assertEqual(len(backend.graphs), 0)
@@ -427,7 +425,7 @@ graph():
 
         x = torch.ones(5)
         with YoloMode():
-            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+            out = torch.compile(torch.add, backend=backend)(x, x)
 
         self.assertEqual(len(backend.graphs), 1)
 
@@ -440,9 +438,9 @@ graph():
 
         class YoloMode2(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(
-                    lambda x, y: func(x, y), backend=backend3, fullgraph=True
-                )(*args, **kwargs)
+                out = torch.compile(lambda x, y: func(x, y), backend=backend3)(
+                    *args, **kwargs
+                )
                 return out
 
         class YoloMode(TorchDispatchMode):
@@ -451,16 +449,12 @@ graph():
                     return func(*args, **kwargs)
 
                 random_fn(func, *args, **kwargs)
-                out = torch.compile(torch.add, backend=backend2, fullgraph=True)(
-                    args[0], args[1]
-                )
+                out = torch.compile(torch.add, backend=backend2)(args[0], args[1])
                 return out
 
         x = torch.ones(5)
         with YoloMode(), YoloMode2():
-            torch.compile(
-                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
-            )(x, x)
+            torch.compile(lambda x, y: torch.add(x, y), backend=backend)(x, x)
 
         self.assertEqual(len(backend2.graphs), 1)
         self.assertEqual(len(backend3.graphs), 0)
@@ -475,9 +469,9 @@ graph():
 
         class YoloMode2(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(
-                    lambda x, y: func(x, y), backend=backend3, fullgraph=True
-                )(*args, **kwargs)
+                out = torch.compile(lambda x, y: func(x, y), backend=backend3)(
+                    *args, **kwargs
+                )
                 return out
 
             @classmethod
@@ -486,9 +480,7 @@ graph():
 
         class YoloMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(torch.add, backend=backend2, fullgraph=True)(
-                    args[0], args[1]
-                )
+                out = torch.compile(torch.add, backend=backend2)(args[0], args[1])
                 return out
 
             @classmethod
@@ -497,9 +489,7 @@ graph():
 
         x = torch.ones(5)
         with YoloMode(), YoloMode2():
-            torch.compile(
-                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
-            )(x, x)
+            torch.compile(lambda x, y: torch.add(x, y), backend=backend)(x, x)
 
         self.assertEqual(len(backend2.graphs), 1)
         self.assertEqual(len(backend3.graphs), 1)
@@ -514,9 +504,9 @@ graph():
 
         class YoloMode2(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(
-                    lambda x, y: func(x, y), backend=backend3, fullgraph=True
-                )(*args, **kwargs)
+                out = torch.compile(lambda x, y: func(x, y), backend=backend3)(
+                    *args, **kwargs
+                )
                 return out
 
             @classmethod
@@ -525,16 +515,12 @@ graph():
 
         class YoloMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(torch.add, backend=backend2, fullgraph=True)(
-                    args[0], args[1]
-                )
+                out = torch.compile(torch.add, backend=backend2)(args[0], args[1])
                 return out
 
         x = torch.ones(5)
         with YoloMode(), YoloMode2():
-            torch.compile(
-                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
-            )(x, x)
+            torch.compile(lambda x, y: torch.add(x, y), backend=backend)(x, x)
 
         self.assertEqual(len(backend2.graphs), 1)
         self.assertEqual(len(backend3.graphs), 0)
@@ -547,9 +533,7 @@ graph():
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         with YoloMode2(), YoloMode():
-            torch.compile(
-                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
-            )(x, x)
+            torch.compile(lambda x, y: torch.add(x, y), backend=backend)(x, x)
 
         self.assertEqual(len(backend2.graphs), 1)
         self.assertEqual(len(backend3.graphs), 1)
@@ -570,9 +554,7 @@ graph():
                 return False
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(func, backend=backend, fullgraph=True)(
-                    *args, **kwargs
-                )
+                out = torch.compile(func, backend=backend)(*args, **kwargs)
                 return out
 
         x = torch.randn(5)

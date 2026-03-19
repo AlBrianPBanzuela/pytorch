@@ -61,6 +61,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_override,
+    set_fullgraph_compiled_frame_count,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -963,10 +964,13 @@ class _TorchDynamoContext:
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             prior_eval_frame_override: _EvalFrameOverride | None = None
+            fullgraph_count_enabled = False
             if self.fullgraph:
                 prior_eval_frame_override = set_eval_frame_override(
                     _get_eval_frame_override()
                 )
+                if not self.export:
+                    fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -1026,8 +1030,10 @@ class _TorchDynamoContext:
 
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
+                call_succeeded = False
                 try:
-                    return fn(*args, **kwargs)
+                    result = fn(*args, **kwargs)
+                    call_succeeded = True
                 except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
                     if config.verbose:
                         raise
@@ -1045,6 +1051,17 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
+                    if fullgraph_count_enabled and call_succeeded:
+                        count = set_fullgraph_compiled_frame_count(-1)
+                        from torch._higher_order_ops.utils import _in_hop_compile
+
+                        if not _in_hop_compile() and count == 0:
+                            raise RuntimeError(
+                                "torch.compile with fullgraph=True found no compiled frames. "
+                                "The frame was likely skipped (e.g., a non-infra torch dispatch "
+                                "mode was active, dynamo was disabled, or the function had "
+                                "no tensor operations to compile)."
+                            )
                     if prior_error_on_graph_break is not None:
                         _set_error_on_graph_break(prior_error_on_graph_break)
                     if prior_eval_frame_override is not None:
@@ -1056,7 +1073,10 @@ class _TorchDynamoContext:
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                     for cleanup in cleanups:
                         cleanup()
+                return result
             finally:
+                if fullgraph_count_enabled:
+                    set_fullgraph_compiled_frame_count(-1)
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
