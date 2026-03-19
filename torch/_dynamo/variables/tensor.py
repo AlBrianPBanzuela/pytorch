@@ -72,7 +72,12 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import (
+    _get_all_slots,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import CONSTANT_VARIABLE_NONE, CONSTANT_VARIABLE_TRUE, ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
@@ -148,6 +153,24 @@ all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
+
+    __slots__ = (
+        "proxy",
+        "dtype",
+        "device",
+        "layout",
+        "ndim",
+        "_size",
+        "stride",
+        "requires_grad",
+        "is_quantized",
+        "is_contiguous",
+        "is_nested",
+        "is_sparse",
+        "class_type",
+        "has_grad_fn",
+        "_is_name_set",
+    )
 
     _nonvar_fields = {
         "proxy",
@@ -1965,6 +1988,8 @@ class SymNodeVariable(VariableTracker):
     handle logic like float_tensor.item() or unspecialized float inputs.
     """
 
+    __slots__ = ("proxy", "sym_num", "_tensor_var")
+
     _nonvar_fields = {
         "proxy",
         "sym_num",
@@ -2079,6 +2104,8 @@ class NumpyNdarrayVariable(TensorVariable):
     Represents a np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
     Use this for Tensor.numpy() call.
     """
+
+    __slots__ = ()
 
     @staticmethod
     def create(
@@ -2237,6 +2264,8 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
+    __slots__ = ("raw_value", "need_unwrap")
+
     _nonvar_fields = {
         "raw_value",
         "need_unwrap",
@@ -2263,8 +2292,12 @@ class UnspecializedPythonVariable(TensorVariable):
         need_unwrap: bool = True,
     ) -> "UnspecializedPythonVariable":
         # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.
+        args = {
+            slot: getattr(tensor_variable, slot)
+            for slot in _get_all_slots(type(tensor_variable))
+        }
         return UnspecializedPythonVariable(
-            **dict(tensor_variable.__dict__),
+            **args,
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
@@ -2273,6 +2306,8 @@ class UnspecializedPythonVariable(TensorVariable):
 class FakeItemVariable(TensorVariable):
     """An unspecialized python variable which prevents access to the underlying raw value.
     This is needed if item is called on a FakeTensor."""
+
+    __slots__ = ("need_unwrap",)
 
     _nonvar_fields = {
         "need_unwrap",
@@ -2288,10 +2323,16 @@ class FakeItemVariable(TensorVariable):
     def from_tensor_variable(
         cls, tensor_variable: TensorVariable
     ) -> "FakeItemVariable":
-        return FakeItemVariable(**dict(tensor_variable.__dict__))
+        args = {
+            slot: getattr(tensor_variable, slot)
+            for slot in _get_all_slots(type(tensor_variable))
+        }
+        return FakeItemVariable(**args)
 
 
 class TensorSubclassVariable(UserDefinedClassVariable):
+    __slots__ = ()
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -2346,6 +2387,8 @@ class TensorSubclassVariable(UserDefinedClassVariable):
 
 
 class UntypedStorageVariable(VariableTracker):
+    __slots__ = ("from_tensor", "example_value")
+
     _nonvar_fields = {
         "example_value",
         *VariableTracker._nonvar_fields,
@@ -2414,6 +2457,8 @@ class UntypedStorageVariable(VariableTracker):
 
 
 class DataPtrVariable(VariableTracker):
+    __slots__ = ("from_tensor",)
+
     def __init__(
         self,
         from_tensor: TensorVariable,

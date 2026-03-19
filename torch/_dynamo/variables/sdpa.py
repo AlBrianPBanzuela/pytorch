@@ -28,6 +28,8 @@ PARAM_NAMES = [
 
 
 class SDPAParamsVariable(VariableTracker):
+    __slots__ = ("proxy", "param_vars")
+
     """Represents the c++ params struct for scaled dot product attention.
     This is a read-only container."""
 

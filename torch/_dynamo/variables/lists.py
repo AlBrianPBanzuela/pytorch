@@ -60,6 +60,8 @@ if TYPE_CHECKING:
 
 
 class BaseListVariable(VariableTracker):
+    __slots__ = ("items",)
+
     @staticmethod
     def cls_for_instance(obj: Any) -> type["BaseListVariable"]:
         return BaseListVariable.cls_for(type(obj))
@@ -422,6 +424,8 @@ class BaseListVariable(VariableTracker):
 
 
 class RangeVariable(BaseListVariable):
+    __slots__ = ()
+
     def __init__(self, items: Sequence[VariableTracker], **kwargs: Any) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
@@ -742,6 +746,8 @@ class CommonListMethodsVariable(BaseListVariable):
     Implement methods common to List and other List-like things
     """
 
+    __slots__ = ()
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -944,6 +950,8 @@ class CommonListMethodsVariable(BaseListVariable):
 
 
 class ListVariable(CommonListMethodsVariable):
+    __slots__ = ()
+
     def python_type(self) -> type:
         return list
 
@@ -1127,6 +1135,8 @@ class ListVariable(CommonListMethodsVariable):
 
 
 class DequeVariable(CommonListMethodsVariable):
+    __slots__ = ("maxlen",)
+
     def __init__(
         self,
         items: list[VariableTracker],
@@ -1303,6 +1313,8 @@ class DequeVariable(CommonListMethodsVariable):
 
 
 class TupleVariable(BaseListVariable):
+    __slots__ = ()
+
     def python_type(self) -> type[tuple]:  # type: ignore[type-arg]
         return tuple
 
@@ -1350,6 +1362,8 @@ class SizeVariable(TupleVariable):
         "proxy",
         *TupleVariable._nonvar_fields,
     }
+
+    __slots__ = ("proxy",)
 
     def __init__(
         self,
@@ -1517,6 +1531,8 @@ class SizeVariable(TupleVariable):
 
 
 class NamedTupleVariable(UserDefinedTupleVariable):
+    __slots__ = ("tuple_cls", "dynamic_attributes")
+
     _nonvar_fields = {
         "tuple_cls",
         "dynamic_attributes",
@@ -1834,6 +1850,8 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 
 
 class SliceVariable(VariableTracker):
+    __slots__ = ("items",)
+
     def __init__(
         self,
         items: Sequence[VariableTracker],
@@ -1906,6 +1924,8 @@ class SliceVariable(VariableTracker):
 
 
 class ListIteratorVariable(IteratorVariable):
+    __slots__ = ("items", "index", "is_exhausted")
+
     _nonvar_fields = {
         "index",
         *IteratorVariable._nonvar_fields,
@@ -1981,10 +2001,12 @@ class ListIteratorVariable(IteratorVariable):
 
 
 class TupleIteratorVariable(ListIteratorVariable):
-    pass
+    __slots__ = ()
 
 
 class RangeIteratorVariable(IteratorVariable):
+    __slots__ = ("start", "stop", "step", "len")
+
     # only needed for isinstance(..., range_iterator) to work
     _nonvar_fields = {
         "iter_obj",

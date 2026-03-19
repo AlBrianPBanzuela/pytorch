@@ -299,6 +299,8 @@ class BuiltinVariable(VariableTracker):
     maintaining correct semantics and enabling optimizations.
     """
 
+    __slots__ = ("fn",)
+
     _SENTINEL = object()
     _nonvar_fields = {
         "fn",

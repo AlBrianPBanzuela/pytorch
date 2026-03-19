@@ -81,6 +81,8 @@ def _raise_hard_error_if_graph_break(
 
 
 class OpaqueObjectClassVariable(UserDefinedVariable):
+    __slots__ = ("value",)
+
     """
     A variable that represents an opaque object class (not instance).
     Since UserDefinedClassVariable has some special handling for side effects,
@@ -213,6 +215,8 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
 
 class TorchScriptObjectVariable(UserDefinedObjectVariable):
+    __slots__ = ("proxy", "source", "ctor_args_kwargs", "ctor_arg_sources")
+
     _fake_script_object_cache: dict[int, "TorchScriptObjectVariable"] = {}
 
     @classmethod

@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 
 
 class DistributedVariable(VariableTracker):
+    __slots__ = ("value",)
+
     """
     The base distributed variable that encapsulates common methods
     for the distributed objects (i.e. ProcessGroup, DeviceMesh, etc.).
@@ -115,6 +117,8 @@ def is_constant_pg_functions(value: object) -> bool:
 
 
 class WorldMetaClassVariable(DistributedVariable):
+    __slots__ = ()
+
     """
     Tracks torch.distributed.GroupMember and torch.distributed.group, which are
     instances of the metaclass _WorldMeta.
@@ -146,6 +150,8 @@ class WorldMetaClassVariable(DistributedVariable):
 
 
 class BackwardHookVariable(VariableTracker):
+    __slots__ = ()
+
     """
     Handles torch.utils.hooks.BackwardHook for module-level backward
     hooks.

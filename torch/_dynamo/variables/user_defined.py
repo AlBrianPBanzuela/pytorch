@@ -180,6 +180,8 @@ def is_data_descriptor(obj: object) -> bool:
 
 
 class UserDefinedVariable(VariableTracker):
+    __slots__ = ("value",)
+
     value: object
 
     def _maybe_get_baseclass_method(self, name: str) -> Any:
@@ -194,6 +196,8 @@ class UserDefinedVariable(VariableTracker):
 
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
+    __slots__ = ("ban_mutation",)
+
     value: type[object]
 
     def __init__(self, value: type[object], **kwargs: Any) -> None:
@@ -1050,6 +1054,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
+    __slots__ = ()
+
     @property
     def fn(self) -> type[object]:
         return self.value
@@ -1067,6 +1073,8 @@ class UserDefinedEnumClassVariable(UserDefinedClassVariable):
     """
 
     # pyrefly: ignore[bad-override]
+    __slots__ = ()
+
     value: type[enum.Enum]
 
     def call_method(
@@ -1148,6 +1156,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
+
+    __slots__ = (
+        "value_type",
+        "cls_source",
+        "base_cls_vt",
+        "init_args",
+        "dict_vt",
+        "_looked_up_attrs",
+        "_subobj_from_class",
+        "is_pytree_constant_class",
+        "_object_has_getattribute",
+    )
 
     _nonvar_fields = {
         "value",
@@ -2318,6 +2338,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
+    __slots__ = ("fields",)
+
     @staticmethod
     def create(
         tx: "InstructionTranslator", value: object, source: Source
@@ -2506,6 +2528,8 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
+    __slots__ = ()
+
     def __init__(
         self,
         value: object,
@@ -2530,6 +2554,8 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
 
 
 class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
+    __slots__ = ("exc_vt",)
+
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         self.exc_vt = variables.ExceptionVariable(self.value_type, ())
@@ -2599,6 +2625,8 @@ class InspectVariable(UserDefinedObjectVariable):
     redirecting them to the underlying private attributes directly.
     """
 
+    __slots__ = ()
+
     _PROPERTY_REDIRECTS: dict[type, dict[str, str]] = {
         inspect.Signature: {"parameters": "_parameters"},
         inspect.Parameter: {"kind": "_kind", "name": "_name"},
@@ -2620,6 +2648,8 @@ class InspectVariable(UserDefinedObjectVariable):
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
+    __slots__ = ()
+
     @staticmethod
     def is_matching_object(obj: object) -> bool:
         mod = sys.modules.get("torchrec.sparse.jagged_tensor")
@@ -2645,6 +2675,8 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
+    __slots__ = ()
+
     # Dummy class to check if the object is an IntWrapper, and turn it into a
     # symint
     @staticmethod
@@ -2654,6 +2686,8 @@ class IntWrapperVariable(UserDefinedObjectVariable):
 
 
 class RemovableHandleVariable(VariableTracker):
+    __slots__ = ("idx",)
+
     REMOVED = -1
 
     def __init__(
@@ -2707,6 +2741,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
+
+    __slots__ = ("_dict_vt", "_dict_methods")
 
     def __init__(
         self,
@@ -2791,6 +2827,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
+
+    __slots__ = ("_set_vt", "_set_methods")
 
     def __init__(
         self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
@@ -2887,6 +2925,8 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
+    __slots__ = ("_list_vt",)
+
     def __init__(
         self, value: object, list_vt: Union["ListVariable", None] = None, **kwargs: Any
     ) -> None:
@@ -2936,6 +2976,8 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
+
+    __slots__ = ("_tuple_vt",)
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
@@ -3019,6 +3061,8 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
+    __slots__ = ()
+
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
 
@@ -3075,4 +3119,4 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
 
 class RandomVariable(UserDefinedObjectVariable):
-    pass
+    __slots__ = ()

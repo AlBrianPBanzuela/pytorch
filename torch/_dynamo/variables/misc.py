@@ -89,6 +89,8 @@ class NO_SUCH_SUBOBJ:
 
 
 class SuperVariable(VariableTracker):
+    __slots__ = ("typevar", "objvar")
+
     _nonvar_fields = {
         *VariableTracker._nonvar_fields,
     }
@@ -436,6 +438,8 @@ class SuperVariable(VariableTracker):
 
 
 class FrameSummaryVariable(VariableTracker):
+    __slots__ = ("frame_summary",)
+
     def __init__(self, frame_summary: traceback.FrameSummary, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.frame_summary = frame_summary
@@ -456,6 +460,8 @@ class FrameSummaryVariable(VariableTracker):
 
 
 class TracebackVariable(VariableTracker):
+    __slots__ = ("frame_summary", "tb_next")
+
     def __init__(
         self,
         frame_summary: FrameSummaryVariable,
@@ -555,6 +561,16 @@ class TracebackVariable(VariableTracker):
 
 
 class ExceptionVariable(VariableTracker):
+    __slots__ = (
+        "exc_type",
+        "args",
+        "__context__",
+        "__cause__",
+        "__suppress_context__",
+        "__traceback__",
+        "python_stack",
+    )
+
     # The ExceptionVariable corresponds to the BaseException class in Python
     def __init__(
         self,
@@ -710,12 +726,16 @@ class ExceptionVariable(VariableTracker):
 
 
 class UnknownVariable(VariableTracker):
+    __slots__ = ()
+
     """
     It could be anything!
     """
 
 
 class DelayGraphBreakVariable(UnknownVariable):
+    __slots__ = ("msg",)
+
     """
     Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
@@ -741,6 +761,8 @@ class DelayGraphBreakVariable(UnknownVariable):
 
 
 class ComptimeVariable(VariableTracker):
+    __slots__ = ()
+
     """
     This variable is special, it lets you execute arbitrary code at
     Dynamo compile time
@@ -807,6 +829,8 @@ class ComptimeVariable(VariableTracker):
 
 
 class CellVariable(VariableTracker):
+    __slots__ = ("pre_existing_contents", "local_name")
+
     # If the cell existed before Dynamo tracing started, this will be the
     # VariableTracker that represents the cell content.
     #
@@ -817,16 +841,18 @@ class CellVariable(VariableTracker):
 
     # This is set when this cell can be referenced via `LOAD/STORE_DEREF` in the
     # root frame via this name (e.g., the name is in `co_cellvars/co_freevars`).
-    local_name: str | None = None
 
     def __init__(
         self, pre_existing_contents: VariableTracker | None = None, **kwargs: Any
     ) -> None:
         super().__init__(**kwargs)
         self.pre_existing_contents = pre_existing_contents
+        self.local_name: str | None = None
 
 
 class NewGlobalVariable(VariableTracker):
+    __slots__ = ()
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -841,6 +867,8 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
 
 
 class AutogradFunctionVariable(VariableTracker):
+    __slots__ = ("fn_cls",)
+
     """represents a torch.autograd.Function subclass"""
 
     _nonvar_fields = {
@@ -1073,6 +1101,8 @@ class SavedTensorBox:
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
+    __slots__ = ("inference", "saved_tensors", "needs_input_grad", "non_differentiable")
+
     """
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
@@ -1208,6 +1238,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
 
 class AutogradEngineVariable(UserDefinedObjectVariable):
+    __slots__ = ()
+
     """
     Represents a torch._C._ImperativeEngine instance.
     """
@@ -1261,6 +1293,8 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
 
 
 class LambdaVariable(VariableTracker):
+    __slots__ = ("fn",)
+
     # TODO: change to Ts = TypeVarTuple("Ts") for py 3.11+
     def __init__(self, fn: Callable[..., VariableTracker], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -1276,6 +1310,8 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
+    __slots__ = ("obj", "name", "py_type")
+
     _nonvar_fields = {
         "name",
         "py_type",
@@ -1426,6 +1462,8 @@ class GetAttrVariable(VariableTracker):
 
 
 class MethodWrapperVariable(VariableTracker):
+    __slots__ = ("method_wrapper",)
+
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
@@ -1563,6 +1601,8 @@ class MethodWrapperVariable(VariableTracker):
 
 
 class GetSetDescriptorVariable(VariableTracker):
+    __slots__ = ("desc",)
+
     def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.desc = desc
@@ -1585,6 +1625,8 @@ class GetSetDescriptorVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
+    __slots__ = ("value", "is_torch")
+
     _nonvar_fields = {
         "value",
         "is_torch",
@@ -1629,6 +1671,8 @@ class PythonModuleVariable(VariableTracker):
 
 
 class TypingVariable(VariableTracker):
+    __slots__ = ("value",)
+
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -1750,6 +1794,8 @@ def get_tnp_to_np_map() -> dict[types.FunctionType, types.BuiltinFunctionType]:
 
 
 class NumpyVariable(VariableTracker):
+    __slots__ = ("value",)
+
     """
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
@@ -1912,6 +1958,8 @@ class NumpyVariable(VariableTracker):
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
 class NullVariable(VariableTracker):
+    __slots__ = ()
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -1933,10 +1981,14 @@ class NullVariable(VariableTracker):
 
 
 class DeletedVariable(VariableTracker):
+    __slots__ = ()
+
     """Marker used to implement delattr()"""
 
 
 class StringFormatVariable(VariableTracker):
+    __slots__ = ("format_string", "sym_args", "sym_kwargs")
+
     """
     Represents a call to str.format(), we delay calling format until after the graph.
     """
@@ -1997,6 +2049,8 @@ class StringFormatVariable(VariableTracker):
 
 
 class ObjectVariable(VariableTracker):
+    __slots__ = ("value",)
+
     # placeholder for unknown / opaque values
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -2007,6 +2061,8 @@ class ObjectVariable(VariableTracker):
 
 
 class DebuggingVariable(VariableTracker):
+    __slots__ = ("value",)
+
     """
     Represents a call to a debugging function like print(), or something
     registered to config.reorderable_logging_functions.
@@ -2076,6 +2132,8 @@ class DebuggingVariable(VariableTracker):
 
 
 class IgnoredFunctionVariable(VariableTracker):
+    __slots__ = ("value",)
+
     """
     Represents a call to an arbitrary function that should be ignored.
     """
@@ -2094,6 +2152,8 @@ class IgnoredFunctionVariable(VariableTracker):
 
 
 class LoggingLoggerVariable(VariableTracker):
+    __slots__ = ("value",)
+
     """
     Represents a call to any logging.Logger methods.
     """
@@ -2133,6 +2193,8 @@ class LoggingLoggerVariable(VariableTracker):
 
 
 class ConstantLikeVariable(VariableTracker):
+    __slots__ = ("value",)
+
     """self.value is a compile-time constant, but not a literal"""
 
     try:
@@ -2219,6 +2281,8 @@ class ConstantLikeVariable(VariableTracker):
 
 
 class TorchVersionVariable(ConstantLikeVariable):
+    __slots__ = ()
+
     _error_prefix = "torch.__version__"
 
     def __init__(self, **kwargs: Any) -> None:
@@ -2228,6 +2292,8 @@ class TorchVersionVariable(ConstantLikeVariable):
 
 
 class NumpyDTypeVariable(ConstantLikeVariable):
+    __slots__ = ()
+
     def as_proxy(self) -> str:
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
 
@@ -2245,6 +2311,8 @@ np_constant_collections_map = {
 
 
 class RandomClassVariable(VariableTracker):
+    __slots__ = ()
+
     """random.Random"""
 
     def __init__(self, **kwargs: Any) -> None:
@@ -2272,6 +2340,8 @@ class RandomClassVariable(VariableTracker):
 
 
 class RandomVariable(VariableTracker):
+    __slots__ = ("random",)
+
     """random.Random()
 
     Implemented by wrapping a VariableTracker around a random.Random object.
@@ -2419,6 +2489,8 @@ class RandomVariable(VariableTracker):
 
 
 class WeakRefVariable(VariableTracker):
+    __slots__ = ("referent_vt", "callback_vt")
+
     @staticmethod
     # pyrefly: ignore[bad-param-name-override]
     def build(

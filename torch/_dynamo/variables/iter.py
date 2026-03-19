@@ -45,6 +45,8 @@ MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
 
 
 class ItertoolsVariable(VariableTracker):
+    __slots__ = ("value",)
+
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -223,6 +225,8 @@ class ItertoolsVariable(VariableTracker):
 
 
 class IteratorVariable(VariableTracker):
+    __slots__ = ()
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -282,6 +286,8 @@ class IteratorVariable(VariableTracker):
 
 
 class ObjectIteratorVariable(IteratorVariable):
+    __slots__ = ("obj", "generator_exhausted")
+
     """
     VariableTracker for iter(obj) that implements the iterator protocol (i.e.,
     has a `__next__` method).
@@ -314,6 +320,8 @@ class ObjectIteratorVariable(IteratorVariable):
 
 
 class RepeatIteratorVariable(IteratorVariable):
+    __slots__ = ("item",)
+
     def __init__(self, item: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.item = item
@@ -336,6 +344,8 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
+    __slots__ = ("item", "step")
+
     def __init__(
         self,
         item: int | VariableTracker = 0,
@@ -372,6 +382,8 @@ class CountIteratorVariable(IteratorVariable):
 
 
 class ZipVariable(IteratorVariable):
+    __slots__ = ("iterables", "index", "strict")
+
     """
     Represents zip(*iterables)
     """
@@ -493,6 +505,8 @@ class ZipVariable(IteratorVariable):
 
 
 class MapVariable(ZipVariable):
+    __slots__ = ("fn",)
+
     """
     Represents map(fn, *iterables)
     """
@@ -540,6 +554,8 @@ class MapVariable(ZipVariable):
 
 
 class FilterVariable(IteratorVariable):
+    __slots__ = ("fn", "iterable", "index")
+
     """
     Represents filter(fn, iterable)
     """

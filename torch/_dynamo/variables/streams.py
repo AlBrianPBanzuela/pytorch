@@ -257,6 +257,8 @@ class SymbolicStreamState:
 
 
 class StreamContextVariable(FxTracebackAnnotateVariable):
+    __slots__ = ("stream",)
+
     """This represents torch.cuda.StreamContext"""
 
     @staticmethod
@@ -303,6 +305,8 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
 
 class StreamVariable(StreamContextVariable):
+    __slots__ = ("proxy", "value", "device", "user_object_index")
+
     """Represents the device-agnostic torch.Stream class"""
 
     def __init__(
@@ -439,6 +443,8 @@ class StreamVariable(StreamContextVariable):
 
 
 class CudaStreamVariable(StreamVariable):
+    __slots__ = ()
+
     """Represents torch.cuda.Stream, preserving device-specific type and attributes."""
 
     def python_type(self) -> type:
@@ -459,6 +465,8 @@ class CudaStreamVariable(StreamVariable):
 
 
 class EventVariable(VariableTracker):
+    __slots__ = ("proxy", "value", "user_object_index")
+
     def __init__(
         self,
         proxy: Proxy,

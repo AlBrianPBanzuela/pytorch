@@ -139,6 +139,8 @@ def get_prev_stack_var_name() -> str:
 
 
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
+    __slots__ = ("value", "cm_obj", "source")
+
     @staticmethod
     def is_supported_torch_function_mode(ty: type[TorchFunctionMode]) -> bool:
         # Supported in this sense means we can support graph breaks under the
@@ -338,6 +340,8 @@ class SymbolicTorchFunctionState:
 
 
 class TorchFunctionModeStackVariable(VariableTracker):
+    __slots__ = ("source", "symbolic_stack")
+
     """Fake VT to use as a dummy object, indicating the presence of torch function mode stack mutation"""
 
     # singleton value representing the global torch function mode stack
@@ -584,6 +588,8 @@ def dispatch_torch_function(
 
 
 class TensorWithTFOverrideVariable(TensorVariable):
+    __slots__ = ()
+
     """
     Represents a tensor subclass instance with a __torch_function__ override.
     """

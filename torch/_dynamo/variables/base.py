@@ -41,6 +41,27 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
+@functools.cache
+def _get_all_slots(cls: type) -> tuple[str, ...]:
+    """Deduplicated tuple of all __slots__ across the MRO (for clone)."""
+    seen: set[str] = set()
+    slots: list[str] = []
+    for klass in cls.__mro__:
+        for slot in getattr(klass, "__slots__", ()):
+            if slot not in seen:
+                seen.add(slot)
+                slots.append(slot)
+    return tuple(slots)
+
+
+@functools.cache
+def _get_var_slots(cls: type) -> tuple[str, ...]:
+    """Slots excluding _nonvar_fields (for visit/realize_all)."""
+    nonvars = cls._nonvar_fields
+    return tuple(s for s in _get_all_slots(cls) if s not in nonvars)
+
+
 # Tracks active method calls on VariableTracker instances to detect self-referential
 # calls (e.g., as_python_constant on a list that contains itself). Maps
 # (id(instance), id(original_method)) tuples to track which calls are in progress.
@@ -78,6 +99,8 @@ class MutationType:
     2. Whether the value represented by this variable already existed before
     Dynamo tracing.
     """
+
+    __slots__ = ("scope",)
 
     def __init__(self, typ: SourceType) -> None:
         # In HigherOrderOperator tracing, we need to distinguish
@@ -131,6 +154,8 @@ class ValueMutationNew(MutationType):
     Python world.
     """
 
+    __slots__ = ()
+
     def __init__(self) -> None:
         super().__init__(SourceType.New)
 
@@ -153,10 +178,7 @@ class ValueMutationExisting(MutationType):
     used afterwards in Python.
     """
 
-    # A flag to indicate whether mutation happened on the associated
-    # `VariableTracker`. This enables SideEffects to accurately and quickly
-    # filter out which pre-existing values it needs to generate mutation for.
-    is_modified: bool
+    __slots__ = ("is_modified",)
 
     def __init__(self, is_modified: bool = False) -> None:
         super().__init__(SourceType.Existing)
@@ -168,6 +190,8 @@ class AttributeMutation(MutationType):
     This case of VariableTracker.mutation_type marker indicates that Dynamo
     allows mutation on the value's attributes.
     """
+
+    __slots__ = ()
 
 
 class AttributeMutationExisting(AttributeMutation):
@@ -181,6 +205,8 @@ class AttributeMutationExisting(AttributeMutation):
     then re-apply those mutations after the graph runs, since the object might
     be used afterwards in Python.
     """
+
+    __slots__ = ()
 
     def __init__(self) -> None:
         super().__init__(SourceType.Existing)
@@ -197,6 +223,8 @@ class AttributeMutationNew(AttributeMutation):
     have to emit bytecode for these mutations if the object doesn't escape into
     the Python world.
     """
+
+    __slots__ = ("cls_source",)
 
     def __init__(self, cls_source: Source | None = None) -> None:
         super().__init__(SourceType.New)
@@ -278,6 +306,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     Prefer the factory function VariableTracker.build() over VariableTracker.__init__().
     """
 
+    __slots__ = ("source", "mutation_type")
+
     # fields to leave unmodified in apply()
     _nonvar_fields = {
         "value",
@@ -290,7 +320,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def clone(self, **kwargs: Any) -> "VariableTracker":
         """Shallow copy with some (optional) changes"""
-        args = dict(self.__dict__)
+        args = {slot: getattr(self, slot) for slot in _get_all_slots(type(self))}
         args.update(kwargs)
         return self.__class__(**args)
 
@@ -317,10 +347,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             value = value.unwrap()
             fn(value)
             value = value.unwrap()  # calling fn() might have realized it
-            nonvars = value._nonvar_fields
-            for key, subvalue in value.__dict__.items():
-                if key not in nonvars:
-                    cls.visit(fn, subvalue, cache)
+            for key in _get_var_slots(type(value)):
+                cls.visit(fn, getattr(value, key), cache)
         elif istype(value, (list, tuple)):
             for subvalue in value:
                 cls.visit(fn, subvalue, cache)
@@ -473,9 +501,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 found_self = True
 
         # unwrap first iteration - otherwise we can't detect if we revisit self
-        for key, subvalue in self.__dict__.items():
-            if key not in self._nonvar_fields:
-                VariableTracker.visit(check, subvalue)
+        for key in _get_var_slots(type(self)):
+            VariableTracker.visit(check, getattr(self, key))
 
         return found_self
 
@@ -922,6 +949,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # 1. one forgot to pass in a source
                 # 2. `mutation_type` is incorrect
                 assert source is not None
+
+        try:
+            object.__getattribute__(self, "__dict__")
+        except AttributeError:
+            pass
+        else:
+            raise TypeError(
+                f"{self.__class__.__name__} should define __slots__ to prevent __dict__ creation. "
+                f"Define __slots__ = (...) in the class body, or __slots__ = () if the class adds no new attributes."
+            )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """

@@ -110,10 +110,6 @@ if TYPE_CHECKING:
         InstructionTranslatorBase,
     )
     from torch._dynamo.variables.ctx_manager import ContextWrappingVariable
-    from torch._higher_order_ops.triton_kernel_wrap import (
-        TritonGridType,
-        TritonKernelType,
-    )
 
     from .dicts import DunderDictVariable
     from .lists import BaseListVariable, ListVariable
@@ -383,6 +379,8 @@ def fn_var_getattr(
 
 
 class BaseUserFunctionVariable(VariableTracker):
+    __slots__ = ("dict_vt",)
+
     def __init__(
         self, dict_vt: "DunderDictVariable | None" = None, **kwargs: Any
     ) -> None:
@@ -529,6 +527,8 @@ class BaseUserFunctionVariable(VariableTracker):
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
+
+    __slots__ = ("fn", "is_constant")
 
     _nonvar_fields = {
         "fn",
@@ -994,6 +994,8 @@ class InspectSignatureVariable(UserFunctionVariable):
     not change across different calls to the same function.
     """
 
+    __slots__ = ()
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1020,6 +1022,8 @@ class InspectSignatureVariable(UserFunctionVariable):
 
 
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
+    __slots__ = ("allowed_types", "map_fn")
+
     _nonvar_fields = {
         "allowed_types",
         *BaseUserFunctionVariable._nonvar_fields,
@@ -1064,6 +1068,8 @@ class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
 
 
 class BuiltinMethodVariable(BaseUserFunctionVariable):
+    __slots__ = ("fn",)
+
     def __init__(
         self, fn: types.BuiltinMethodType, is_constant: bool = False, **kwargs: Any
     ) -> None:
@@ -1096,6 +1102,8 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
 
 
 class LocalGeneratorObjectVariable(VariableTracker):
+    __slots__ = ("code", "f_globals", "inline_tracer", "remaining_items")
+
     def __init__(
         self,
         code: types.CodeType,
@@ -1107,6 +1115,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.code = code
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
+        self.remaining_items: list | None = None
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1437,6 +1446,8 @@ class ContextlibContextManagerLocalGeneratorObjectVariable(
         from a torch.compile function.
     """
 
+    __slots__ = ()
+
 
 class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
     """functions that behaves like iterators
@@ -1445,6 +1456,8 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
 
         This is a wrapper around (Nested)UserFunctionVariable
     """
+
+    __slots__ = ("vt", "generator_cls")
 
     def __init__(
         self,
@@ -1527,6 +1540,8 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
+    __slots__ = ()
+
     def __init__(self, vt: BaseUserFunctionVariable, **kwargs: Any) -> None:
         super().__init__(
             vt,
@@ -1554,6 +1569,8 @@ class FunctionDecoratedByContextlibContextManagerVariable(
 
 
 class UserMethodVariable(UserFunctionVariable):
+    __slots__ = ("obj", "source_fn")
+
     """Some unsupported user-defined method"""
 
     def __init__(
@@ -1670,6 +1687,8 @@ class UserMethodVariable(UserFunctionVariable):
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
+    __slots__ = ("wrapped", "context")
+
     def __init__(
         self,
         wrapped: UserMethodVariable,
@@ -1705,6 +1724,8 @@ class WrappedUserMethodVariable(UserMethodVariable):
 
 
 class WrappedUserFunctionVariable(UserFunctionVariable):
+    __slots__ = ("wrapped", "context")
+
     def __init__(
         self,
         wrapped: UserFunctionVariable,
@@ -1778,6 +1799,16 @@ def invoke_and_store_as_constant(
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
+    __slots__ = (
+        "fn_name",
+        "code",
+        "f_globals",
+        "defaults",
+        "kwdefaults",
+        "closure",
+        "wrapped_fn",
+    )
+
     _nonvar_fields = {
         "f_globals",
         *BaseUserFunctionVariable._nonvar_fields,
@@ -2046,6 +2077,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
+    __slots__ = ("wrapped", "context")
+
     def __init__(
         self,
         wrapped: NestedUserFunctionVariable,
@@ -2095,6 +2128,8 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
 
 
 class SkipFunctionVariable(VariableTracker):
+    __slots__ = ("value", "reason")
+
     _nonvar_fields = {
         "value",
         "reason",
@@ -2330,6 +2365,8 @@ class SkipFunctionVariable(VariableTracker):
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
+    __slots__ = ("wrapped", "context")
+
     def __init__(
         self,
         wrapped: SkipFunctionVariable,
@@ -2365,6 +2402,8 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
 
 
 class WrapperUserFunctionVariable(BaseUserFunctionVariable):
+    __slots__ = ("wrapper_obj", "attr_to_trace")
+
     """
     Used to represent a wrapper object that contains the actual callable as an
     attribute. For example, torch.jit.script/trace have the original function at
@@ -2454,6 +2493,8 @@ class WrapperUserMethodVariable(WrapperUserFunctionVariable):
     WrapperUserFunctionVariable in `call_function` method.
     """
 
+    __slots__ = ("obj",)
+
     def __init__(
         self,
         wrapper_obj: Any,
@@ -2491,6 +2532,8 @@ def _traceable_collectives_source(
 
 
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
+    __slots__ = ("replacement_var",)
+
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
 
@@ -2662,6 +2705,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):
+    __slots__ = ()
+
     def as_python_constant(self) -> Any:
         return self.fn
 
@@ -2699,6 +2744,8 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
+    __slots__ = ("func", "args", "keywords", "fake_value", "original_cache_hash")
+
     _nonvar_fields = {
         "original_cache_hash",
         *VariableTracker._nonvar_fields,
@@ -2825,6 +2872,8 @@ class FunctoolsPartialVariable(VariableTracker):
 
 
 class PolyfilledFunctionVariable(VariableTracker):
+    __slots__ = ("fn", "wrapped_fn", "traceable_fn")
+
     _nonvar_fields = {
         "fn",
         "wrapped_fn",
@@ -2959,6 +3008,8 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 
 class SysFunctionVariable(VariableTracker):
+    __slots__ = ("value",)
+
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -3188,10 +3239,7 @@ dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 
 
 class TritonKernelVariable(VariableTracker):
-    grid: "TritonGridType"
-    kernel: "TritonKernelType"
-    kernel_idx: int | None
-    kernel_source: "AttrSource"
+    __slots__ = ("grid", "kernel", "kernel_idx", "kernel_source")
 
     def __init__(
         self, kernel: Any, kernel_idx: int | None, grid: Any, **kwargs: Any
@@ -3236,6 +3284,8 @@ class TritonKernelVariable(VariableTracker):
 
 
 class TMADescriptorExperimentalVariable(VariableTracker):
+    __slots__ = ("data_ptr", "dims", "block_dims", "element_size")
+
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
@@ -3275,6 +3325,8 @@ class TMADescriptorExperimentalVariable(VariableTracker):
 
 
 class TMADescriptorStableVariable(VariableTracker):
+    __slots__ = ("tensor", "block_shape")
+
     def __init__(
         self,
         tensor: "TensorVariable",
@@ -3308,6 +3360,8 @@ class TMADescriptorStableVariable(VariableTracker):
 
 
 class CreateTMADescriptorExperimentalVariable(VariableTracker):
+    __slots__ = ("rank",)
+
     def __init__(
         self,
         rank: int,
@@ -3379,6 +3433,8 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
 
 
 class CreateTMADescriptorStableVariable(VariableTracker):
+    __slots__ = ()
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3408,6 +3464,8 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             return namedtuple
         return node_type
     """
+
+    __slots__ = ()
 
     def call_function(
         self,
@@ -3446,6 +3504,8 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
     When is_leaf is None (the common case), we can optimize by not tracing into the function.
     When is_leaf is not None, we fall back to regular tracing since it requires executing user code.
     """
+
+    __slots__ = ()
 
     def call_function(
         self,
@@ -3490,6 +3550,8 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
     """
     Skip variable for sparse tensor factory functions with clear messaging regarding lack of support.
     """
+
+    __slots__ = ()
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
         reason = "sparse tensor creation is not supported in torch.compile"
@@ -3569,6 +3631,8 @@ class TritonSetAllocatorVariable(VariableTracker):
     """Trace triton.set_allocator as an invoke_leaf_function node in the
     graph so that it executes at the right point at runtime, ordered by
     effect tokens."""
+
+    __slots__ = ("value",)
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)

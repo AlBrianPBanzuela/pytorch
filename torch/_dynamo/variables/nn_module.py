@@ -183,6 +183,8 @@ def guard_to_detect_forward_monkeypatching(
 
 
 class NNModuleVariable(VariableTracker):
+    __slots__ = ("module_type", "module_key", "value", "nn_module_stack_source")
+
     _nonvar_fields = {
         "module_type",
         "module_key",
@@ -979,6 +981,8 @@ class NNModuleVariable(VariableTracker):
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
+    __slots__ = ("is_state_mutated", "nn_module_stack_source")
+
     _nonvar_fields = {
         "value_type",
         "is_state_mutated",
@@ -1355,6 +1359,8 @@ class UnspecializedBuiltinNNModuleVariable(UnspecializedNNModuleVariable):
     Differentiates between builtin nn modules (e.g. torch.nn.Linear) and user defined nn modules.
     """
 
+    __slots__ = ()
+
     def _wrap_source(self, attr_source: Source) -> Source:
         # vt is already wrapped with the UnspecializedBuiltinNNModuleSource
         return attr_source
@@ -1371,6 +1377,8 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     requirement to not modify internal model state, which would already break FSDP without
     compilation.
     """
+
+    __slots__ = ()
 
     def __init__(self, value: torch.nn.Module, **kwargs: Any) -> None:
         source = kwargs.get("source")

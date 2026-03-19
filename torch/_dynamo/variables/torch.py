@@ -386,6 +386,8 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
 
 
 class BaseTorchVariable(VariableTracker):
+    __slots__ = ("value",)
+
     """common base for all torch.* functions, classes, modules and other things"""
 
     @classmethod
@@ -462,6 +464,8 @@ class BaseTorchVariable(VariableTracker):
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
+    __slots__ = ()
+
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
     def __repr__(self) -> str:
@@ -641,6 +645,8 @@ class AllowInGraphKind(enum.Enum):
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
+    __slots__ = ("kind",)
+
     """Points to a torch function/method that should be put in FX graph"""
 
     def __init__(
@@ -3097,6 +3103,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
 
 class DispatchKeySetVariable(BaseTorchVariable):
+    __slots__ = ()
+
     """represents torch.DispatchKeySet"""
 
     @staticmethod
@@ -3137,6 +3145,8 @@ class DispatchKeySetVariable(BaseTorchVariable):
 
 
 class FuncTorchInterpreterVariable(BaseTorchVariable):
+    __slots__ = ()
+
     """represents torch._functorch.pyfunctorch.FuncTorchInterpreter"""
 
     @classmethod

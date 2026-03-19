@@ -58,6 +58,8 @@ log = logging.getLogger(__name__)
 
 
 class ContextWrappingVariable(VariableTracker):
+    __slots__ = ("target_values", "initial_values", "cleanup_fn")
+
     _nonvar_fields = {
         "cm_obj",
         "target_values",
@@ -161,6 +163,8 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
+    __slots__ = ("cm_obj",)
+
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
     def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
@@ -206,6 +210,8 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
 
 class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
+    __slots__ = ("cm_vt", "mod", "old_buffer_var", "old_parameters_var")
+
     def __init__(self, ctx_manager_vt: ContextWrappingVariable, mod: Any) -> None:
         self.cm_vt = ctx_manager_vt
         self.mod = mod
@@ -243,6 +249,8 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
+    __slots__ = ("prev_state", "proxy")
+
     """represents torch grad requires grad"""
 
     @staticmethod
@@ -287,6 +295,8 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
 
 
 class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
+    __slots__ = ("proxy", "saved")
+
     """represents torch._functorch.pyfunction.temporarily_pop_interpreter_stack()"""
 
     @staticmethod
@@ -327,6 +337,8 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
 
 
 class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    __slots__ = ("proxy",)
+
     """represents torch.func.jvp increment/decrement nesting"""
 
     # A guard is needed as the grad level is baked into the torch FX graph
@@ -372,6 +384,8 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 
 
 class SetFwdGradEnabledContextManager(ContextWrappingVariable):
+    __slots__ = ("prev_state", "proxy")
+
     """represents torch.autograd.forward_ad._set_fwd_grad_enabled() to enable/disable fwd grad"""
 
     @staticmethod
@@ -414,6 +428,8 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
 
 
 class DualLevelContextManager(ContextWrappingVariable):
+    __slots__ = ("new_level", "proxy")
+
     """Represents torch.autograd.forward_ad.dual_level ctx manager"""
 
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)  # type: ignore[arg-type]
@@ -454,6 +470,8 @@ class DualLevelContextManager(ContextWrappingVariable):
 
 
 class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    __slots__ = ("proxy",)
+
     """represents torch.func.grad increment/decrement nesting"""
 
     # A guard is needed as the grad level is baked into the torch FX graph
@@ -497,6 +515,8 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 
 
 class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
+    __slots__ = ("catch_warnings_args",)
+
     """Delay a call to warnings.catch_warnings"""
 
     @staticmethod
@@ -540,6 +560,8 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    __slots__ = ("proxy",)
+
     """represents torch VMap increment/decrement nesting"""
 
     # A guard is needed as the vmap level is baked into the torch FX graph
@@ -596,6 +618,8 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 
 
 class GradModeVariable(ContextWrappingVariable):
+    __slots__ = ()
+
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)  # type: ignore[arg-type]
@@ -665,6 +689,8 @@ class GradModeVariable(ContextWrappingVariable):
 
 
 class InferenceModeVariable(ContextWrappingVariable):
+    __slots__ = ("proxy",)
+
     @staticmethod
     def create(
         tx: "InstructionTranslator", target_value: Any, **kwargs: Any
@@ -737,6 +763,8 @@ class InferenceModeVariable(ContextWrappingVariable):
 
 
 class CUDADeviceVariable(ContextWrappingVariable):
+    __slots__ = ("proxy",)
+
     """represents torch.cuda.device"""
 
     @staticmethod
@@ -791,6 +819,13 @@ class CUDADeviceVariable(ContextWrappingVariable):
 
 
 class TorchFunctionDisableVariable(ContextWrappingVariable):
+    __slots__ = (
+        "initial_torch_function_mode_enabled",
+        "initial_torch_function_subclass_enabled",
+        "only_subclass",
+        "cleanup_fn",
+    )
+
     """represents whether torch function overrides are enabled or not"""
 
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)  # type: ignore[arg-type]
@@ -865,6 +900,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
 
 class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
+    __slots__ = ()
+
     """represents torch.autograd.graph.disable_saved_tensors_hook."""
 
     @staticmethod
@@ -926,6 +963,8 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 
 
 class AutocastModeVariable(ContextWrappingVariable):
+    __slots__ = ("proxy",)
+
     @staticmethod
     def create(
         func: torch.amp.autocast_mode.autocast,
@@ -998,6 +1037,8 @@ class AutocastModeVariable(ContextWrappingVariable):
 
 
 class NullContextVariable(ContextWrappingVariable):
+    __slots__ = ()
+
     """
     This class represents Python contextlib.nullcontext.
     """
@@ -1022,6 +1063,8 @@ class NullContextVariable(ContextWrappingVariable):
 
 
 class ProfilerContextVariable(ContextWrappingVariable):
+    __slots__ = ()
+
     """
     This class represents a set of torch profiler context objects, where Dynamo
     ignores all the side-effects in the __init__, __enter__ and __exit__ methods
@@ -1059,6 +1102,8 @@ class ProfilerContextVariable(ContextWrappingVariable):
 
 
 class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
+    __slots__ = ("proxy",)
+
     """
     This class represents torch profiler context objects.
 
@@ -1174,6 +1219,8 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
 
 
 class PreserveVersionContextVariable(ContextWrappingVariable):
+    __slots__ = ("prev_versions", "tensors")
+
     """
     Wraps torch.autograd._unsafe_preserve_version_counter
     """
@@ -1247,6 +1294,8 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
 
 class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
+    __slots__ = ("param_group_var",)
+
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)  # type: ignore[arg-type]
 
     @staticmethod
@@ -1320,6 +1369,8 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
 
 
 class SDPAKernelVariable(ContextWrappingVariable):
+    __slots__ = ("set_priority", "prev_backends")
+
     """represents torch.nn.attention.sdpa_kernel"""
 
     @staticmethod
@@ -1413,6 +1464,8 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
 
 class FxTracebackAnnotateVariable(ContextWrappingVariable):
+    __slots__ = ()
+
     """
     fx.traceback.annotate is a context manager that allows users to annotate the
     fx graph nodes with custom metadata. In the context of Dynamo, we don't have
@@ -1459,6 +1512,8 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
 
 
 class DynamoConfigPatchVariable(ContextWrappingVariable):
+    __slots__ = ("initial_values",)
+
     """represents torch._dynamo.patch_dynamo_config"""
 
     # NOTE: no need to guard on dynamo config because dynamo config should not affect soundness
@@ -1493,6 +1548,8 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
 
 
 class ErrorOnGraphBreakVariable(ContextWrappingVariable):
+    __slots__ = ()
+
     """represents torch._dynamo.error_on_graph_break"""
 
     def __init__(self, error_on_graph_break: bool, **kwargs: Any) -> None:
@@ -1514,6 +1571,8 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
 
 
 class CudagraphOverrideVariable(ContextWrappingVariable):
+    __slots__ = ("initial_values",)
+
     """represents torch._dynamo.override_cudagraphs"""
 
     def __init__(self, fwd: bool | None, bwd: bool | None, **kwargs: Any) -> None:
@@ -1567,6 +1626,8 @@ class CudagraphOverrideVariable(ContextWrappingVariable):
 
 
 class WithEnterFunctionVariable(VariableTracker):
+    __slots__ = ("ctx",)
+
     def __init__(
         self,
         ctx: ContextWrappingVariable | GenericContextWrappingVariable,
@@ -1608,6 +1669,8 @@ class WithEnterFunctionVariable(VariableTracker):
 
 
 class WithExitFunctionVariable(VariableTracker):
+    __slots__ = ("ctx", "target")
+
     _nonvar_fields = {
         "target",
         *VariableTracker._nonvar_fields,

@@ -43,6 +43,8 @@ class ConstantVariable(VariableTracker):
     nested collections.
     """
 
+    __slots__ = ("value",)
+
     @overload
     @staticmethod
     def create(value: None) -> Never: ...
@@ -396,6 +398,8 @@ class EnumVariable(VariableTracker):
     Provides specialized handling for Python enum types, supporting
     both standard Enum and IntEnum with proper value tracking and comparison.
     """
+
+    __slots__ = ("value",)
 
     def __init__(self, value: enum.Enum | enum.IntEnum, **kwargs: Any) -> None:
         super().__init__(**kwargs)

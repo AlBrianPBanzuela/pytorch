@@ -121,6 +121,8 @@ def is_hashable(x: VariableTracker) -> bool:
 
 
 class ConstDictVariable(VariableTracker):
+    __slots__ = ("items", "should_reconstruct_all", "original_items", "user_cls")
+
     CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
 
@@ -1014,6 +1016,8 @@ class ConstDictVariable(VariableTracker):
 
 
 class MappingProxyVariable(VariableTracker):
+    __slots__ = ("dv_dict",)
+
     # proxies to the original dict_vt
     def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -1091,6 +1095,8 @@ class MappingProxyVariable(VariableTracker):
 
 
 class NNModuleHooksDictVariable(ConstDictVariable):
+    __slots__ = ()
+
     # Special class to avoid adding any guards on the nn module hook ids.
     def install_dict_keys_match_guard(self) -> None:
         pass
@@ -1102,6 +1108,8 @@ class NNModuleHooksDictVariable(ConstDictVariable):
 
 
 class DefaultDictVariable(ConstDictVariable):
+    __slots__ = ("default_factory",)
+
     def __init__(
         self,
         items: dict[VariableTracker, VariableTracker],
@@ -1229,6 +1237,8 @@ class DefaultDictVariable(ConstDictVariable):
 # implementation, which is almost assuredly wrong
 class SetVariable(ConstDictVariable):
     """We model a sets as dictionary with None values"""
+
+    __slots__ = ()
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
@@ -1544,6 +1554,8 @@ class SetVariable(ConstDictVariable):
 
 
 class OrderedSetClassVariable(VariableTracker):
+    __slots__ = ()
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -1611,6 +1623,8 @@ class OrderedSetClassVariable(VariableTracker):
 
 
 class OrderedSetVariable(SetVariable):
+    __slots__ = ()
+
     def debug_repr(self) -> str:
         if not self.items:
             return "OrderedSet([])"
@@ -1643,6 +1657,8 @@ class OrderedSetVariable(SetVariable):
 
 
 class FrozensetVariable(SetVariable):
+    __slots__ = ()
+
     def debug_repr(self) -> str:
         if not self.items:
             return "frozenset()"
@@ -1729,6 +1745,8 @@ class FrozensetVariable(SetVariable):
 
 
 class DictKeySetVariable(SetVariable):
+    __slots__ = ()
+
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"
@@ -1781,6 +1799,8 @@ class DictViewVariable(VariableTracker):
 
     This is an "abstract" class. Subclasses will override kv and the items method
     """
+
+    __slots__ = ("dv_dict",)
 
     kv: str | None = None
 
@@ -1839,6 +1859,8 @@ class DictViewVariable(VariableTracker):
 
 
 class DictKeysVariable(DictViewVariable):
+    __slots__ = ()
+
     kv = "keys"
 
     @property
@@ -1899,6 +1921,8 @@ class DictKeysVariable(DictViewVariable):
 
 
 class DictValuesVariable(DictViewVariable):
+    __slots__ = ()
+
     # DictValuesVariable is an iterable but cannot be compared.
     kv = "values"
 
@@ -1921,6 +1945,8 @@ class DictValuesVariable(DictViewVariable):
 
 
 class DictItemsVariable(DictViewVariable):
+    __slots__ = ()
+
     kv = "items"
 
     @property
@@ -2023,6 +2049,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
 class DunderDictVariable(ConstDictVariable):
     """represents object.__dict__"""
+
+    __slots__ = ("dict_proxy",)
 
     @classmethod
     def create(

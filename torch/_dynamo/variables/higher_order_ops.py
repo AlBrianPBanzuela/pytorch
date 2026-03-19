@@ -2104,6 +2104,8 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
+    __slots__ = ()
+
     # Subclasses should set _HOP_NAME to enable automatic HOP context in error messages
     _HOP_NAME: str | None = None
     # Set to False for HOPs that hard error on graph break (e.g., cond, map, scan); otherwise
@@ -2187,6 +2189,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
 
 class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     """
     Wraps torch._functorch.autograd_function.custom_function_call
     """
@@ -2210,6 +2214,8 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.cond"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
@@ -2447,6 +2453,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.call_torchbind"
 
     def __init__(
@@ -2518,6 +2526,8 @@ def validate_subgraph_output_types(
 
 
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.while_loop"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
@@ -2536,6 +2546,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.while_loop"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
@@ -2554,6 +2566,8 @@ class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.associative_scan"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
@@ -2795,6 +2809,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.scan"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
@@ -3041,6 +3057,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.map_impl"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
@@ -3152,6 +3170,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.print"
 
     def _call_function(
@@ -3178,6 +3198,8 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.executorch_call_delegate"
 
     def _call_function(
@@ -3249,6 +3271,8 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
 
 class FunctorchHigherOrderVariable(UserFunctionVariable):
+    __slots__ = ()
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3262,6 +3286,8 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
 
 
 class FunctionalCallVariable(FunctorchHigherOrderVariable):
+    __slots__ = ()
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3281,6 +3307,8 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
+    __slots__ = ()
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
@@ -3295,6 +3323,8 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.wrap"
     supports_input_mutation = True
     supports_aliasing = True
@@ -3429,6 +3459,8 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     """
     This hop is not exposed to users but is inserted into the graph
     after export as a post-processing step.
@@ -3519,6 +3551,8 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
 
 class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     """
     This hop is not exposed to users but is inserted into the graph
     after export as a post-processing step.
@@ -3617,6 +3651,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.hints_wrapper"
     _ALLOW_FALLBACK_TO_EAGER = False
 
@@ -3707,6 +3743,8 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.out_dtype"
 
     def _call_function(
@@ -3751,6 +3789,8 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.strict_mode"
     _ALLOW_FALLBACK_TO_EAGER = False
 
@@ -3829,6 +3869,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.utils.checkpoint.checkpoint"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -3897,6 +3939,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.dynamo_bypassing_wrapper"
 
     def __init__(self, hop: HigherOrderOperator, source: Source | None) -> None:
@@ -3954,6 +3998,8 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order._export_tracepoint"
 
     def call_function(
@@ -3979,6 +4025,8 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.run_with_rng_state"
 
     def _call_function(
@@ -4004,6 +4052,8 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.auto_functionalized"
 
     def _call_function(
@@ -4029,6 +4079,8 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.flex_attention_backward"
 
     def proxy_submod(
@@ -4085,6 +4137,8 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     """
     Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
     by unwrapping the higher order op and inlining through it.  This op
@@ -4106,6 +4160,8 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 
 class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.flex_attention"
 
     @staticmethod
@@ -4267,6 +4323,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 @add_hop_context
 class AutogradFunctionApplyVariable(VariableTracker):
+    __slots__ = ()
+
     _HOP_NAME: str = "autograd.Function"
     _ALLOW_FALLBACK_TO_EAGER = True
 
@@ -5104,6 +5162,8 @@ def maybe_positional_arg_names(func: VariableTracker) -> list[str] | None:
 
 
 class BaseHOPVariable(WrapHigherOrderVariable):
+    __slots__ = ()
+
     # Generic fallback for BaseHOP instances not explicitly mapped
     # The actual HOP name comes from self.value._name at runtime
     _HOP_NAME = "base HOP (name not yet determined)"
@@ -5150,6 +5210,8 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.invoke_subgraph"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = True
@@ -5294,6 +5356,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
+    __slots__ = ()
+
     _HOP_NAME = "torch.ops.higher_order.local_map_hop"
     supports_input_mutation = False
     supports_aliasing = False

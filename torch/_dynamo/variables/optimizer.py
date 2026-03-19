@@ -84,6 +84,8 @@ def _is_static_for_cudagraphs(x: torch.Tensor) -> bool:
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
+    __slots__ = ("grad_to_source", "tensor_to_source", "static_tensor_names")
+
     _nonvar_fields = {
         "grad_to_source",
         "tensor_to_source",

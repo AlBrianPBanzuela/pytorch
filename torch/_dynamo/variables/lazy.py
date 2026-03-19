@@ -6,7 +6,7 @@ import inspect
 from typing import Any, TYPE_CHECKING
 
 from ..utils import is_function_or_wrapper
-from .base import VariableTracker, VariableTrackerMeta
+from .base import _get_var_slots, VariableTracker, VariableTrackerMeta
 
 
 if TYPE_CHECKING:
@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 class LazyCache:
     """Container to cache the real VariableTracker"""
+
+    __slots__ = ("value", "source", "name_hint", "vt")
 
     def __init__(self, value: Any, source: Any) -> None:
         if not isinstance(value, LazySymNodeFormatString):
@@ -69,6 +71,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     # Flag to prevent implicit realization in isinstance checks (inherited by subclasses)
     _no_implicit_realize = True
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
+    __slots__ = ("_cache",)
 
     @staticmethod
     def create(value: Any, source: Any, **options: Any) -> VariableTracker:
@@ -186,13 +189,16 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             result = value
             # update cache now to prevent infinite recursion
             cache[idx] = (result, value)
-            value_dict = value.__dict__
-            nonvars = value._nonvar_fields
-            for key in value_dict:
-                if key not in nonvars:
-                    value_dict[key] = cls.realize_all(
-                        value_dict[key], cache, allow_lazy_constant=allow_lazy_constant
-                    )
+            for key in _get_var_slots(type(value)):
+                setattr(
+                    value,
+                    key,
+                    cls.realize_all(
+                        getattr(value, key),
+                        cache,
+                        allow_lazy_constant=allow_lazy_constant,
+                    ),
+                )
         elif value_cls is list:
             result = [
                 cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
@@ -253,6 +259,8 @@ class LazyConstantVariable(LazyVariableTracker):
     being used in control flow or math) to avoid unnecessary recompilation when
     their values change.
     """
+
+    __slots__ = ()
 
     supported_types = (int, float, bool, str)
 
