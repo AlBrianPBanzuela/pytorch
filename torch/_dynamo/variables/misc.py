@@ -1355,7 +1355,6 @@ class GetAttrVariable(VariableTracker):
                 self.obj,
                 (
                     variables.NNModuleVariable,
-                    # variables.UserDefinedClassVariable,
                 ),
             )
         ):
@@ -1394,7 +1393,6 @@ class GetAttrVariable(VariableTracker):
                 self.obj,
                 (
                     variables.NNModuleVariable,
-                    # variables.UserDefinedClassVariable,
                 ),
             )
         ):
