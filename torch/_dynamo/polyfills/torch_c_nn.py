@@ -84,18 +84,6 @@ def _parse_to_polyfill(
     return (device, dtype, non_blocking, memory_format)
 
 
-@substitute_in_graph(torch.__future__.get_overwrite_module_params_on_conversion)
-def get_overwrite_module_params_on_conversion_polyfill() -> bool:
-    """
-    Polyfill for torch.__future__.get_overwrite_module_params_on_conversion.
-
-    Returns the actual value from the underlying global variable.
-    """
-    import torch.__future__ as torch_future
-
-    return torch_future._overwrite_module_params_on_conversion
-
-
 @substitute_in_graph(torch.__future__.get_swap_module_params_on_conversion)
 def get_swap_module_params_on_conversion_polyfill() -> bool:
     """
@@ -128,7 +116,6 @@ def _has_compatible_shallow_copy_type_polyfill(
 
 __all__ = [
     "_parse_to_polyfill",
-    "get_overwrite_module_params_on_conversion_polyfill",
     "get_swap_module_params_on_conversion_polyfill",
     "_has_compatible_shallow_copy_type_polyfill",
 ]

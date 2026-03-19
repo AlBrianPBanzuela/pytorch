@@ -1054,6 +1054,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.value is other.value
         )
 
+    def get_real_python_backed_value(self) -> object:
+        return self.value
+
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
@@ -1237,7 +1240,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self) -> type:
         return self.value_type  # type: ignore[return-value]
 
-    def python_value_for_identity(self) -> object:
+    def get_real_python_backed_value(self) -> object:
         return self.value
 
     def as_python_constant(self) -> object:

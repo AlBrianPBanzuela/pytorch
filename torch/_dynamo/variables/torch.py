@@ -429,6 +429,9 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
+    def get_real_python_backed_value(self) -> Any:
+        return self.value
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
