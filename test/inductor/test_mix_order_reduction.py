@@ -15,9 +15,8 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    isRocmArchAnyOf,
-    MI200_ARCH,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -294,6 +293,8 @@ class MixOrderReductionTest(TestBase):
     @parametrize("max_autotune", (False, True))
     @parametrize("initial_xblock", (1, 2))
     @parametrize("add_1dim", (False, True))
+    # The test OOM in CI sometimes. Ask for more memory to make it stable.
+    @largeTensorTest("16GB", device=GPU_TYPE, inductor=True)
     def test_rms_norm_bwd(
         self,
         wdtype,
@@ -534,9 +535,6 @@ class MixOrderReductionTest(TestBase):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
-        if dtype is torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
-            self.skipTest("Currently failing on rocm mi200")
-
         def f(xs, w, eps):
             ys = []
             for x in xs:
@@ -554,13 +552,22 @@ class MixOrderReductionTest(TestBase):
         eps = 1e-5
 
         ref = f(xs, w, eps)
+
+        # use float64 to compute ref_grads for precision
+        # and cast back to original dtype
+        xs_f64 = [x.to(torch.float64) for x in xs]
+        w_f64 = w.to(torch.float64)
+        dys_f64 = [dy.to(torch.float64) for dy in dys]
+        ref_f64 = f(xs_f64, w_f64, eps)
+        ref_grads_f64 = torch.autograd.grad(ref_f64, [*xs_f64, w_f64], dys_f64)
+        ref_grads = [g.to(dtype) for g in ref_grads_f64]
+
         act = torch.compile(
             f,
             options={
                 "split_reductions": split_reductions,
             },
         )(xs, w, eps)
-        ref_grads = torch.autograd.grad(ref, [*xs, w], dys)
         act_grads, (wrapper,) = utils.run_and_get_code(
             lambda: torch.autograd.grad(act, [*xs, w], dys)
         )
@@ -752,6 +759,7 @@ class MixOrderReductionTest(TestBase):
         compile_metrics = torch._dynamo.utils._compilation_metrics
         self.assertEqual(len(compile_metrics), 1, "Don't recompile")
 
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/6398")
     def test_additive_rnumel(self):
         """
         Fix https://github.com/pytorch/pytorch/issues/176375

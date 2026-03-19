@@ -371,6 +371,16 @@ test_python_smoke_xpu() {
   assert_git_not_dirty
 }
 
+test_dtensor() {
+  # Dynamically discover all test files under test/distributed/tensor/
+  # so new tests are automatically picked up.
+  # shellcheck disable=SC2046
+  time python test/run_test.py \
+    --include $(find test/distributed/tensor -name 'test_*.py' -printf '%P\n' | sed 's|\.py$||; s|^|distributed/tensor/|' | sort | tr '\n' ' ') \
+    --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_h100_distributed() {
   # Distributed tests at H100
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -394,6 +404,7 @@ test_h100_symm_mem() {
   export NVSHMEM_SYMMETRIC_SIZE=4G
   # Disable NVLink Switch features (not available on AWS H100 instances)
   export NVSHMEM_DISABLE_NVLS=1
+  export NCCL_NVLS_ENABLE=0
   _run_symm_mem_tests
 }
 
@@ -1787,6 +1798,8 @@ test_linux_aarch64() {
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
         distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
         test_linalg \
+        test_jit test_jit_autocast test_ops_jit \
+        test_nn nn/test_convolution functorch/test_ops functorch/test_aotdispatch \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1806,6 +1819,7 @@ test_linux_aarch64() {
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
        inductor/test_cpu_select_algorithm inductor/test_cpu_repro \
+       inductor/test_aot_inductor inductor/test_fused_attention \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
@@ -2057,6 +2071,8 @@ elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
   test_python_smoke_b200
 elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
   test_python_smoke_xpu
+elif [[ "${TEST_CONFIG}" == dtensor ]]; then
+  test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
