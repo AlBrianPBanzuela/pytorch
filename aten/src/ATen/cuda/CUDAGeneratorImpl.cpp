@@ -446,7 +446,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   // Each sharding spec array stores one uint64_t per tensor dim
   constexpr size_t sharding_spec_entry_size = sizeof(uint64_t);
   // 4 arrays total: local_shape, global_offset, global_shape, global_strides
-  constexpr size_t sharding_spec_stride =
+  constexpr size_t sharding_spec_bytes_per_dim =
       4 * sharding_spec_entry_size;
 
   auto new_state_size = new_state.numel();
@@ -462,7 +462,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     TORCH_CHECK(
         new_state_size > static_cast<int64_t>(seed_size + offset_size) &&
             (new_state_size - (seed_size + offset_size)) %
-                    sharding_spec_stride ==
+                    sharding_spec_bytes_per_dim ==
                 0,
         "RNG state is wrong size");
     no_philox_seed = false;
@@ -481,7 +481,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   size_t base_size = no_philox_seed ? seed_size : seed_size + offset_size;
   if (new_state_size > static_cast<int64_t>(base_size)) {
     uint64_t tensor_ndim =
-        (new_state_size - base_size) / sharding_spec_stride;
+        (new_state_size - base_size) / sharding_spec_bytes_per_dim;
 
     std::array<uint64_t, MAX_DIMS> local_shape{};
     std::array<uint64_t, MAX_DIMS> global_offset{};

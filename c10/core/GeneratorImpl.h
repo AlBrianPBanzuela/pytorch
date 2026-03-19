@@ -84,7 +84,11 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   virtual bool use_shard_aware_rng() const {
     return false;
   }
-  virtual void set_use_shard_aware_rng(bool /*value*/) {}
+  virtual void set_use_shard_aware_rng(bool value) {
+    TORCH_CHECK(
+        !value,
+        "set_use_shard_aware_rng is not supported for this generator type");
+  }
 
   // See Note [Acquire lock when using random generators]
   std::mutex mutex_;

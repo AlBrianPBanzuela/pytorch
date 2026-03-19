@@ -123,7 +123,9 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   c10::intrusive_ptr<CUDAGeneratorState> clone();
 };
 
-// aten/src/ATen/cuda/detail/OffsetCalculator.cuh
+// Maximum number of tensor dimensions. Used to size fixed-length arrays
+// on the stack and in GPU registers where dynamic allocation isn't possible.
+// Keep in sync with aten/src/ATen/cuda/detail/OffsetCalculator.cuh.
 #if defined(USE_ROCM)
 constexpr int MAX_DIMS = 16;
 #else
@@ -180,6 +182,14 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
       const std::array<uint64_t, MAX_DIMS>& global_shape,
       const std::array<uint64_t, MAX_DIMS>& global_strides);
 
+  bool use_shard_aware_rng() const override {
+    return use_shard_aware_rng_;
+  }
+
+  void set_use_shard_aware_rng(bool value) override {
+    use_shard_aware_rng_ = value;
+  }
+
   bool reset_rnn_state() {
     return !no_reset_rnn_state_.test_and_set();
   }
@@ -197,17 +207,6 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   std::unique_ptr<ShardingSpec> sharding_spec_;
   std::atomic_flag no_reset_rnn_state_;
   bool use_shard_aware_rng_ = false;
-
- public:
-  // Returns true if CUDA RNG is configured for sharding-aware RNG mode,
-  // false otherwise.
-  bool use_shard_aware_rng() const override {
-    return use_shard_aware_rng_;
-  }
-
-  void set_use_shard_aware_rng(bool value) override {
-    use_shard_aware_rng_ = value;
-  }
 };
 
 namespace cuda::detail {
