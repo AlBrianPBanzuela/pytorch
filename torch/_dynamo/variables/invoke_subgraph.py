@@ -61,7 +61,6 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # HIGH-LEVEL FLOW
 # ===============
-#
 #   User code: model.layers[0](x), model.layers[1](x), ..., model.layers[79](x)
 #                     |                     |                        |
 #                     v                     v                        v
@@ -83,7 +82,6 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # WHAT GETS CACHED
 # ================
-#
 # After the first trace, save_reuse_entry stores an InvokeSubgraphReuseEntry
 # (in _guards.py) containing:
 #   - body_name/body_gmod: the traced subgraph
@@ -99,7 +97,6 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # CACHE LOOKUP (is_reusable)
 # ==========================
-#
 # On subsequent calls:
 #   1. Input structure match -- same treespec, tags, tensor metadata.
 #   2. Source replacement -- clone each guard's source with a replacement map
@@ -112,7 +109,6 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # STAMP OUT (stamp_out_subgraph)
 # ==============================
-#
 # On cache hit, reconstruct the argument list using the freevar mapping
 # (list[LiftedArgOrigin]):
 #
@@ -131,7 +127,6 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # SAFETY
 # ======
-#
 # In normal Dynamo compilation, safety is enforced at runtime: guards are
 # installed during tracing and re-evaluated on every subsequent call against
 # real Python objects.  Subgraph reuse operates differently — we are in the
