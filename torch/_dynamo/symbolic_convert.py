@@ -1063,8 +1063,10 @@ class ExceptionStack:
     def clear_current_exception(self) -> None:
         self._current_exception = None
 
-    def set_current_exception(self, val: ExceptionVals) -> None:
-        self._set_context_and_break_context_reference_cycle(val)
+    def set_current_exception(
+        self, tx: InstructionTranslator, val: ExceptionVals
+    ) -> None:
+        self._set_context_and_break_context_reference_cycle(tx, val)
         self._current_exception = val
 
     def move_current_exception_to_stack(self) -> None:
@@ -1077,17 +1079,27 @@ class ExceptionStack:
         return self._current_exception
 
     def _set_context_recursive(
-        self, val: ExceptionVals, prev_idx: int
+        self, tx: InstructionTranslator, val: ExceptionVals, prev_idx: int
     ) -> ExceptionVals:
-        if (ctx := val.__context__) and type(ctx) is not ConstantVariable:  # type: ignore[union-attr]
+        ctx = val.var_getattr(tx, "__context__")
+        if not ctx.is_constant_none():
             return val
         if len(self._exc_stack) + prev_idx > 0:
             prev = self._exc_stack[prev_idx]
-            self._set_context_recursive(prev, prev_idx - 1)
-            val.set_context(prev)  # type: ignore[union-attr, arg-type]
+            self._set_context_recursive(tx, prev, prev_idx - 1)
+            if prev is not val:
+                ctx = VariableTracker.build(tx, "__context__")
+                val.call_method(
+                    tx,
+                    "__setattr__",
+                    [ctx, prev],
+                    {},
+                )
         return val
 
-    def _break_context_reference_cycle(self, val: ExceptionVals) -> None:
+    def _break_context_reference_cycle(
+        self, tx: InstructionTranslator, val: ExceptionVals
+    ) -> None:
         # See test_exceptions::test_raise_does_not_create_context_chain_cycle
         # Based on https://github.com/python/cpython/blob/e635bf2e49797ecb976ce45a67fce2201a25ca68/Python/errors.c#L207-L228
         # As noted on CPython, this is O(chain length) but the context chains
@@ -1095,12 +1107,13 @@ class ExceptionStack:
         o = slow_o = val
         slow_update_toggle = False  # floyd's algorithm for detecting cycle
         while True:
-            context = o.__context__  # type: ignore[union-attr]
+            context = o.var_getattr(tx, "__context__")
             if type(context) is ConstantVariable:  # context not set
                 break
 
             if context is val:
-                o.set_context(CONSTANT_VARIABLE_NONE)  # type: ignore[union-attr, arg-type]
+                ctx = VariableTracker.build(tx, "__context__")
+                o.call_method(tx, "__setattr__", [ctx, CONSTANT_VARIABLE_NONE], {})
                 break
 
             o = context  # type: ignore[assignment]
@@ -1115,11 +1128,11 @@ class ExceptionStack:
             slow_update_toggle = not slow_update_toggle
 
     def _set_context_and_break_context_reference_cycle(
-        self, val: ExceptionVals
+        self, tx: InstructionTranslator, val: ExceptionVals
     ) -> None:
         # set Exception.__context__
-        self._set_context_recursive(val, len(self._exc_stack) - 1)
-        self._break_context_reference_cycle(val)
+        self._set_context_recursive(tx, val, len(self._exc_stack) - 1)
+        self._break_context_reference_cycle(tx, val)
 
     def pop(self) -> ExceptionVals:
         return self._exc_stack.pop()
@@ -2196,7 +2209,7 @@ class InstructionTranslatorBase(
         # 2) when user raises exception instance
         if self._isinstance_exception(val):
             # Save the exception in a global data structure
-            self.exn_vt_stack.set_current_exception(val)  # type: ignore[arg-type]
+            self.exn_vt_stack.set_current_exception(self, val)  # type: ignore[arg-type]
 
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
             # Pass the stored python_stack to preserve the original exception location

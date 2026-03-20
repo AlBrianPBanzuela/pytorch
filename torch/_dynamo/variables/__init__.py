@@ -166,6 +166,7 @@ from .user_defined import (
     InspectVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
+    UserDefinedBuiltinSubclassVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,

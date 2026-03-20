@@ -64,10 +64,8 @@ from ..utils import (
     identity,
     is_tensor_base_attr_getter,
     istype,
-    list_methods,
     proxy_args_kwargs,
     raise_args_mismatch,
-    tuple_methods,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -345,25 +343,10 @@ class SuperVariable(VariableTracker):
             )
             return variables.CONSTANT_VARIABLE_NONE
         elif (
-            isinstance(self.objvar, variables.UserDefinedDictVariable)
-            and inner_fn in self.objvar._dict_methods
+            isinstance(self.objvar, variables.UserDefinedBuiltinSubclassVariable)
+            and inner_fn in self.objvar._builtin_methods()
         ):
-            return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
-        elif (
-            isinstance(self.objvar, variables.UserDefinedSetVariable)
-            and inner_fn in self.objvar._set_methods
-        ):
-            return self.objvar._set_vt.call_method(tx, name, args, kwargs)
-        elif (
-            isinstance(self.objvar, variables.UserDefinedTupleVariable)
-            and inner_fn in tuple_methods
-        ):
-            return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
-        elif (
-            isinstance(self.objvar, variables.UserDefinedListVariable)
-            and inner_fn in list_methods
-        ):
-            return self.objvar._list_vt.call_method(tx, name, args, kwargs)
+            return self.objvar._builtin_base_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -589,9 +572,6 @@ class ExceptionVariable(VariableTracker):
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
 
-    def set_context(self, context: VariableTracker) -> None:
-        self.__context__ = context
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
@@ -629,9 +609,16 @@ class ExceptionVariable(VariableTracker):
 
         name = name_var.as_python_constant()
         if name == "__context__":
-            # Constant can be either an Exceptior or None
-            assert isinstance(val, (ExceptionVariable, ConstantVariable))
-            self.set_context(val)
+            # Constant can be either an Exception or None
+            assert isinstance(
+                val,
+                (
+                    ExceptionVariable,
+                    ConstantVariable,
+                    variables.UserDefinedExceptionObjectVariable,
+                ),
+            )
+            self.__context__ = val
         elif name == "__cause__":
             if val.is_constant_none() or isinstance(
                 val,
@@ -681,7 +668,10 @@ class ExceptionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
+        if name == "__init__":
+            self.args = tuple(args)
+            return variables.CONSTANT_VARIABLE_NONE
+        elif name == "__setattr__":
             return self.call_setattr(tx, *args)
         elif name == "with_traceback":
             [tb] = args

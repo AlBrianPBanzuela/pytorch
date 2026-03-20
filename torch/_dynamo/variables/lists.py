@@ -51,7 +51,7 @@ from .base import AsPythonConstantNotImplementedError, ValueMutationNew, Variabl
 from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
-from .user_defined import UserDefinedTupleVariable
+from .user_defined import UserDefinedBuiltinSubclassVariable, UserDefinedTupleVariable
 
 
 if TYPE_CHECKING:
@@ -1547,7 +1547,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 
         super().__init__(
             value=dummy_value,
-            tuple_vt=tuple_vt,
+            builtin_base_vt=tuple_vt,
             init_args=items,
             **kwargs,
         )
@@ -1558,7 +1558,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 
     @property
     def items(self) -> list[VariableTracker]:
-        return self._tuple_vt.items
+        return self._builtin_base_vt.items
 
     def is_namedtuple(self) -> bool:
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
@@ -1595,8 +1595,10 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 
     def as_proxy(self) -> Any:
         if self.is_structseq():
-            return self.python_type()([x.as_proxy() for x in self._tuple_vt.items])
-        return self.python_type()(*[x.as_proxy() for x in self._tuple_vt.items])
+            return self.python_type()(
+                [x.as_proxy() for x in self._builtin_base_vt.items]
+            )
+        return self.python_type()(*[x.as_proxy() for x in self._builtin_base_vt.items])
 
     def call_tree_map(
         self,
@@ -1752,10 +1754,10 @@ class NamedTupleVariable(UserDefinedTupleVariable):
                 codegen.create_load_const_unchecked(create_fn)
             )
         )
-        codegen.foreach(self._tuple_vt.items)
+        codegen.foreach(self._builtin_base_vt.items)
         codegen.extend_output(
             [
-                create_build_tuple(len(self._tuple_vt.items)),
+                create_build_tuple(len(self._builtin_base_vt.items)),
             ]
             + create_call_function(1, False)
         )
@@ -1828,7 +1830,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         fields = self.fields()
         if name in fields:
             field_index = fields.index(name)
-            return self._tuple_vt.items[field_index]
+            return self._builtin_base_vt.items[field_index]
 
         return super().var_getattr(tx, name)
 

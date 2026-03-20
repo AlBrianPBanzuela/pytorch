@@ -2881,6 +2881,12 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+base_exception_methods = {
+    method for method in BaseException.__dict__.values() if callable(method)
+}
+exception_methods = {
+    method for method in Exception.__dict__.values() if callable(method)
+}
 set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
     method for method in frozenset.__dict__.values() if callable(method)

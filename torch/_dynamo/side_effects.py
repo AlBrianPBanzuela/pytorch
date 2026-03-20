@@ -1135,7 +1135,7 @@ class SideEffects:
                 if isinstance(
                     var,
                     variables.UserDefinedDictVariable,
-                ) and self.is_modified(var._dict_vt):
+                ) and self.is_modified(var._builtin_base_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
                     varname_map = {}
@@ -1167,7 +1167,9 @@ class SideEffects:
                         ]
                     )
 
-                    cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
+                    cg(
+                        var._builtin_base_vt, allow_cache=False
+                    )  # Don't codegen via source
                     cg.extend_output(
                         [
                             create_instruction(
@@ -1186,11 +1188,11 @@ class SideEffects:
                             create_instruction("POP_TOP"),
                         ]
                     )
-                    _maybe_log_side_effect(var._dict_vt)
+                    _maybe_log_side_effect(var._builtin_base_vt)
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,
-                ) and self.is_modified(var._list_vt):
+                ) and self.is_modified(var._builtin_base_vt):
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
                     varname_map = {}
@@ -1206,7 +1208,9 @@ class SideEffects:
                         ]
                     )
 
-                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
+                    cg(
+                        var._builtin_base_vt, allow_cache=False
+                    )  # Don't codegen via source
                     cg.extend_output(
                         [
                             create_instruction(
@@ -1225,7 +1229,7 @@ class SideEffects:
                             create_instruction("POP_TOP"),
                         ]
                     )
-                    _maybe_log_side_effect(var._list_vt)
+                    _maybe_log_side_effect(var._builtin_base_vt)
 
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to

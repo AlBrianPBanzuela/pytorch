@@ -1693,7 +1693,9 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            result = UserDefinedDictVariable(
+                value, builtin_base_vt=dict_vt, source=self.source
+            )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1715,7 +1717,7 @@ class VariableBuilder:
                 mutation_type=ValueMutationExisting(),
             )
             result = UserDefinedTupleVariable(
-                value, tuple_vt=tuple_vt, source=self.source
+                value, builtin_base_vt=tuple_vt, source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, list):
@@ -1736,7 +1738,9 @@ class VariableBuilder:
                 source=self.source,
                 mutation_type=ValueMutationExisting(),
             )
-            result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
+            result = UserDefinedListVariable(
+                value, builtin_base_vt=list_vt, source=self.source
+            )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1759,7 +1763,9 @@ class VariableBuilder:
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
-            result = UserDefinedSetVariable(value, set_vt=set_vt, source=self.source)
+            result = UserDefinedSetVariable(
+                value, builtin_base_vt=set_vt, source=self.source
+            )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -4386,6 +4392,12 @@ class SourcelessBuilder:
                 value, mutation_type=ValueMutationNew()
             )
         )
+        # handlers[BaseException] = lambda tx, value: ExceptionVariable(
+        #     type(value), (create(tx, x) for x in value.args), mutation_type=ValueMutationNew()
+        # )
+        # handlers[Exception] = lambda tx, value: ExceptionVariable(
+        #     type(value), (create(tx, x) for x in value.args), mutation_type=ValueMutationNew()
+        # )
 
         def passthrough(tx: "InstructionTranslator", value: T) -> T:
             return value
