@@ -22,8 +22,7 @@ jobs:
   llm-retrieval:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    # TODO: Migrate this workflow to OSDC
-    runs-on: linux.4xlarge
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     continue-on-error: true
     needs: get-label-type
     steps:

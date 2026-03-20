@@ -68,14 +68,14 @@ jobs:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
+      check_experiments: arc
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-py3.10-gcc11 (build + test)                            ║
+  # ║ linux-jammy-py3.10-gcc11 (build + test)                              ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_10-gcc11-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' linux-docs ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' linux-docs ')) }}
     name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -83,29 +83,31 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.c7i.2xlarge' }}" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.c7i.2xlarge' }}" },
+          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   linux-jammy-py3_10-gcc11-test:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ')) }}
     name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -118,89 +120,41 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_10-gcc11-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' linux-docs ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-gcc11
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3_10-gcc11-test-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-gcc11
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs:
-      - linux-jammy-py3_10-gcc11-build-osdc
-      - target-determination
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build-osdc.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.14t-clang15 (build + test)                         ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_14t-clang15-build:
-    if: ${{ needs.get-label-type.outputs.use-arc != 'true' }}
     name: linux-jammy-py3.14t-clang15
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.14t-clang15
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang15
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3.14t-clang15' }}"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   linux-jammy-py3_14t-clang15-test:
-    if: ${{ needs.get-label-type.outputs.use-arc != 'true' }}
     name: linux-jammy-py3.14t-clang15
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -211,48 +165,7 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang15
       docker-image: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.test-matrix }}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_14t-clang15-build-osdc:
-    if: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.14t-clang15
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.14t-clang15
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3_14t-clang15-test-osdc:
-    if: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.14t-clang15
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs:
-      - linux-jammy-py3_14t-clang15-build-osdc
-      - target-determination
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_14t-clang15-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_14t-clang15-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_14t-clang15-build-osdc.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
@@ -276,9 +189,8 @@ jobs:
   # ║ linux-jammy-py3.10-gcc11-no-ops (build only)                       ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_10-gcc11-no-ops:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-no-ops ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-no-ops ')) }}
     name: linux-jammy-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -286,65 +198,50 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-gcc11-no-ops
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_10-gcc11-no-ops-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-no-ops ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-gcc11-no-ops
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.10-gcc11-no-ops
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-clang18-asan (build + test)                     ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_10-clang18-asan-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ')) }}
     name: linux-jammy-py3.10-clang18-asan
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
-      runner: linux.c7i.4xlarge
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.4xlarge' }}"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3-clang18-asan' }}"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      # TODO (huydhn): Add this back once other workflow migrates
+      # sync-tag: asan-build
     secrets: inherit
 
   linux-jammy-py3_10-clang18-asan-test:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ')) }}
     name: linux-jammy-py3.10-clang18-asan
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -357,57 +254,17 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_10-clang18-asan-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-clang18-asan
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner: l-x86iavx512-8-64
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang18-asan
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3_10-clang18-asan-test-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-clang18-asan
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs:
-      - linux-jammy-py3_10-clang18-asan-build-osdc
-      - target-determination
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang18-asan-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build-osdc.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      # TODO (huydhn): Add this back once other workflow migrates
+      # sync-tag: asan-test
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-clang15-onnx (build + test)                     ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_10-clang15-onnx-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15-onnx ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15-onnx ')) }}
     name: linux-jammy-py3.10-clang15-onnx
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -415,17 +272,19 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-clang15-onnx
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang15-onnx
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3-clang15-onnx' }}"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.c7i.2xlarge' }}" },
+          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.c7i.2xlarge' }}" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   linux-jammy-py3_10-clang15-onnx-test:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15-onnx ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15-onnx ')) }}
     name: linux-jammy-py3.10-clang15-onnx
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -438,51 +297,15 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang15-onnx-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang15-onnx-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_10-clang15-onnx-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15-onnx ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-clang15-onnx
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.10-clang15-onnx
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3_10-clang15-onnx-test-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15-onnx ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-clang15-onnx
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs:
-      - linux-jammy-py3_10-clang15-onnx-build-osdc
-      - target-determination
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang15-onnx-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang15-onnx-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang15-onnx-build-osdc.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-clang15 (build + test)                          ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_10-clang15-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15 ')) }}
     name: linux-jammy-py3.10-clang15
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -490,27 +313,29 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-clang15
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang15
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3.10-clang15' }}"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   linux-jammy-py3_10-clang15-test:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15 ')) }}
     name: linux-jammy-py3.10-clang15
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -523,61 +348,15 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang15-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang15-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_10-clang15-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-clang15
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.10-clang15
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3_10-clang15-test-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang15 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-clang15
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs:
-      - linux-jammy-py3_10-clang15-build-osdc
-      - target-determination
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang15-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang15-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang15-build-osdc.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.14-clang15 (build + test)                          ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_14-clang15-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang15 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang15 ')) }}
     name: linux-jammy-py3.14-clang15
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -585,27 +364,29 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.14-clang15
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.14-clang15
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3.14-clang15' }}"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-32' || 'linux.4xlarge' }}" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.2xlarge' }}" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   linux-jammy-py3_14-clang15-test:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang15 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang15 ')) }}
     name: linux-jammy-py3.14-clang15
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -617,60 +398,15 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_14-clang15-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14-clang15-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_14-clang15-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang15 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.14-clang15
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.14-clang15
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-32" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3_14-clang15-test-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang15 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.14-clang15
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs:
-      - linux-jammy-py3_14-clang15-build-osdc
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_14-clang15-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_14-clang15-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_14-clang15-build-osdc.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-cuda12.8-cudnn9-py3.10-clang15 (build only)            ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-cuda12_8-cudnn9-py3_10-clang15-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-cudnn9-py3.10-clang15 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-cudnn9-py3.10-clang15 ')) }}
     name: linux-jammy-cuda12.8-cudnn9-py3.10-clang15
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -678,31 +414,14 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-cuda12.8-cudnn9-py3.10-clang15
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-cuda12_8-cudnn9-py3_10-clang15-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-cudnn9-py3.10-clang15 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-cuda12.8-cudnn9-py3.10-clang15
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-cuda12.8-cudnn9-py3.10-clang15
-      docker-image-name: ghcr.io/pytorch/test-infra:cuda-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
@@ -731,9 +450,8 @@ jobs:
   # ║ linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch (build only)   ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-py3_10-gcc11-mobile-lightweight-dispatch-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build ')) }}
     name: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -741,42 +459,23 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
       build-generates-artifacts: false
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-py3_10-gcc11-mobile-lightweight-dispatch-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      build-generates-artifacts: false
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-rocm-py3.10 (build + test)                              ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-rocm-py3_10-build:
-    if: ${{ (github.event_name == 'pull_request' || (needs.job-filter.outputs.jobs != '' && contains(needs.job-filter.outputs.jobs, ' linux-jammy-rocm-py3.10 '))) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (github.event_name == 'pull_request' || (needs.job-filter.outputs.jobs != '' && contains(needs.job-filter.outputs.jobs, ' linux-jammy-rocm-py3.10 '))) }}
     # don't run build twice on main
     name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
@@ -785,46 +484,26 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-rocm-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
-      sync-tag: rocm-build
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-rocm-n-py3' }}"
+      # TODO (huydhn): Add this back once other workflow migrates
+      # sync-tag: rocm-build
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2" },
           { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.2" },
           { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.2" },
         ]}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-rocm-py3_10-build-osdc:
-    if: ${{ (github.event_name == 'pull_request' || (needs.job-filter.outputs.jobs != '' && contains(needs.job-filter.outputs.jobs, ' linux-jammy-rocm-py3.10 '))) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-rocm-py3.10
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-rocm-py3.10
-      docker-image-name: ghcr.io/pytorch/test-infra:cuda-x86_64-a235b1b
-      sync-tag: rocm-build
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.2" },
-        ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-cuda13.0-py3.10-gcc11-inductor (build + test)           ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-cuda13_0-py3_10-gcc11-inductor-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda13.0-py3.10-gcc11-sm75 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda13.0-py3.10-gcc11-sm75 ')) }}
     name: cuda13.0-py3.10-gcc11-sm75
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -832,16 +511,18 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm75
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks' }}"
       test-matrix: |
         { include: [
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   linux-jammy-cuda13_0-py3_10-gcc11-inductor-test:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda13.0-py3.10-gcc11-sm75 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda13.0-py3.10-gcc11-sm75 ')) }}
     name: cuda13.0-py3.10-gcc11-sm75
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -853,49 +534,15 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-cuda13_0-py3_10-gcc11-inductor-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda13.0-py3.10-gcc11-sm75 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: cuda13.0-py3.10-gcc11-sm75
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm75
-      docker-image-name: ghcr.io/pytorch/test-infra:cuda-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-bx86iavx512-94-384-t4-8" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-cuda13_0-py3_10-gcc11-inductor-test-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda13.0-py3.10-gcc11-sm75 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: cuda13.0-py3.10-gcc11-sm75
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs:
-      - linux-jammy-cuda13_0-py3_10-gcc11-inductor-build-osdc
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build-osdc.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-xpu-n-py3.10 (build + test)                             ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   linux-jammy-xpu-n-py3_10-build:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ')) }}
     name: linux-jammy-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -903,9 +550,9 @@ jobs:
       - job-filter
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      runner: linux.c7i.4xlarge
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.4xlarge' }}"
       build-environment: linux-noble-xpu-n-py3.10
-      docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-noble-xpu-n-py3' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
@@ -913,52 +560,30 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
-    secrets: inherit
-
-  # --- OSDC path ---
-  linux-jammy-xpu-n-py3_10-build-osdc:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ')) && needs.get-label-type.outputs.use-arc == 'true' }}
-    name: linux-jammy-xpu-n-py3.10
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      runner: l-x86iavx512-8-64
-      build-environment: linux-noble-xpu-n-py3.10
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
-        ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ dynamo-cpython (build + test)                                       ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  # --- EC2 path ---
   dynamo-cpython-build:
-    if: ${{ needs.get-label-type.outputs.use-arc != 'true' }}
     name: dynamo-cpython-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.13-clang15
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang15
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b' || 'ci-image:pytorch-linux-jammy-py3.13-clang15' }}"
       test-matrix: |
         { include: [
-          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-16' || 'linux.c7i.2xlarge' }}" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   dynamo-cpython-test:
-    if: ${{ needs.get-label-type.outputs.use-arc != 'true' }}
     name: dynamo-cpython-test
     uses: ./.github/workflows/_linux-test.yml
     needs: [get-label-type, dynamo-cpython-build]
@@ -969,32 +594,5 @@ jobs:
         { include: [
           { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
-    secrets: inherit
-
-  # --- OSDC path ---
-  dynamo-cpython-build-osdc:
-    if: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-    name: dynamo-cpython-build
-    uses: ./.github/workflows/_linux-build-osdc.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-x86iavx512-8-64
-      build-environment: linux-jammy-py3.13-clang15
-      docker-image-name: ghcr.io/pytorch/test-infra:cpu-x86_64-a235b1b
-      test-matrix: |
-        { include: [
-          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-16" },
-        ]}
-    secrets: inherit
-
-  dynamo-cpython-test-osdc:
-    if: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-    name: dynamo-cpython-test
-    uses: ./.github/workflows/_linux-test-osdc.yml
-    needs: [get-label-type, dynamo-cpython-build-osdc]
-    with:
-      build-environment: ${{ needs.dynamo-cpython-build-osdc.outputs.build-environment }}
-      docker-image: ${{ needs.dynamo-cpython-build-osdc.outputs.docker-image }}
-      test-matrix: ${{ needs.dynamo-cpython-build-osdc.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
