@@ -7,7 +7,6 @@ higher-order operator.
 import enum
 import logging
 import traceback
-import weakref
 from dataclasses import dataclass
 from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
@@ -249,11 +248,11 @@ def build_fingerprint_with_pytree(
     return InputFingerprint(flat_vts, arg_sources, has_unknown, treespec)
 
 
-def get_flat_proxies(flat_vts: list[tuple[InputTag, VariableTracker]]) -> list[Proxy]:
+def get_flat_proxies(fingerprint: InputFingerprint) -> list[Proxy]:
     """Collect deduplicated proxies from tensor/symnode leaves."""
     seen: set[torch.fx.Node] = set()
     flat_proxies: list[Proxy] = []
-    for tag, vt in flat_vts:
+    for tag, vt in fingerprint.flat_vts:
         if tag in (InputTag.TENSOR, InputTag.SYMNODE):
             proxy = vt.as_proxy()
             if proxy.node not in seen:
@@ -633,7 +632,7 @@ def is_reusable(
         "L": tx.output.root_tx.f_locals,
     }
     resolve_locals: dict[str, Any] = {}
-    resolve_cache: weakref.WeakKeyDictionary[Source, Any] = weakref.WeakKeyDictionary()
+    resolve_cache: dict[Source, Any] = {}
 
     for source, handler, expected, guard in condition.guards:
         new_source = source.clone(replacement_fn)
@@ -807,7 +806,7 @@ def stamp_out_subgraph(
     from torch._dynamo.variables.builder import VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
 
-    flat_proxies = get_flat_proxies(fingerprint.flat_vts)
+    flat_proxies = get_flat_proxies(fingerprint)
     new_arg_sources = fingerprint.arg_sources
 
     source_replacement = build_source_replacement(cached.arg_sources, new_arg_sources)
@@ -820,7 +819,7 @@ def stamp_out_subgraph(
         "L": tx.output.root_tx.f_locals,
     }
     resolve_locals: dict[str, Any] = {}
-    resolve_cache: weakref.WeakKeyDictionary[Source, Any] = weakref.WeakKeyDictionary()
+    resolve_cache: dict[Source, Any] = {}
 
     # Find the args for the about-to-be-inserted invoke_subgraph call.
     for subgraph_input in cached.subgraph_input_mapping:

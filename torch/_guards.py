@@ -1335,7 +1335,7 @@ class Source:
         self,
         globals: dict[str, Any],
         locals: dict[str, Any],
-        cache: weakref.WeakKeyDictionary[Source, Any],
+        cache: dict[Source, Any],
     ) -> Any:
         if self in cache:
             return cache[self]
@@ -1393,7 +1393,7 @@ class ChainedSource(Source):
         self,
         globals: dict[str, Any],
         locals: dict[str, Any],
-        cache: weakref.WeakKeyDictionary[Source, Any],
+        cache: dict[Source, Any],
     ) -> Any:
         if self in cache:
             return cache[self]
