@@ -327,7 +327,7 @@ class StreamVariable(StreamContextVariable):
     def python_type(self) -> type:
         return torch.Stream
 
-    def python_value_for_identity(self) -> object:
+    def get_real_python_backed_value(self) -> object:
         return self.value
 
     def call_method(
@@ -476,7 +476,7 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
-    def python_value_for_identity(self) -> object:
+    def get_real_python_backed_value(self) -> object:
         return self.value
 
     def call_method(
