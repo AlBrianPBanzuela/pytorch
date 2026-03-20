@@ -8730,6 +8730,54 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    def test_cast_no_recompile_on_different_types(self):
+        # typing.cast is a no-op at runtime. Dynamo should not install a
+        # TYPE_MATCH guard on the value being cast, so passing different
+        # types through the same cast() call should not trigger recompilation.
+        from typing import cast
+
+        class Mixin:
+            def get_self_as_module(self):
+                return cast(torch.nn.Module, self)
+
+        class ModuleA(Mixin, torch.nn.Module):
+            def forward(self, x):
+                self.get_self_as_module()
+                return x + 1
+
+        class ModuleB(Mixin, torch.nn.Module):
+            def forward(self, x):
+                self.get_self_as_module()
+                return x + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(mod, x):
+            mod.get_self_as_module()
+            return x + 1
+
+        fn(ModuleA(), torch.randn(4))
+        fn(ModuleB(), torch.randn(4))
+
+        # Should NOT recompile — cast is a no-op identity function
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_cast_fullgraph_with_non_tensor(self):
+        # Verify typing.cast works with non-tensor values under fullgraph=True
+        from typing import cast
+
+        def fn(x):
+            val = cast(int, x.shape[0])
+            return x + val
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        ref = fn(torch.ones(3, 4))
+        res = opt_fn(torch.ones(3, 4))
+
+        self.assertTrue(same(ref, res))
+
     def test_T_tensor_attribute(self):
         def fn(x, y):
             a = x.T
