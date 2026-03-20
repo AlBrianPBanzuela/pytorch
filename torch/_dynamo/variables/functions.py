@@ -1512,7 +1512,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             source=self.source,
         )
 
-    def get_real_python_backed_value(self) -> bool:
+    def get_real_python_backed_value(self) -> object:
         return self.vt.get_real_python_backed_value()
 
 
@@ -2447,7 +2447,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
             kwargs,
         )
 
-    def get_real_python_backed_value(self) -> bool:
+    def get_real_python_backed_value(self) -> object:
         return getattr(self.wrapper_obj, self.attr_to_trace)
 
 
