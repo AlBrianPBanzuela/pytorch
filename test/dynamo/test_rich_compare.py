@@ -1,5 +1,4 @@
 """Tests for generic_richcompare: unified comparison protocol in Dynamo."""
-import typing
 
 import torch
 import torch._dynamo.testing
@@ -143,19 +142,19 @@ class RichCompareTests(TestCase):
 
     def test_typing_eq_equal(self):
         def fn(x):
-            return typing.List[int] == typing.List[int]
+            return list[int] == list[int]
 
         self.assertTrue(self._compile(fn, torch.tensor(0)))
 
     def test_typing_eq_unequal(self):
         def fn(x):
-            return typing.List[int] == typing.List[str]
+            return list[int] == list[str]
 
         self.assertFalse(self._compile(fn, torch.tensor(0)))
 
     def test_typing_ne(self):
         def fn(x):
-            return typing.List[int] != typing.List[str]
+            return list[int] != list[str]
 
         self.assertTrue(self._compile(fn, torch.tensor(0)))
 
@@ -189,6 +188,7 @@ class RichCompareTests(TestCase):
 
     def test_subclass_priority_eq_native_types(self):
         """rhs side is tried first for subclass, but result is identity for unknown types."""
+
         # A list of tuples is not equal to a tuple of the same items in CPython
         # because list.__eq__ returns NotImplemented for non-list, and
         # tuple.__eq__ returns NotImplemented for non-tuple → identity → False

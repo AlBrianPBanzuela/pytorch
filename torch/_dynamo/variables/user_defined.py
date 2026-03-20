@@ -221,9 +221,6 @@ def generic_richcompare(
       3. If NotImplemented, try rhs.__reflected_op__(lhs)
       4. If still NotImplemented: for __eq__/__ne__ use identity; for others TypeError
     """
-    import operator as _operator
-
-    from .builder import SourcelessBuilder
 
     reflected = _reflected_richcompare_op[op]
 
@@ -3107,7 +3104,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         if op in ("__eq__", "__ne__"):
             result = self.is_python_equal(other)
             return VariableTracker.build(tx, result if op == "__eq__" else not result)
-        other_vt = other._tuple_vt if isinstance(other, UserDefinedTupleVariable) else other  # type: ignore[attr-defined]
+        other_vt = (
+            other._tuple_vt if isinstance(other, UserDefinedTupleVariable) else other
+        )  # type: ignore[attr-defined]
         return self._tuple_vt.richcompare_impl(tx, other_vt, op)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
