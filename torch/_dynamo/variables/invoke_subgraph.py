@@ -132,11 +132,41 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 # SAFETY
 # ======
 #
+# In normal Dynamo compilation, safety is enforced at runtime: guards are
+# installed during tracing and re-evaluated on every subsequent call against
+# real Python objects.  Subgraph reuse operates differently — we are in the
+# middle of tracing, there are no real Python objects, only VariableTrackers.
+# We must answer: what could cause the second invocation of a nested compile
+# region to produce a different trace than the first?
+#
+# VariableTrackers fall into two categories:
+#
+# 1. Intermediates — values produced during tracing with no originating source
+#    (e.g. the result of a prior FX op). These can reach a nested compile region
+#    only via (a) the region's explicit function arguments, or (b) closure
+#    capture. We do not support nested-function regions that close over tensors,
+#    so only (a) applies. For explicit arguments, the set of types that can
+#    appear is small and well-defined: TensorVariable, SymNodeVariable,
+#    ConstantVariable, and NNModuleVariable. Each has a cheap structural
+#    comparison (tensor metadata, symnode identity, constant value equality).
+#    We also snapshot the pytree treespec of the argument list and verify it
+#    matches on lookup, ensuring the flattened structure is identical.
+#
+# 2. Sourceful variables — values with a known originating source (e.g. a
+#    module attribute or a local variable visible in the outer frame). For these
+#    we collect the guard delta from the first trace, parameterize the guard
+#    sources by replacing the original arg sources with the new arg sources, and
+#    re-evaluate the guards by resolving each source against the live f_locals /
+#    f_globals. The one extra hazard here is mutation: if the outer trace
+#    mutates a sourceful object between the first and second invocations, the
+#    cached guards would evaluate against stale values. We therefore also check
+#    that none of the sources read by the cached subgraph have been mutated in
+#    the outer SideEffects tracker before accepting a reuse.
+#
 # - max_reuse_entries (default 8, configurable via nested_compile_region arg)
 #   caps cache entries per function. Exceeding it raises RuntimeError.
-# - Mutations on captured variables disable reuse for that entry.
 # - Guard failures logged with guard type + user stack trace.
-#   Enable: TORCH_LOGS='+higher_order_ops_cache'
+#   Enable: TORCH_LOGS='+hierarchical_compile'
 # ---------------------------------------------------------------------------
 # Auto-cache helpers for invoke_subgraph
 # ---------------------------------------------------------------------------
@@ -160,7 +190,7 @@ class InputFingerprint(NamedTuple):
     treespec: pytree.TreeSpec | None = None
 
 
-def _classify_vt(vt: Any) -> InputTag | None:
+def classify_vt(vt: Any) -> InputTag | None:
     """Return the tag for a leaf VT, or None if unsupported."""
     if isinstance(vt, TensorVariable):
         return InputTag.TENSOR
@@ -192,7 +222,7 @@ def build_input_fingerprint(
     if not kwargs:
         all_leaf = True
         for vt in fn_args_vt:
-            if _classify_vt(vt) is None:
+            if classify_vt(vt) is None:
                 all_leaf = False
                 break
         if all_leaf:
@@ -206,7 +236,7 @@ def build_fingerprint_fast(fn_args_vt: Any) -> InputFingerprint:
     flat_vts: list[tuple[InputTag, VariableTracker]] = []
     arg_sources: list[Source | None] = []
     for vt in fn_args_vt:
-        tag = _classify_vt(vt)
+        tag = classify_vt(vt)
         assert tag is not None
         flat_vts.append((tag, vt))
         # Always append (even None) to keep positional alignment with flat_vts
@@ -235,7 +265,7 @@ def build_fingerprint_with_pytree(
     has_unknown = False
 
     for vt in flat_list_vt.unpack_var_sequence(tx):
-        tag = _classify_vt(vt)
+        tag = classify_vt(vt)
         if tag is not None:
             flat_vts.append((tag, vt))
         else:

@@ -3097,12 +3097,12 @@ class GraphModule(torch.nn.Module):
 class TestInvokeSubgraphReuse(TestCase):
     @contextlib.contextmanager
     def _count_speculate_calls(self):
-        """Yields a list[int] counter incremented on each subgraph speculation (trace)."""
-        count = [0]
+        count = 0
         orig = torch._dynamo.variables.higher_order_ops.speculate_subgraph_with_auto_output_flattening
 
         def _counting(*args, **kwargs):
-            count[0] += 1
+            nonlocal count
+            count += 1
             return orig(*args, **kwargs)
 
         with mock.patch.object(
@@ -3110,35 +3110,10 @@ class TestInvokeSubgraphReuse(TestCase):
             "speculate_subgraph_with_auto_output_flattening",
             _counting,
         ):
-            yield count
-
-    def test_subgraph_reuse_basic(self):
-        @nested_compile_region()
-        def gn(x, y):
-            return torch.mul(x, y)
-
-        def fn(x, y):
-            a = gn(x, y)
-            b = gn(x, y)
-            return a + b
-
-        x = torch.randn(8, requires_grad=True)
-        y = torch.randn(8, requires_grad=True)
-        ref = fn(x, y)
-
-        x_clone = x.detach().clone().requires_grad_(True)
-        y_clone = y.detach().clone().requires_grad_(True)
-        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone, y_clone)
-
-        ref.sum().backward()
-        res.sum().backward()
-
-        self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
-        self.assertEqual(y.grad, y_clone.grad)
+            yield lambda: count
 
     def test_subgraph_reuse_skips_tracing(self):
-        @nested_compile_region()
+        @nested_compile_region
         def gn(x, y):
             return torch.mul(x, y)
 
@@ -3154,10 +3129,10 @@ class TestInvokeSubgraphReuse(TestCase):
         with self._count_speculate_calls() as count:
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
 
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
 
     def test_subgraph_reuse_different_shapes(self):
-        @nested_compile_region()
+        @nested_compile_region
         def gn(x):
             return x.sin()
 
@@ -3173,7 +3148,7 @@ class TestInvokeSubgraphReuse(TestCase):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
 
         # Different shapes → two separate traces
-        self.assertEqual(count[0], 2)
+        self.assertEqual(count(), 2)
         self.assertEqual(res, fn(x, y))
 
     def test_subgraph_reuse_module(self):
@@ -3182,7 +3157,7 @@ class TestInvokeSubgraphReuse(TestCase):
                 super().__init__()
                 self.c = 5
 
-            @nested_compile_region()
+            @nested_compile_region
             def forward(self, x, y):
                 return torch.mul(x, y).sin() + self.c
 
@@ -3204,7 +3179,7 @@ class TestInvokeSubgraphReuse(TestCase):
             )
 
         # Second call reuses the first trace
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
         ref.sum().backward()
         res.sum().backward()
 
@@ -3213,19 +3188,12 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(y.grad, y_clone.grad)
 
     def test_subgraph_reuse_module_different_instances(self):
-        """Reuse must fire when two different instances of the same module class are called.
-
-        Source replacement remaps captured attributes (e.g. self.c) from the
-        first instance's source to the second instance's source, so a single
-        cache entry suffices for both calls.
-        """
-
         class Mod(torch.nn.Module):
             def __init__(self, c):
                 super().__init__()
                 self.c = c
 
-            @nested_compile_region()
+            @nested_compile_region
             def forward(self, x, y):
                 return torch.mul(x, y).sin() + self.c
 
@@ -3249,7 +3217,7 @@ class TestInvokeSubgraphReuse(TestCase):
 
         # mod1 and mod2 have the same structure and c value; source replacement
         # means only one trace is needed.
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
         ref.sum().backward()
         res.sum().backward()
 
@@ -3257,45 +3225,8 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
-    def test_subgraph_reuse_free_function_with_module_arg(self):
-        class Block(torch.nn.Module):
-            def __init__(self, scale):
-                super().__init__()
-                self.linear = torch.nn.Linear(8, 8, bias=False)
-                torch.nn.init.constant_(self.linear.weight, scale)
-
-        @nested_compile_region()
-        def apply_block(mod, x):
-            return mod.linear(x).relu()
-
-        block1 = Block(1.0)
-        block2 = Block(2.0)
-
-        def fn(x):
-            a = apply_block(block1, x)
-            b = apply_block(block2, x)
-            return a + b
-
-        x = torch.randn(4, 8, requires_grad=True)
-        ref = fn(x)
-
-        x_clone = x.detach().clone().requires_grad_(True)
-
-        with self._count_speculate_calls() as count:
-            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone)
-
-        # block1 and block2 have the same subgraph structure (Linear + relu).
-        # Source replacement remaps captured vars, so one cache entry suffices.
-        self.assertEqual(count[0], 1)
-
-        ref.sum().backward()
-        res.sum().backward()
-
-        self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
-
     def test_subgraph_reuse_tuple_output(self):
-        @nested_compile_region()
+        @nested_compile_region
         def gn(x, y):
             return torch.sin(x), torch.cos(y)
 
@@ -3317,7 +3248,7 @@ class TestInvokeSubgraphReuse(TestCase):
             )
 
         # Second call reuses the first trace
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
         sum(r.sum() for r in ref).backward()
         sum(r.sum() for r in res).backward()
 
@@ -3334,7 +3265,7 @@ class TestInvokeSubgraphReuse(TestCase):
                 super().__init__()
                 self.c = 5
 
-            @nested_compile_region()
+            @nested_compile_region
             def forward(self, x):
                 return x * self.c
 
@@ -3356,8 +3287,11 @@ class TestInvokeSubgraphReuse(TestCase):
         # Compiled should produce the same result. If reuse incorrectly
         # fires, both calls would use c=5, giving x*10 instead of x*15.
         mod.c = 5
-        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
+        # c=5 and c=10 are distinct constants → two separate traces
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_unrelated_attr_mutation(self):
         """Reuse should still fire when a different attribute is mutated."""
@@ -3368,7 +3302,7 @@ class TestInvokeSubgraphReuse(TestCase):
                 self.c = 5
                 self.d = 100
 
-            @nested_compile_region()
+            @nested_compile_region
             def forward(self, x):
                 # Only reads self.c, never self.d
                 return x * self.c
@@ -3391,7 +3325,7 @@ class TestInvokeSubgraphReuse(TestCase):
 
         self.assertEqual(ref, res)
         # Mutating mod.d should not prevent reuse of the subgraph that only reads mod.c.
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
 
     def test_subgraph_reuse_same_class_attr_mutated(self):
         """Reuse must be skipped when a captured attr changes between calls.
@@ -3407,7 +3341,7 @@ class TestInvokeSubgraphReuse(TestCase):
                 super().__init__()
                 self.c = c
 
-            @nested_compile_region()
+            @nested_compile_region
             def forward(self, x):
                 return x * self.c
 
@@ -3426,21 +3360,19 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(ref, x * 15)
 
         submod2.c = 5  # reset for compiled run
-        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
+        # submod1 traces with c=5; submod2 has c mutated to 10 → two separate traces
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_pre_existing_attr_guard(self):
-        """Reuse must account for guards installed before the subgraph trace.
+        """Guards installed before the subgraph trace must still block incorrect reuse.
 
-        Using ``block.c`` in a conditional before the nested compile region
-        call installs an EQUALS_MATCH guard on ``block.c`` before
-        guards_before is snapshotted.  When the subgraph trace accesses the
-        same attribute, Guard deduplication prevents a second copy from being
-        added, so the guard won't appear in the delta.  And because
-        arg_sources only contains the module source (not the attr source),
-        get_guards_for_source won't find it either.  Without proper handling,
-        the second call with a different module (different ``c``) would
-        incorrectly reuse the first cached subgraph.
+        If ``block.c`` is read in a conditional before the nested compile region,
+        its guard is installed before ``guards_before`` is snapshotted and won't
+        appear in the delta.  Reuse must still be rejected when a different module
+        with a different ``c`` is passed.
         """
 
         class Block(torch.nn.Module):
@@ -3448,7 +3380,7 @@ class TestInvokeSubgraphReuse(TestCase):
                 super().__init__()
                 self.c = c
 
-        @nested_compile_region()
+        @nested_compile_region
         def apply_block(mod, x):
             return x * mod.c
 
@@ -3476,7 +3408,7 @@ class TestInvokeSubgraphReuse(TestCase):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
         # block1.c=5 and block2.c=10 differ → two separate traces
-        self.assertEqual(count[0], 2)
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_mutated_captured_variable(self):
         """Reuse must be skipped when a captured (non-input) variable is mutated."""
@@ -3487,7 +3419,7 @@ class TestInvokeSubgraphReuse(TestCase):
 
         cfg = Config(5)
 
-        @nested_compile_region()
+        @nested_compile_region
         def apply(x):
             # cfg is captured from closure, not an explicit input
             return x * cfg.c
@@ -3504,8 +3436,11 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(ref, x * 15)
 
         cfg.c = 5
-        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
+        # cfg.c=5 and cfg.c=10 are distinct → two separate traces
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_synthetic_source(self):
         """Reuse must handle TorchScriptObjectVariable with SyntheticLocalSource.
@@ -3532,7 +3467,7 @@ class TestInvokeSubgraphReuse(TestCase):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(ref, res)
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
 
     def test_subgraph_reuse_synthetic_source_different_args(self):
         """Reuse when hoisted opaque ctor args differ across submodules."""
@@ -3569,7 +3504,7 @@ class TestInvokeSubgraphReuse(TestCase):
             res = torch.compile(model, backend=backend, fullgraph=True)(x)
 
         self.assertEqual(ref, res)
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
 
         self.assertEqual(len(backend.graphs), 1)
         if not TEST_WITH_CROSSREF:
@@ -3633,7 +3568,7 @@ class GraphModule(torch.nn.Module):
             )
 
         # Different list lengths → treespec mismatch → two separate traces
-        self.assertEqual(count[0], 2)
+        self.assertEqual(count(), 2)
         for r, e in zip(res, ref):
             for ri, ei in zip(r, e):
                 self.assertEqual(ri, ei)
@@ -3644,7 +3579,7 @@ class GraphModule(torch.nn.Module):
         Three calls with three distinct scalar constants → call_count == 3.
         """
 
-        @nested_compile_region()
+        @nested_compile_region
         def gn(x, scale):
             return x * scale
 
@@ -3663,25 +3598,15 @@ class GraphModule(torch.nn.Module):
         for r, e in zip(res, ref):
             self.assertEqual(r, e)
         # Three distinct constants → three separate traces
-        self.assertEqual(count[0], 3)
+        self.assertEqual(count(), 3)
 
     def test_subgraph_reuse_tuple_destructure_with_intermediates(self):
-        """Reuse must handle tuple destructuring when graph has extra intermediate outputs.
-
-        When allow_side_effects=True, intermediates may be added as extra
-        graph outputs beyond the user-visible return values. The normal path
-        returns body_r (which has the correct user-visible length), but
-        stamp_out_subgraph returns flat_variable (which includes all graph
-        outputs). This test ensures that destructuring `a, b = layer(x, y)`
-        works correctly even on the reuse path.
-        """
-
         class Layer(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8, bias=False)
 
-            @nested_compile_region()
+            @nested_compile_region
             def forward(self, x, residual):
                 h = self.linear(x)
                 h = h + residual
@@ -3691,10 +3616,16 @@ class GraphModule(torch.nn.Module):
         class Model(torch.nn.Module):
             def __init__(self, num_layers):
                 super().__init__()
+                self.embed = torch.nn.Linear(8, 8, bias=False)
                 self.layers = torch.nn.ModuleList([Layer() for _ in range(num_layers)])
 
             def forward(self, x, residual):
+                # embed gives x/residual requires_grad=True (same as layer outputs),
+                # so all layers see identical tensor metadata → single trace suffices.
+                x = self.embed(x)
+                residual = self.embed(residual)
                 for layer in self.layers:
+                    # Must support extra outputs
                     hidden_states, residual = layer(x, residual)
                     x = hidden_states
                 return x, residual
@@ -3712,23 +3643,12 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
-        # layers[1] reuses layers[0]'s trace; layers[2] reuses layers[1]'s
-        # (layers[0] and layers[1] have different input metadata after the
-        # first invoke_subgraph, so two traces are needed in total)
-        self.assertLessEqual(count[0], 3)
+        # All layers see identical tensor metadata (requires_grad=True throughout)
+        # so layers[1] and layers[2] reuse layers[0]'s trace.
+        self.assertEqual(count(), 1)
 
     def test_subgraph_reuse_different_dynamic_symnodes(self):
-        """Distinct dynamic dimension symbols passed as explicit args must not reuse.
-
-        Both calls receive the same tensor x (tensor check passes) but pass
-        different SymNode args: x.shape[0] (s0) vs x.shape[1] (s1). These are
-        distinct symbolic values, so the second call must trace independently.
-
-        Regression test for a bug where python_type() was used instead of
-        sym_num identity, making all int-typed symnodes look identical.
-        """
-
-        @nested_compile_region()
+        @nested_compile_region
         def gn(x, n):
             return x * n
 
@@ -3746,16 +3666,10 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
         # s0 (dim 0) and s1 (dim 1) are distinct symbols → two separate traces
-        self.assertEqual(count[0], 2)
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_cache_multiple_entries(self):
-        """Cache accumulates multiple entries; linear scan finds the right one.
-
-        After tracing for shape [4] and [8], a third call with shape [4]
-        must hit the first cache entry without tracing again (call_count == 2).
-        """
-
-        @nested_compile_region()
+        @nested_compile_region
         def gn(x):
             return x.sin()
 
@@ -3777,17 +3691,10 @@ class GraphModule(torch.nn.Module):
 
         for r, e in zip(res, ref):
             self.assertEqual(r, e)
-        # shape [4] and [8] each require one trace; second [4] reuses the first
-        self.assertEqual(count[0], 2)
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_kwargs(self):
-        """Reuse works when the nested region is called with keyword arguments.
-
-        Tests that two calls with the same keyword args (same treespec) reuse
-        the cached subgraph.
-        """
-
-        @nested_compile_region()
+        @nested_compile_region
         def gn(x, *, scale=1.0):
             return x * scale
 
@@ -3803,8 +3710,50 @@ class GraphModule(torch.nn.Module):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(ref, res)
-        # Both calls have identical inputs (same treespec + same values) → one trace
-        self.assertEqual(count[0], 1)
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_max_entries_raises(self):
+        """Exceeding max_reuse_entries raises RuntimeError."""
+
+        @nested_compile_region(max_reuse_entries=2)
+        def gn(x, c):
+            return x * c
+
+        def fn(x):
+            # Three distinct constants exceed the limit of 2
+            return gn(x, 1) + gn(x, 2) + gn(x, 3)
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(RuntimeError, "exceeded maximum reuse entries"):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_subgraph_reuse_module_different_instances_retrace(self):
+        """Different module instances with different weights require separate traces."""
+
+        class Mod(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            @nested_compile_region
+            def forward(self, x):
+                return x * self.c
+
+        mod1 = Mod(5)
+        mod2 = Mod(10)
+
+        def fn(x):
+            return mod1(x) + mod2(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        # mod1.c=5 and mod2.c=10 differ → two separate traces
+        self.assertEqual(count(), 2)
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")

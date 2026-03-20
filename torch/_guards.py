@@ -907,10 +907,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
             raise RuntimeError(
                 f"invoke_subgraph: exceeded maximum reuse entries "
                 f"({max_reuse_entries}) for function id {fn_id}. "
-                f"This means guards keep failing across invocations and "
-                f"subgraph reuse is not effective for this function. "
-                f"Set TORCH_LOGS='+higher_order_ops_cache' for details on "
-                f"which guards are failing."
+                f"This most likely means a guard keeps failing on every "
+                f"invocation, preventing subgraph reuse. "
+                f"Set TORCH_LOGS='+hierarchical_compile' to identify which "
+                f"guard is failing. If reuse is genuinely not possible and "
+                f"you need more cache entries, increase the limit via the "
+                f"max_reuse_entries argument to nested_compile_region()."
             )
         entries.append((condition, entry))
 
