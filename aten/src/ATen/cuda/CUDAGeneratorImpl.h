@@ -4,6 +4,7 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/PhiloxCudaState.h>
+#include <array>
 #include <atomic>
 #include <memory>
 #include <unordered_set>
@@ -122,6 +123,23 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   c10::intrusive_ptr<CUDAGeneratorState> clone();
 };
 
+// Maximum number of tensor dimensions. Used to size fixed-length arrays
+// on the stack and in GPU registers where dynamic allocation isn't possible.
+// Keep in sync with aten/src/ATen/cuda/detail/OffsetCalculator.cuh.
+#if defined(USE_ROCM)
+constexpr int MAX_DIMS = 16;
+#else
+constexpr int MAX_DIMS = 25;
+#endif
+
+struct ShardingSpec {
+  uint64_t tensor_ndim = 0;
+  std::array<uint64_t, MAX_DIMS> local_shape{};
+  std::array<uint64_t, MAX_DIMS> global_offset{};
+  std::array<uint64_t, MAX_DIMS> global_shape{};
+  std::array<uint64_t, MAX_DIMS> global_strides{};
+};
+
 struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CUDAGeneratorImpl(DeviceIndex device_index = -1);
@@ -152,6 +170,25 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state
   PhiloxCudaState philox_cuda_state(uint64_t increment);
+  uint64_t get_sharding_spec(
+      std::array<uint64_t, MAX_DIMS>& local_shape,
+      std::array<uint64_t, MAX_DIMS>& global_offset,
+      std::array<uint64_t, MAX_DIMS>& global_shape,
+      std::array<uint64_t, MAX_DIMS>& global_strides) const;
+  void set_sharding_spec(
+      uint64_t tensor_ndim,
+      const std::array<uint64_t, MAX_DIMS>& local_shape,
+      const std::array<uint64_t, MAX_DIMS>& global_offset,
+      const std::array<uint64_t, MAX_DIMS>& global_shape,
+      const std::array<uint64_t, MAX_DIMS>& global_strides);
+
+  bool use_shard_aware_rng() const override {
+    return use_shard_aware_rng_;
+  }
+
+  void set_use_shard_aware_rng(bool value) override {
+    use_shard_aware_rng_ = value;
+  }
 
   bool reset_rnn_state() {
     return !no_reset_rnn_state_.test_and_set();
@@ -167,7 +204,9 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   CUDAGeneratorImpl* clone_impl() const override;
 
   c10::intrusive_ptr<CUDAGeneratorState> state_;
+  std::unique_ptr<ShardingSpec> sharding_spec_;
   std::atomic_flag no_reset_rnn_state_;
+  bool use_shard_aware_rng_ = false;
 };
 
 namespace cuda::detail {

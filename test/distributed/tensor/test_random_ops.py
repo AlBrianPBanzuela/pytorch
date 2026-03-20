@@ -1001,6 +1001,163 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, self.rank)
 
 
+class DTensorThreadRNGTrackerTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_shard_aware_rng_1d(self):
+        """
+        Sharded 1D generation reproduces the same random values as a single
+        unsharded tensor. Tests float32 (UF=4) and float64 (UF=2).
+        """
+        from torch.distributed.tensor._random import (
+            _RNGStateTracker,
+            set_use_shard_aware_rng,
+        )
+
+        device = self.device_type
+
+        for dtype in [torch.float32, torch.float64]:
+            # Reset to a known seed so the Philox offset starts at 0.
+            # The make_state helper below hardcodes offsets (0, 4, …) that
+            # assume the captured initial_state has offset == 0.
+            torch.cuda.manual_seed(42)
+            initial_state = torch.cuda.get_rng_state(device)
+
+            # Generate references and naive chunks WITHOUT shard-aware mode
+            reference_32 = torch.empty(32, device=device, dtype=dtype).uniform_(0, 1)
+            reference_32_v2 = torch.empty(32, device=device, dtype=dtype).uniform_(0, 1)
+
+            torch.cuda.set_rng_state(initial_state, device)
+            chunk_first = torch.empty(16, device=device, dtype=dtype).uniform_(0, 1)
+            chunk_second = torch.empty(16, device=device, dtype=dtype).uniform_(0, 1)
+            self.assertNotEqual(
+                torch.cat([chunk_first, chunk_second]),
+                reference_32,
+                "Naive chunked generation should NOT match reference",
+            )
+
+            def make_state(offset, local_shape, global_offset):
+                spec = (local_shape, global_offset, (32,), (1,))
+                spec_bytes = torch.tensor(sum(spec, (offset,))).view(torch.uint8)
+                return torch.cat([initial_state[0:8], spec_bytes])
+
+            set_use_shard_aware_rng(True, device=torch.device(device))
+            tracker = _RNGStateTracker(torch.device("cuda"))
+            device_handle = tracker._device_handle
+
+            # With sharding_spec, two 16-element chunks match reference_32
+            device_handle.set_rng_state(make_state(0, (16,), (16,)))
+            chunk_second_sharded = torch.empty(16, device=device, dtype=dtype).uniform_(
+                0, 1
+            )
+            self.assertEqual(
+                reference_32, torch.cat([chunk_first, chunk_second_sharded])
+            )
+
+            # Four 8-element chunks match reference_32_v2 (offset=4 accounts for prior generation)
+            chunks = []
+            for off in [0, 8, 16, 24]:
+                device_handle.set_rng_state(make_state(4, (8,), (off,)))
+                chunks.append(torch.empty(8, device=device, dtype=dtype).uniform_(0, 1))
+            self.assertEqual(reference_32_v2, torch.cat(chunks))
+            set_use_shard_aware_rng(False, device=torch.device(device))
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_shard_aware_rng_2d(self):
+        """
+        2D sharding: a [4, 8] tensor split into four [2, 4] chunks reproduces
+        the original random values when reassembled.
+        """
+        from torch.distributed.tensor._random import (
+            _RNGStateTracker,
+            set_use_shard_aware_rng,
+        )
+
+        device = self.device_type
+        torch.cuda.manual_seed(42)
+        initial_state = torch.cuda.get_rng_state(device)
+        reference_2d = torch.empty(4, 8, device=device).uniform_(0, 1)
+
+        def make_state_2d(offset, local_shape, global_offset):
+            global_shape = (4, 8)
+            global_strides = (8, 1)
+            spec = (local_shape, global_offset, global_shape, global_strides)
+            spec_bytes = torch.tensor(sum(spec, (offset,))).view(torch.uint8)
+            return torch.cat([initial_state[0:8], spec_bytes])
+
+        set_use_shard_aware_rng(True, device=torch.device(device))
+        tracker = _RNGStateTracker(torch.device("cuda"))
+        device_handle = tracker._device_handle
+        chunks_2d = {}
+        for row_off, col_off in [(0, 0), (0, 4), (2, 0), (2, 4)]:
+            device_handle.set_rng_state(make_state_2d(0, (2, 4), (row_off, col_off)))
+            chunks_2d[(row_off, col_off)] = torch.empty(2, 4, device=device).uniform_(
+                0, 1
+            )
+        reconstructed = torch.cat(
+            [
+                torch.cat([chunks_2d[(0, 0)], chunks_2d[(0, 4)]], dim=1),
+                torch.cat([chunks_2d[(2, 0)], chunks_2d[(2, 4)]], dim=1),
+            ],
+            dim=0,
+        )
+        self.assertEqual(reference_2d, reconstructed)
+        set_use_shard_aware_rng(False, device=torch.device(device))
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_shard_aware_rng_state_round_trip(self):
+        """get_state → set_state round-trip preserves the sharding spec and
+        produces identical random output."""
+        from torch.distributed.tensor._random import (
+            _RNGStateTracker,
+            set_use_shard_aware_rng,
+        )
+
+        device = self.device_type
+        torch.cuda.manual_seed(42)
+        initial_state = torch.cuda.get_rng_state(device)
+
+        def make_state_rt(
+            offset, local_shape, global_offset, global_shape, global_strides
+        ):
+            spec = (local_shape, global_offset, global_shape, global_strides)
+            spec_bytes = torch.tensor(sum(spec, (offset,))).view(torch.uint8)
+            return torch.cat([initial_state[0:8], spec_bytes])
+
+        set_use_shard_aware_rng(True, device=torch.device(device))
+        tracker = _RNGStateTracker(torch.device("cuda"))
+        device_handle = tracker._device_handle
+        state_with_spec = make_state_rt(0, (16,), (0,), (32,), (1,))
+        device_handle.set_rng_state(state_with_spec)
+        round_tripped_state = torch.cuda.get_rng_state(device)
+        self.assertEqual(state_with_spec, round_tripped_state)
+
+        device_handle.set_rng_state(state_with_spec)
+        first = torch.empty(16, device=device).uniform_(0, 1)
+        device_handle.set_rng_state(round_tripped_state)
+        second = torch.empty(16, device=device).uniform_(0, 1)
+        self.assertEqual(first, second)
+        set_use_shard_aware_rng(False, device=torch.device(device))
+
+
+class ShardAwareRNGCPUTest(torch.testing._internal.common_utils.TestCase):
+    def test_shard_aware_rng_unsupported_on_cpu(self):
+        """Test that set_use_shard_aware_rng(True) raises on CPU generator."""
+        cpu_gen = torch.Generator(device="cpu")
+        with self.assertRaisesRegex(
+            RuntimeError, "set_use_shard_aware_rng is not supported"
+        ):
+            cpu_gen.set_use_shard_aware_rng(True)
+        # set_use_shard_aware_rng(False) should be a no-op and not raise
+        cpu_gen.set_use_shard_aware_rng(False)
+
+
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
 )

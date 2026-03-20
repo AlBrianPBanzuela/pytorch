@@ -4,7 +4,6 @@ import contextlib
 import warnings
 from collections.abc import Sequence
 from logging import getLogger
-from typing import Optional
 
 import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
@@ -20,9 +19,29 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
+    "set_use_shard_aware_rng",
 ]
 
-_rng_tracker: Optional["_RNGStateTracker"] = None
+_rng_tracker: "_RNGStateTracker | None" = None
+
+# When True, use the sharding-aware RNG kernel that produces globally
+# reproducible random sequences regardless of tensor partitioning.
+# When False, use the standard offset-based RNG kernel.
+_USE_SHARD_AWARE_RNG: bool = False
+
+
+def set_use_shard_aware_rng(
+    use_shard_aware: bool, device: torch.device | None = None
+) -> None:
+    """Sets whether to use shard-aware RNG mode for random ops."""
+    global _USE_SHARD_AWARE_RNG
+    _USE_SHARD_AWARE_RNG = use_shard_aware
+
+    if device is not None and device.type == "cuda":
+        device_handle = _get_device_handle(device.type)
+        if device_handle is not None:
+            for generator in device_handle.default_generators:
+                generator.set_use_shard_aware_rng(use_shard_aware)
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -89,8 +108,8 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # )
     # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
-    # instantiate a RNG tracker if haven't. By default DTensor uses an
-    # OffsetBasedRNGTracker to perform random operators.
+    # instantiate a RNG tracker if haven't. The tracker type is controlled
+    # by the global _USE_SHARD_AWARE_RNG.
     global _rng_tracker
     if not _rng_tracker:
         _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
@@ -127,13 +146,13 @@ class _PhiloxState:
 
     @property
     def offset(self) -> torch.Tensor:
-        return self._state[8:].view(dtype=torch.int64)
+        return self._state[8:16].view(dtype=torch.int64)
 
     @offset.setter
     def offset(self, offset: torch.Tensor) -> None:
         if offset.numel() != 1:
             raise AssertionError
-        self._state[8:] = offset.view(torch.uint8)
+        self._state[8:16] = offset.view(torch.uint8)
 
     @property
     def seed(self) -> torch.Tensor:
