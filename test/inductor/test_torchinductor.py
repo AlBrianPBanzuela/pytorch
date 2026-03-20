@@ -13206,8 +13206,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, code = run_and_get_code(torch.compile(fn), x, y, z)
         # z's assert should appear after the first mm, not at the top
         # with all the other asserts
-        FileCheck().check("extern_kernels.mm(").check(
-            "assert_size_stride(arg2_1"
+        FileCheck().check("def call").check_count(
+            "assert_size_stride", 2, exactly=True
         ).check("extern_kernels.mm(").run(code[0])
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
