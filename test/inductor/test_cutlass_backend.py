@@ -734,7 +734,9 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("autotune_in_subproc", (False, True))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_addmm_input_reorder(self, autotune_in_subproc):
+    def test_max_autotune_cutlass_backend_addmm_input_reorder(
+        self, autotune_in_subproc
+    ):
         """
         When input_reorder=[2, 0, 1] is set for addmm, the CUTLASS kernel
         signature is reordered from [X, W, Bias] to [Bias, X, W].
@@ -775,9 +777,9 @@ class TestCutlassBackend(TestCase):
         AlgorithmSelectorCache.benchmark_choices = tracking_benchmark_choices
         try:
             M, K, N = 4096, 8192, 25728
-            bias = torch.randn(N, device=GPU_TYPE, dtype=torch.bfloat16)
-            x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
-            w = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+            bias = torch.randn(N, device="cuda", dtype=torch.bfloat16)
+            x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+            w = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
 
             with config.patch(
                 {

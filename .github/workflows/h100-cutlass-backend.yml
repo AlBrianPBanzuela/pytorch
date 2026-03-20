@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/h100-cutlass-backend.yml
       - torch/_inductor/codegen/cuda/**
+      - torch/_inductor/codegen/cutlass/**
       - test/inductor/test_cutlass_backend.py
       - test/inductor/test_cutlass_evt.py
   workflow_dispatch:
