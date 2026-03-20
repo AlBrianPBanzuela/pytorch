@@ -1,0 +1,144 @@
+name: Setup Linux
+
+description: Set up Linux workspace on OSDC ARC runner
+
+inputs:
+  build-environment:
+    description: Top-level label for what's being built/tested (used to parse Python and GCC versions)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Parse Python version from build environment
+      id: parse-python
+      shell: bash
+      run: |
+        PYTHON_VERSION=$(echo "${{ inputs.build-environment }}" | perl -n -e'/py(\d+\.\d+)/ && print $1')
+        echo "python-version=${PYTHON_VERSION:-3.12}" >> "${GITHUB_OUTPUT}"
+
+    - name: Install uv
+      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      with:
+        python-version: ${{ steps.parse-python.outputs.python-version }}
+        activate-environment: true
+
+    - name: Install CI requirements
+      shell: bash
+      run: uv pip install -r .ci/docker/requirements-ci.txt
+
+    - name: Install MKL
+      if: runner.arch != 'ARM64'
+      shell: bash
+      run: |
+        uv pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0
+        echo "CMAKE_PREFIX_PATH=${VIRTUAL_ENV}" >> "${GITHUB_ENV}"
+
+    - name: Install C++ compiler
+      shell: bash
+      run: |
+        set -eux
+
+        BUILD_ENV="${{ inputs.build-environment }}"
+        CLANG_VERSION=$(echo "${BUILD_ENV}" | perl -n -e'/clang(\d+)/ && print $1')
+        GCC_VERSION=$(echo "${BUILD_ENV}" | perl -n -e'/gcc(\d+)/ && print $1')
+
+        if [ -z "${CLANG_VERSION}" ] && [ -z "${GCC_VERSION}" ]; then
+          echo "No compiler specified in build environment, using base image defaults"
+        elif [ -n "${CLANG_VERSION}" ]; then
+          # On AlmaLinux 9, clang 18 is pre-installed from AppStream.
+          # Older versions (e.g., clang 15) are available from EPEL.
+          if [ "${CLANG_VERSION}" -le 15 ]; then
+            dnf install -y epel-release
+            dnf config-manager --set-enabled crb
+            dnf install -y clang${CLANG_VERSION} clang${CLANG_VERSION}-devel clang${CLANG_VERSION}-libs libomp-devel
+
+            # EPEL installs versioned binaries (e.g., /usr/bin/clang-15).
+            # Register them as the default cc/c++ compiler.
+            update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${CLANG_VERSION} 50
+            update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${CLANG_VERSION} 50
+            update-alternatives --install /usr/bin/cc cc /usr/bin/clang-${CLANG_VERSION} 50
+            update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-${CLANG_VERSION} 50
+
+            # Add clang runtime libs to the linker path
+            CLANG_RESOURCE_DIR=$(/usr/bin/clang-${CLANG_VERSION} -print-resource-dir)
+            if [ -d "${CLANG_RESOURCE_DIR}/lib/linux" ]; then
+              echo "${CLANG_RESOURCE_DIR}/lib/linux" > /etc/ld.so.conf.d/clang.conf
+              ldconfig
+            fi
+          else
+            # Clang 18+ is pre-installed; just install libomp-devel
+            dnf install -y libomp-devel
+          fi
+
+          clang --version
+        else
+          # On AlmaLinux 9, GCC 11 is the system default at /usr/bin/gcc.
+          # Only install gcc-toolset for newer versions that aren't already available.
+          if [ "${GCC_VERSION}" = "11" ]; then
+            # Remove gcc/g++ from /usr/local/bin so they don't shadow /usr/bin/gcc (system default)
+            rm -f /usr/local/bin/gcc /usr/local/bin/g++ /usr/local/bin/cc /usr/local/bin/c++
+            # Strip any /opt/rh/gcc-toolset-* paths from PATH
+            CLEAN_PATH=$(echo "${PATH}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
+            echo "PATH=${CLEAN_PATH}" >> "${GITHUB_ENV}"
+            echo "Using system default GCC 11"
+          else
+            dnf install -y \
+              gcc-toolset-${GCC_VERSION}-gcc \
+              gcc-toolset-${GCC_VERSION}-gcc-c++ \
+              gcc-toolset-${GCC_VERSION}-gcc-gfortran
+
+            TOOLSET_ROOT="/opt/rh/gcc-toolset-${GCC_VERSION}/root/usr"
+            echo "PATH=${TOOLSET_ROOT}/bin:${PATH}" >> "${GITHUB_ENV}"
+            echo "LD_LIBRARY_PATH=${TOOLSET_ROOT}/lib64:${TOOLSET_ROOT}/lib:${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+          fi
+
+          gcc --version
+        fi
+
+    - name: Switch CUDA version
+      shell: bash
+      run: |
+        set -eux
+
+        BUILD_ENV="${{ inputs.build-environment }}"
+        CUDA_VERSION=$(echo "${BUILD_ENV}" | perl -n -e'/cuda(\d+\.\d+)/ && print $1')
+
+        if [ -z "${CUDA_VERSION}" ]; then
+          echo "No CUDA version specified in build environment, keeping default"
+          exit 0
+        fi
+
+        # All CUDA versions are pre-installed in the base image under
+        # /usr/local/cuda-{major.minor}. The default (/usr/local/cuda
+        # symlink) points to CUDA 13. Switch to the requested version.
+        CUDA_DIR="/usr/local/cuda-${CUDA_VERSION}"
+        if [ ! -d "${CUDA_DIR}" ]; then
+          echo "ERROR: CUDA ${CUDA_VERSION} not found at ${CUDA_DIR}"
+          ls -d /usr/local/cuda-* /usr/local/cuda 2>/dev/null || true
+          exit 1
+        fi
+
+        rm -f /usr/local/cuda
+        ln -s "${CUDA_DIR}" /usr/local/cuda
+
+        echo "PATH=/usr/local/cuda/bin:${PATH}" >> "${GITHUB_ENV}"
+        echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+        echo "CUDA_HOME=/usr/local/cuda" >> "${GITHUB_ENV}"
+        echo "CUDA_PATH=/usr/local/cuda" >> "${GITHUB_ENV}"
+        echo "DESIRED_CUDA=${CUDA_VERSION}" >> "${GITHUB_ENV}"
+        echo "NCCL_INCLUDE_DIR=/usr/local/cuda/include" >> "${GITHUB_ENV}"
+        echo "NCCL_LIB_DIR=/usr/local/cuda/lib64" >> "${GITHUB_ENV}"
+
+        echo "Switched to CUDA ${CUDA_VERSION}"
+        nvcc --version
+
+    - name: Print GPU info (if present)
+      shell: bash
+      run: if [ -f /usr/bin/nvidia-smi ]; then nvidia-smi; fi
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
