@@ -1051,8 +1051,12 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
 
             # With sharding_spec, two 16-element chunks match reference_32
             device_handle.set_rng_state(make_state(0, (16,), (16,)))
-            chunk_second_sharded = torch.empty(16, device=device, dtype=dtype).uniform_(0, 1)
-            self.assertEqual(reference_32, torch.cat([chunk_first, chunk_second_sharded]))
+            chunk_second_sharded = torch.empty(16, device=device, dtype=dtype).uniform_(
+                0, 1
+            )
+            self.assertEqual(
+                reference_32, torch.cat([chunk_first, chunk_second_sharded])
+            )
 
             # Four 8-element chunks match reference_32_v2 (offset=4 accounts for prior generation)
             chunks = []
@@ -1091,10 +1095,10 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
         device_handle = tracker._device_handle
         chunks_2d = {}
         for row_off, col_off in [(0, 0), (0, 4), (2, 0), (2, 4)]:
-            device_handle.set_rng_state(
-                make_state_2d(0, (2, 4), (row_off, col_off))
+            device_handle.set_rng_state(make_state_2d(0, (2, 4), (row_off, col_off)))
+            chunks_2d[(row_off, col_off)] = torch.empty(2, 4, device=device).uniform_(
+                0, 1
             )
-            chunks_2d[(row_off, col_off)] = torch.empty(2, 4, device=device).uniform_(0, 1)
         reconstructed = torch.cat(
             [
                 torch.cat([chunks_2d[(0, 0)], chunks_2d[(0, 4)]], dim=1),
@@ -1119,7 +1123,9 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
         torch.cuda.manual_seed(42)
         initial_state = torch.cuda.get_rng_state(device)
 
-        def make_state_rt(offset, local_shape, global_offset, global_shape, global_strides):
+        def make_state_rt(
+            offset, local_shape, global_offset, global_shape, global_strides
+        ):
             spec = (local_shape, global_offset, global_shape, global_strides)
             spec_bytes = torch.tensor(sum(spec, (offset,))).view(torch.uint8)
             return torch.cat([initial_state[0:8], spec_bytes])
@@ -1138,7 +1144,6 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
         second = torch.empty(16, device=device).uniform_(0, 1)
         self.assertEqual(first, second)
         set_use_shard_aware_rng(False, device=torch.device(device))
-
 
 
 class ShardAwareRNGCPUTest(torch.testing._internal.common_utils.TestCase):
