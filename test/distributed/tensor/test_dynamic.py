@@ -55,8 +55,9 @@ class TestDynamic(DTensorTestBase):
             )
             arg0 = DTensor.from_local(arg0, device_mesh, placements)
 
-            compiled_forward = torch.compile(forward, fullgraph=True, dynamic=True)
-            _out = compiled_forward(arg0)
+            compiled_forward = torch.compile(forward, dynamic=True)
+            with torch._dynamo.error_on_graph_break(True):
+                _out = compiled_forward(arg0)
 
 
 instantiate_parametrized_tests(TestDynamic)

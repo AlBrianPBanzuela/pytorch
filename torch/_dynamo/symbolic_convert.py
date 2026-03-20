@@ -4907,6 +4907,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
+            and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
             # NOTE if one_graph=True, then the SkipFrame will cause eval_frame.py to error
