@@ -577,6 +577,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # subclasses (such as methods) usually aren't a constant
         return super().as_python_constant()
 
+    def get_real_python_backed_value(self) -> Any:
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        return super().get_real_python_backed_value()
+
     def self_args(self) -> list[VariableTracker]:
         return []
 
@@ -1507,8 +1512,8 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             source=self.source,
         )
 
-    def python_value_for_identity(self):
-        return self.vt.python_value_for_identity()
+    def get_real_python_backed_value(self) -> bool:
+        return self.vt.get_real_python_backed_value()
 
 
 class FunctionDecoratedByContextlibContextManagerVariable(
@@ -2102,6 +2107,9 @@ class SkipFunctionVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
+    def get_real_python_backed_value(self) -> Any:
+        return self.value
+
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
         # Use closure match guard (i.e. guard on __code__ object instead of
@@ -2439,7 +2447,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
             kwargs,
         )
 
-    def python_value_for_identity(self):
+    def get_real_python_backed_value(self) -> bool:
         return getattr(self.wrapper_obj, self.attr_to_trace)
 
 

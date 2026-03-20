@@ -854,8 +854,8 @@ class BuiltinVariable(VariableTracker):
                         return VariableTracker.build(tx, op.__name__ == "is_")
 
                     # Compare underlying Python objects via hook
-                    left_val = left.python_value_for_identity()
-                    right_val = right.python_value_for_identity()
+                    left_val = left.get_real_python_backed_value()
+                    right_val = right.get_real_python_backed_value()
 
                     left_known = left_val is not NO_SUCH_SUBOBJ
                     right_known = right_val is not NO_SUCH_SUBOBJ
@@ -928,6 +928,9 @@ class BuiltinVariable(VariableTracker):
         return f"{self.__class__.__name__}({name})"
 
     def as_python_constant(self) -> Any:
+        return self.fn
+
+    def get_real_python_backed_value(self) -> Any:
         return self.fn
 
     def as_proxy(self) -> Any:
