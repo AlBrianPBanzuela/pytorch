@@ -245,6 +245,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
+    # SPMD verification — before collective reordering passes.
+    if (
+        config.aten_distributed_optimizations.verify_spmd_graph
+        and _needs_spmd_graph_preservation()
+    ):
+        from torch._inductor.fx_passes.overlap_scheduling import _verify_spmd_graph
+
+        _verify_spmd_graph(gm)
+
     collectives_bucketing: bool = False
 
     if config.bucket_reduce_scatters_fx != "none":
@@ -1035,6 +1044,14 @@ def register_noop_decomp(targets, nop_arg=0):
         return cond
 
     return register_fun
+
+
+def _needs_spmd_graph_preservation() -> bool:
+    """Check if SPMD graph preservation is needed for distributed overlap."""
+    return (
+        config.aten_distributed_optimizations.enable_overlap_scheduling
+        or config.reorder_for_compute_comm_overlap
+    )
 
 
 @register_noop_decomp(aten.slice)

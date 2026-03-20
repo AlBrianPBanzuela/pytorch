@@ -1123,6 +1123,15 @@ class aten_distributed_optimizations:
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
 
+    # Verify FX graphs are identical across ranks before overlap scheduling.
+    # Detects non-SPMD graphs that would cause NCCL collective ordering
+    # mismatches and hangs.
+    verify_spmd_graph: bool = True
+
+    # When True, crash with RuntimeError on SPMD mismatch instead of warning.
+    # Fails fast instead of risking silent NCCL hang.
+    spmd_verify_crash_on_mismatch: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

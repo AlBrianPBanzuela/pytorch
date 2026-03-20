@@ -1719,6 +1719,110 @@ def align_estimations_across_ranks(
     return dict(zip(nodes, medians))
 
 
+def _verify_spmd_graph(gm: torch.fx.GraphModule) -> bool:
+    """Verify all ranks have identical FX graph structure (SPMD).
+
+    Computes a structural fingerprint (op targets only, no shapes) and
+    compares across ranks. On mismatch, emits a diagnostic report to
+    stdout, logging, and trace_structured.
+
+    Returns True if graphs match (SPMD), False on mismatch.
+    """
+    import torch.distributed as dist
+
+    if not dist.is_initialized() or dist.get_world_size() <= 1:
+        return True
+
+    import zlib
+
+    # Op targets only, no shapes — robust to dynamic shapes.
+    # crc32 is deterministic across processes (unlike hash()).
+    targets = tuple(str(n.target) for n in gm.graph.nodes if n.op == "call_function")
+    structure_hash = zlib.crc32(repr(targets).encode())
+
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+    from torch.distributed.distributed_c10d import _get_default_group
+
+    pg = _get_default_group()
+    world_size = dist.get_world_size()
+    rank = dist.get_rank()
+
+    with unset_fake_temporarily():
+        all_hashes: list[int] = [0] * world_size
+        dist.all_gather_object(all_hashes, structure_hash, pg)
+
+    if all(h == all_hashes[0] for h in all_hashes):
+        return True
+
+    # Mismatch detected — gather full target lists for diagnostics
+    with unset_fake_temporarily():
+        all_targets: list[tuple[str, ...]] = [() for _ in range(world_size)]
+        dist.all_gather_object(all_targets, targets, pg)
+
+    # Build diagnostic report
+    lines = [
+        "=" * 80,
+        f"SPMD GRAPH MISMATCH — rank {rank}, world_size={world_size}",
+        "=" * 80,
+    ]
+
+    # Node count per rank
+    counts = [len(t) for t in all_targets]
+    lines.append("NODE COUNTS PER RANK:")
+    for r in range(world_size):
+        marker = " <--" if counts[r] != counts[0] else ""
+        lines.append(f"  rank {r}: {counts[r]} call_function nodes{marker}")
+    lines.append("")
+
+    # Find ops that differ
+    ref = all_targets[0]
+    for r in range(1, world_size):
+        other = all_targets[r]
+        if other == ref:
+            continue
+        lines.append(f"DIFFS rank 0 vs rank {r}:")
+        # Find ops in one but not the other
+        from collections import Counter as _Counter
+
+        ref_counts = _Counter(ref)
+        other_counts = _Counter(other)
+        only_ref = ref_counts - other_counts
+        only_other = other_counts - ref_counts
+        if only_ref:
+            lines.append("  Only on rank 0:")
+            for op, cnt in only_ref.most_common(10):
+                lines.append(f"    {op} (x{cnt})")
+        if only_other:
+            lines.append(f"  Only on rank {r}:")
+            for op, cnt in only_other.most_common(10):
+                lines.append(f"    {op} (x{cnt})")
+        lines.append("")
+
+    lines.append("=" * 80)
+    report = "\n".join(lines)
+
+    print(report, flush=True)
+    log.warning("\n%s", report)
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "inductor_spmd_graph_mismatch",
+            "encoding": "string",
+        },
+        payload_fn=lambda: report,
+    )
+
+    if config.aten_distributed_optimizations.spmd_verify_crash_on_mismatch:
+        raise RuntimeError(
+            "SPMD graph verification failed. "
+            "Set aten_distributed_optimizations.spmd_verify_crash_on_mismatch=False "
+            "to warn instead of fail.\n" + report
+        )
+
+    return False
+
+
 def schedule_overlap_bucketing(
     gm: torch.fx.GraphModule,
     max_in_flight_gb: float = 5,
