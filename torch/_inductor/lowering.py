@@ -2948,12 +2948,9 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
-        if isinstance(arg, ir.IRNode):
-            meta_val = fx_arg.meta.get("val")
-            if not isinstance(meta_val, torch.Tensor):
-                return arg
+        if _is_tensor_irnode(arg):
             stride_order = ir.get_stride_order(
-                meta_val.stride(), V.graph.sizevars.shape_env
+                fx_arg.meta["val"].stride(), V.graph.sizevars.shape_env
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
@@ -2977,12 +2974,10 @@ def sdpa_constraint(fx_node, *args, **kwargs):
     """Apply stride constraints to SDPA inputs, ensuring dense last dimension."""
 
     def apply_constraint(idx, arg, fx_arg):
-        if not isinstance(arg, ir.IRNode) or isinstance(arg, ir.NonTensorObj):
+        if not _is_tensor_irnode(arg):
             return arg
 
-        meta_val = fx_arg.meta.get("val")
-        if not isinstance(meta_val, torch.Tensor):
-            return arg
+        meta_val = fx_arg.meta["val"]
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
         ]
