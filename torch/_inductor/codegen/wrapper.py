@@ -1377,6 +1377,9 @@ class PythonWrapperCodegen(CodeGen):
             self.header.writeline("import triton")
             self.header.writeline("import atexit")
             self.header.writeline("import os")
+            # Under CUDAGraph partition mode, self.header is redirected
+            # into call(), but proton/triton setup must execute on every
+            # call() invocation, so use self.prefix instead.
             self.prefix.writeline(
                 "triton.set_allocator(lambda size, align, stream: "
                 "torch.empty(size, dtype=torch.uint8, device='cuda'))"

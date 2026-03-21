@@ -889,6 +889,8 @@ class BaseSchedulerNode:
                 or buf_node.get_inputs_that_alias_output()
                 or buf_node.get_mutation_names()
                 or buf.get_name() in V.graph.removed_buffers
+                # P2P memory (CommBufferLayout) must not be in-placed into
+                # a regular CUDA buffer, as that would lose the P2P property.
                 or isinstance(buf_node.get_output_spec(), ir.CommBufferLayout)
             ):
                 continue
@@ -7417,13 +7419,9 @@ class Scheduler:
 
             any_hoisted = True
             new_output_nodes = list(prior_sig.output_nodes) + hoisted
-            new_signatures[i - 1] = GraphPartitionSignature(
-                prior_sig.symbol_inputs,
-                prior_sig.input_nodes,
-                new_output_nodes,
-                prior_sig.input_deallocation,
-                prior_sig.skip_cudagraph,
-                prior_sig.constant_names,
+            new_signatures[i - 1] = dataclasses.replace(
+                prior_sig,
+                output_nodes=new_output_nodes,
                 hoisted_alloc_buffers=tuple(hoisted),
             )
 

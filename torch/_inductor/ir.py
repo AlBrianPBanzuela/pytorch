@@ -3850,7 +3850,7 @@ class Layout(OutputSpec):
         stride: Sequence[Expr] | None = None,
         offset: Expr = Integer(0),
         is_pinned: bool = False,
-        allocator: AllocatorType = None,  # type: ignore[assignment]
+        allocator: AllocatorType | None = None,
     ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)

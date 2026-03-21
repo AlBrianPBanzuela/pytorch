@@ -532,10 +532,6 @@ def register_symm_mem_lowerings():
            SYMM_MEM; wrapper generates persistent P2P buffer + DMA .copy_().
         3. Fallback: insert Pointwise identity copy in P2P via CommBufferLayout.
 
-        If the buffer can be realized as CommBufferLayout (e.g. a
-        ComputedBuffer), it is done in-place (zero-copy).  Otherwise
-        an identity copy to a P2P-allocated buffer is inserted.
-
         Returns the (possibly replaced) TensorBox.  Callers must use
         the return value since a new buffer may be created.
         """

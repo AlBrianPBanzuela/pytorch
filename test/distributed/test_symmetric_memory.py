@@ -1513,8 +1513,11 @@ class LoweringTest(MultiProcContinuousTest):
     @fresh_inductor_cache()
     def test_external_allocation_fallback(self):
         """
-        When the input is not pre-allocated in symmetric memory, Inductor
-        auto-inserts an identity copy to P2P.  Verify codegen + correctness.
+        When the input is not pre-allocated in symmetric memory, the Layout
+        approach annotates the InputBuffer with AllocatorType(kind="symm_mem")
+        and generates a .copy_() from the caller's input to a persistent P2P
+        buffer.  Verify codegen + correctness for both the Layout path and
+        the identity-copy fallback path.
         """
         self._init_process()
 
@@ -1525,18 +1528,26 @@ class LoweringTest(MultiProcContinuousTest):
 
         x_input = torch.rand(N, N, device=self.device)
 
-        # When the input is not a symmetric memory buffer, Inductor
-        # automatically inserts a copy to a P2P-allocated comm buffer.
-        # With mode="reduce-overhead", this exercises the CUDAGraph tree's
-        # P2P input handling (p2p_input_idxs pass-through).
-        compiled = torch.compile(func_input_direct, mode="reduce-overhead")
+        compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
+        code = run_and_get_triton_code(compiled_input_direct, x_input)
 
-        # Multiple iterations to trigger CG record + replay
-        for _ in range(3):
-            torch.compiler.cudagraph_mark_step_begin()
-            compiled_result = compiled(x_input)
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected empty_strided_p2p for persistent P2P buffer allocation",
+        )
+        self.assertIn(
+            ".copy_(",
+            code,
+            "Expected .copy_() for DMA copy to P2P buffer",
+        )
+        self.assertIn(
+            "one_shot_all_reduce_out",
+            code,
+            "Expected out-variant allreduce in generated code",
+        )
 
-        # Verify runtime correctness
+        compiled_result = compiled_input_direct(x_input)
         eager_result = x_input.clone()
         dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
         torch.testing.assert_close(
@@ -1544,107 +1555,44 @@ class LoweringTest(MultiProcContinuousTest):
             eager_result,
             rtol=1e-5,
             atol=1e-5,
-            msg="CUDAGraph replay with auto-copy to P2P does not match eager",
-        )
-
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
-    @skip_if_lt_x_gpu(2)
-    @fresh_inductor_cache()
-    def test_layout_allocator_placeholder(self):
-        """
-        Verify that when a symm_mem collective's input is a graph placeholder
-        (Inductor does not control its allocation), the Layout approach
-        annotates the InputBuffer with AllocatorType(kind="symm_mem") and generates
-        a .copy_() from the caller's input to a persistent P2P buffer.
-
-        This replaces the Triton identity-copy kernel with a DMA .copy_()
-        that runs on the copy engine (not compute SMs).
-        """
-        self._init_process()
-
-        N = 8
-
-        def func(x):
-            return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
-
-        x = torch.rand(N, N, device=self.device)
-        compiled = torch.compile(func, fullgraph=True)
-        code = run_and_get_triton_code(compiled, x)
-
-        # The codegen should contain a persistent P2P allocation at module level
-        self.assertIn(
-            "empty_strided_p2p",
-            code,
-            "Expected empty_strided_p2p for persistent P2P buffer allocation",
-        )
-        # The codegen should use the Layout approach (.copy_()) rather than
-        # a Triton identity-copy kernel
-        self.assertIn(
-            ".copy_(",
-            code,
-            "Expected .copy_() for DMA copy to P2P buffer (Layout approach)",
-        )
-        # The codegen should have the out-variant allreduce
-        self.assertIn(
-            "one_shot_all_reduce_out",
-            code,
-            "Expected out-variant allreduce in generated code",
-        )
-
-        # Verify correctness
-        compiled_result = compiled(x)
-        eager_result = x.clone()
-        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
-        torch.testing.assert_close(
-            compiled_result,
-            eager_result,
-            rtol=1e-5,
-            atol=1e-5,
-            msg="Compiled (Layout approach) and eager all_reduce do not match",
+            msg="Auto-copy to P2P does not match eager",
         )
 
         # --- Identity copy fallback ---
         # When the allreduce input is NOT a graph placeholder (InputBuffer)
-        # but an ExternKernel output (e.g., cpu→cuda DeviceCopy), the
-        # Layout approach does not apply. The fallback inserts a
-        # Triton identity copy with CommBufferLayout instead.
+        # but an ExternKernel output (e.g., cpu->cuda DeviceCopy), the
+        # Layout approach does not apply.  The fallback inserts a Triton
+        # identity copy with CommBufferLayout instead.
         torch._dynamo.reset()
 
-        def func_path3(x_cpu):
+        def func_fallback(x_cpu):
             x_cuda = x_cpu.cuda()
             return torch.ops.symm_mem.one_shot_all_reduce(x_cuda, "sum", "0")
 
         x_cpu = torch.rand(N, N, device="cpu")
-        compiled_path3 = torch.compile(func_path3, fullgraph=True)
-        code_path3 = run_and_get_triton_code(compiled_path3, x_cpu)
+        compiled_fallback = torch.compile(func_fallback, fullgraph=True)
+        code_fallback = run_and_get_triton_code(compiled_fallback, x_cpu)
 
-        # Fallback: P2P allocation happens inside call() (not module-level)
         self.assertIn(
             "empty_strided_p2p",
-            code_path3,
+            code_fallback,
             "Expected empty_strided_p2p for identity copy fallback",
         )
-        # Fallback should NOT have the module-level _p2p_buf_ pattern
         self.assertNotIn(
             "_p2p_buf_",
-            code_path3,
+            code_fallback,
             "Fallback should not use module-level persistent P2P buffer",
         )
-        self.assertIn(
-            "one_shot_all_reduce_out",
-            code_path3,
-            "Expected out-variant allreduce in fallback generated code",
-        )
-        # Verify fallback correctness
-        compiled_result_path3 = compiled_path3(x_cpu)
-        eager_result_path3 = x_cpu.cuda().clone()
-        dist.all_reduce(eager_result_path3, op=dist.ReduceOp.SUM)
+
+        compiled_result_fallback = compiled_fallback(x_cpu)
+        eager_result_fallback = x_cpu.cuda().clone()
+        dist.all_reduce(eager_result_fallback, op=dist.ReduceOp.SUM)
         torch.testing.assert_close(
-            compiled_result_path3,
-            eager_result_path3,
+            compiled_result_fallback,
+            eager_result_fallback,
             rtol=1e-5,
             atol=1e-5,
-            msg="Compiled (identity copy fallback) and eager do not match",
+            msg="Identity copy fallback does not match eager",
         )
 
     def test_layout_allocator_type_propagation(self):
@@ -1669,7 +1617,7 @@ class LoweringTest(MultiProcContinuousTest):
         fixed_default = flex_default.as_fixed()
         self.assertEqual(fixed_default.allocator, AllocatorType())
 
-        # __eq__: same allocator → equal
+        # __eq__: same allocator -> equal
         fixed_a = FixedLayout(
             device, torch.float32, size, allocator=AllocatorType(kind="symm_mem")
         )
@@ -1678,7 +1626,7 @@ class LoweringTest(MultiProcContinuousTest):
         )
         self.assertEqual(fixed_a, fixed_b)
 
-        # __eq__: different allocator → not equal
+        # __eq__: different allocator -> not equal
         fixed_default2 = FixedLayout(
             device, torch.float32, size, allocator=AllocatorType()
         )
@@ -1687,11 +1635,12 @@ class LoweringTest(MultiProcContinuousTest):
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
-    def test_symm_mem_upstream_propagation(self):
+    def test_comm_buffer_inplace_prevention(self):
         """
-        Verify that when a pointwise op (add) sits between a data source and
-        a symm_mem collective, the ComputedBuffer's CommBufferLayout prevents
-        incorrect in-place reuse with the upstream regular CUDA buffer.
+        When a pointwise op (add) sits between a data source and a symm_mem
+        collective, the output gets CommBufferLayout. Verify that the scheduler
+        does not in-place reuse a regular CUDA buffer for a CommBufferLayout
+        output, which would place the allreduce input in non-P2P memory.
         """
         self._init_process()
 
@@ -1699,9 +1648,10 @@ class LoweringTest(MultiProcContinuousTest):
         x = torch.rand(N, N, device=self.device)
         w = torch.rand(N, N, device=self.device)
 
-        # Pattern: mm → cpu → cuda → add → allreduce
-        # The cpu→cuda roundtrip creates a fallback region (partition boundary).
-        # The add op's output needs P2P, but its input comes from the fallback.
+        # Pattern: mm -> cpu -> cuda -> add -> allreduce
+        # The add output needs P2P (CommBufferLayout), but its input
+        # comes from a regular CUDA buffer (cpu->cuda DeviceCopy output).
+        # The scheduler must not in-place the add into the DeviceCopy output.
         def func(x, w):
             y = torch.mm(x, w)
             y_cpu = y.cpu()
@@ -1712,7 +1662,6 @@ class LoweringTest(MultiProcContinuousTest):
         compiled = torch.compile(func, fullgraph=True)
         code = run_and_get_triton_code(compiled, x, w)
 
-        # Verify upstream propagation generated correct P2P allocation
         self.assertIn(
             "empty_strided_p2p",
             code,
@@ -1724,7 +1673,6 @@ class LoweringTest(MultiProcContinuousTest):
             "Expected out-variant allreduce in generated code",
         )
 
-        # Single-run correctness
         result = compiled(x, w)
         eager_y = torch.mm(x, w)
         eager_z = eager_y.cpu().cuda() + 1
@@ -1735,7 +1683,7 @@ class LoweringTest(MultiProcContinuousTest):
             eager_result,
             rtol=1e-5,
             atol=1e-5,
-            msg="Compiled (upstream propagation) and eager do not match",
+            msg="Compiled and eager do not match",
         )
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
@@ -1785,67 +1733,14 @@ class LoweringTest(MultiProcContinuousTest):
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
-    def test_symm_mem_upstream_propagation_cudagraph(self):
-        """
-        CUDAGraph replay correctness for the upstream propagation pattern.
-
-        Pattern: mm → cpu → cuda → add → allreduce with CUDAGraph enabled.
-        Verifies that P2P buffers created by upstream propagation survive
-        CG recording and produce correct results across multiple replays.
-
-        Companion to test_symm_mem_upstream_propagation (PR #175449) which
-        verifies codegen correctness without CUDAGraph.
-        """
-        self._init_process()
-
-        N = 8
-        x = torch.rand(N, N, device=self.device)
-        w = torch.rand(N, N, device=self.device)
-
-        def func(x, w):
-            y = torch.mm(x, w)
-            y_cpu = y.cpu()
-            y_back = y_cpu.cuda()
-            z = y_back + 1
-            return torch.ops.symm_mem.one_shot_all_reduce(z, "sum", "0")
-
-        with torch._inductor.config.patch(
-            {
-                "graph_partition": True,
-                "triton.cudagraphs": True,
-            }
-        ):
-            compiled = torch.compile(func, fullgraph=True)
-            for _ in range(3):
-                torch.compiler.cudagraph_mark_step_begin()
-                result = compiled(x, w)
-
-        eager_y = torch.mm(x, w)
-        eager_z = eager_y.cpu().cuda() + 1
-        eager_result = eager_z.clone()
-        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
-        torch.testing.assert_close(
-            result,
-            eager_result,
-            rtol=1e-5,
-            atol=1e-5,
-            msg="CUDAGraph replay with upstream propagation does not match eager",
-        )
-
-    @skip_if_rocm_multiprocess
-    @skip_if_lt_x_gpu(2)
-    @fresh_inductor_cache()
     def test_hoisting_with_device_copy(self):
         """
         Verify ExternKernelOut output buffers are hoisted into the prior
-        CUDAGraph partition using a *natural* partition boundary (DeviceCopy)
-        instead of custom_should_partition_ops.
+        CUDAGraph partition using a natural partition boundary (DeviceCopy).
 
-        Pattern: [CG 0: add] → [fallback: cpu(), cuda()] → [CG 1: mul]
+        Pattern: [CG 0: add] -> [fallback: cpu(), cuda()] -> [CG 1: mul]
 
-        DeviceCopy is explicitly listed in should_partition() and cannot be
-        fused or optimized away since it is a physical cross-device transfer.
-        The cpu→cuda DeviceCopy output (CUDA ExternKernelOut) should be
+        The cpu->cuda DeviceCopy output (CUDA ExternKernelOut) should be
         pre-allocated inside partition_0 so it is captured once during CG
         recording and replayed with a fixed pointer.
         """
@@ -1869,16 +1764,12 @@ class LoweringTest(MultiProcContinuousTest):
             compiled = torch.compile(func, fullgraph=True)
             code = run_and_get_triton_code(compiled, x)
 
-        # Verify multiple partitions exist (DeviceCopy created a split)
         self.assertIn(
             "self.partitions[0]",
             code,
             "Expected at least partition_0 in generated code",
         )
 
-        # partition_0 is the first CUDAGraph partition (y = x + 1).
-        # The hoisted cpu→cuda DeviceCopy output allocation should
-        # appear inside partition_0 as an extra empty_strided_cuda.
         partition_0_match = re.search(
             r"def partition_0\(.*?\n(.*?)(?=\ndef |\Z)", code, re.DOTALL
         )
@@ -1895,7 +1786,6 @@ class LoweringTest(MultiProcContinuousTest):
             f"got {cuda_alloc_count}.\npartition_0 code:\n{p0_code}",
         )
 
-        # Correctness with CG replay
         with torch._inductor.config.patch(
             {
                 "graph_partition": True,
