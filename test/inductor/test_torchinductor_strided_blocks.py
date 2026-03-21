@@ -553,7 +553,10 @@ class CommonTemplate:
 
         view = self._discontiguous_tensor(view_size, self.device)
 
-        if num_triton_kernels == 2 and config.triton.cooperative_reductions:
+        if num_triton_kernels == 2 and (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             # fewer kernels with cooperative reductions
             num_triton_kernels = 1
             num_block_pointers -= 2
@@ -813,7 +816,10 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
-        if reduction_op == torch.sum and config.triton.cooperative_reductions:
+        if reduction_op == torch.sum and (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             num_triton_kernels = 1
             num_block_pointers = 1
 
@@ -886,7 +892,10 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
-        if config.triton.cooperative_reductions:
+        if (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             expected_num_triton_kernels = 1
             expected_num_block_pointers = 1
 
@@ -922,11 +931,15 @@ class CommonTemplate:
         view = self._discontiguous_tensor((259, 311), self.device)
 
         # We expect many block pointers for this one.
+        cooperative_reductions = (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        )
         result, (code,) = self._run_and_compare(
             torch.var_mean,
             view,
-            expected_num_block_pointers=0 if config.triton.cooperative_reduction else 6,
-            expected_num_triton_kernels=1 if config.triton.cooperative_reduction else 2,
+            expected_num_block_pointers=0 if cooperative_reductions else 6,
+            expected_num_triton_kernels=1 if cooperative_reductions else 2,
             config_patches={"triton.prefer_nd_tiling": True},
         )
 

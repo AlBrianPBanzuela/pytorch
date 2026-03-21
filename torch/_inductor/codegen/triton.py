@@ -6337,7 +6337,10 @@ class TritonScheduling(SIMDScheduling):
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
-        if config.triton.cooperative_reductions:
+        if (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             return OrderedSet(
                 [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
             )

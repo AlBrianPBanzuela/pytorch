@@ -219,7 +219,10 @@ class MixOrderReductionTest(TestBase):
         # with more than 2 layers
         self.assertEqual(
             metrics.codegen_mix_order_reduction,
-            1 if inductor_config.triton.cooperative_reductions else 0,
+            1
+            if inductor_config.triton.cooperative_reductions
+            or inductor_config.triton.force_cooperative_reductions
+            else 0,
         )
 
     def test_independent_split_size(self):
