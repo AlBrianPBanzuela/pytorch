@@ -66,11 +66,17 @@ def check_wheel_platform_tag() -> None:
     if target_os == "linux" and platform.machine() == "aarch64":
         target_os = "linux-aarch64"
     expected_python = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    import sysconfig
+
     abiflags = getattr(sys, "abiflags", "")
-    # free-threaded Python uses 't' suffix, detectable via sys._is_gil_enabled()
-    if not abiflags and not getattr(sys, "_is_gil_enabled", lambda: True)():
+    if not abiflags and (
+        os.getenv("MATRIX_PYTHON_VERSION", "").endswith("t")
+        or bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+        or not getattr(sys, "_is_gil_enabled", lambda: True)()
+    ):
         abiflags = "t"
     expected_abi = f"cp{sys.version_info.major}{sys.version_info.minor}{abiflags}"
+    print(f"Expected ABI tag: {expected_abi}")
 
     platform_pattern = EXPECTED_PLATFORM_TAGS.get(target_os)
     if not platform_pattern:
