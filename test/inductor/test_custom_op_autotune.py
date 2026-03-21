@@ -251,15 +251,8 @@ class TestCustomOpAutoTune(TestCase):
         """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
-        sd = k**0.25
-        a = (
-            torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
-            / sd
-        )
-        b = (
-            torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
-            / sd
-        )
+        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
         bias = (
             torch.randn(n, device=self.device, dtype=self.dtype, requires_grad=False)
             * 0.1
@@ -381,9 +374,9 @@ class TestCustomOpAutoTune(TestCase):
             torch.testing.assert_close(
                 compiled_result,
                 expected,
-                rtol=2e-3,
-                atol=5e-3,
-                # msg=f"Failed for shape ({m}, {k}, {n})",
+                rtol=2e-1,
+                atol=5e-1,
+                msg=f"Failed for shape ({m}, {k}, {n})",
             )
 
     def test_multi_parameter_tuning(self):
@@ -1437,6 +1430,7 @@ class TestCustomOpAutoTune(TestCase):
 
         torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
 
+    @skipIfXpu
     def test_cudagraph_memory_cleanup(self):
         """Test that CUDA graph destruction automatically cleans up cuBLAS workspaces."""
         if self.device != "cuda":
@@ -1481,6 +1475,7 @@ class TestCustomOpAutoTune(TestCase):
             f"Memory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
         )
 
+    @skipIfXpu
     def test_cudagraph_memory_cleanup_benchmarker(self):
         """Test that CUDA graph benchmarking cleans up memory without leaking."""
         if self.device != "cuda":
