@@ -28,6 +28,7 @@ import atexit
 import contextlib
 import functools
 import inspect
+import itertools
 import logging
 import os
 import sys
@@ -138,6 +139,8 @@ log = logging.getLogger(__name__)
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
+
+_region_id_counter = itertools.count(1)
 
 
 # See https://github.com/python/typing/pull/240
@@ -749,6 +752,8 @@ class _TorchDynamoContext:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
+        if callable(callback):
+            callback._torchdynamo_region_id = next(_region_id_counter)  # type: ignore[union-attr]
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Unset | DynamoCallback = unset
         self.first_ctx = first_ctx

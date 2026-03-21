@@ -505,8 +505,13 @@ PyObject* dynamo__custom_eval_frame(
     extra = init_and_set_extra_state(F_CODE(frame));
   }
 
+  int64_t region_id = 0;
+  if (!callback.is(py::bool_(false)) && !callback.is(py::none())) {
+    region_id = get_region_id(callback.ptr());
+  }
+
   // Get recursive action
-  FrameExecStrategy strategy = extra_state_get_exec_strategy(extra);
+  FrameExecStrategy strategy = extra_state_get_exec_strategy(extra, region_id);
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
@@ -537,6 +542,7 @@ PyObject* dynamo__custom_eval_frame(
       extra,
       locals.get(),
       backend,
+      region_id,
       &maybe_cached_code,
       &trace_annotation,
       is_skip_guard_eval_unsafe);
@@ -646,7 +652,11 @@ PyObject* dynamo__custom_eval_frame(
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }
-    extra_state_set_exec_strategy(extra, new_strategy);
+    if (region_id != 0) {
+      extra_state_set_region_exec_strategy(extra, region_id, new_strategy);
+    } else {
+      extra_state_set_exec_strategy(extra, new_strategy);
+    }
   }
 
   if (guarded_code != Py_None) {
@@ -657,7 +667,7 @@ PyObject* dynamo__custom_eval_frame(
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra won't be NULL here.
     CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
+        create_cache_entry(extra, guarded_code, backend, region_id);
 
     // Update the existing cache_entry on the extra object. This extra object
     // is sitting on the extra scratch space, we are just changing the

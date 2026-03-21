@@ -320,6 +320,34 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res, inp + 3)
 
+    @torch._dynamo.config.patch(
+        recompile_limit=2,
+        accumulated_recompile_limit=64,
+        fail_on_recompile_limit_hit=True,
+        automatic_dynamic_shapes=False,
+    )
+    def test_two_compile_calls_isolated(self):
+        # Two torch.compile() calls on the same function should not interfere
+        # with each other's cache size counting (region_id partitioning).
+        def f(x):
+            return x + 1
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_g = torch.compile(f, backend="eager")
+
+        opt_f(torch.randn(1))  # compiles (1 entry for opt_f's region)
+        opt_f(torch.randn(2))  # recompiles (2 entries for opt_f's region)
+        with self.assertRaises(FailOnRecompileLimitHit):
+            # opt_f's region hits recompile_limit=2; fail_on_recompile_limit_hit
+            # raises instead of silently going to RUN_ONLY, keeping the global
+            # exec_strategy as DEFAULT so opt_g's callback can still fire.
+            opt_f(torch.randn(3))
+
+        # opt_g's region is empty. Without region isolation, compute_cache_size
+        # would count 2 entries from opt_f and raise FailOnRecompileLimitHit.
+        # With region isolation, opt_g sees 0 entries and compiles fine.
+        opt_g(torch.randn(4))
+
 
 class RecompileLimitKwargTests(torch._dynamo.test_case.TestCase):
     @staticmethod

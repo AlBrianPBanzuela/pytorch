@@ -9,6 +9,7 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <unordered_map>
 
 namespace py = pybind11;
 
@@ -66,6 +67,8 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   py::dict frame_state;
   // Actions to apply to all frames with this code object
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // Per-region actions (for recompile limit isolation between torch.compile() calls)
+  std::unordered_map<int64_t, FrameExecStrategy> per_region_strategy;
 
   ExtraState(PyCodeObject* orig_code_arg);
   CacheEntry* get_first_entry();
@@ -101,13 +104,22 @@ FrameState* extract_frame_state(ExtraState* extra_state);
 // Ownership contract
 // args
 //  - extra_state: Borrowed
-FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
+FrameExecStrategy extra_state_get_exec_strategy(
+    ExtraState* extra_state,
+    int64_t region_id);
 
 // Set the FrameExecStrategy to be done to all frames with code object
 // corresponding to this extra_state. Ownership contract
 // - extra_state: Borrowed
 void extra_state_set_exec_strategy(
     ExtraState* extra_state,
+    FrameExecStrategy strategy);
+
+// Set the per-region FrameExecStrategy. Ownership contract
+// - extra_state: Borrowed
+void extra_state_set_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t region_id,
     FrameExecStrategy strategy);
 
 // Ownership contract
@@ -171,6 +183,7 @@ void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
+    int64_t region_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe);
@@ -185,10 +198,14 @@ void lookup(
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guraded_code,
-    PyObject* callback);
+    PyObject* callback,
+    int64_t region_id);
 
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
+
+// Extracts the region_id from the callback.
+int64_t get_region_id(PyObject* callback);
 
 #ifdef __cplusplus
 

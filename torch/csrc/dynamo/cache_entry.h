@@ -54,6 +54,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void* diff_guard_root_mgr{nullptr};
   // backend used to create this cache entry
   py::object backend;
+  // region_id of the torch.compile() call that created this entry
+  int64_t region_id{0};
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list
@@ -61,7 +63,7 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   // Reference to string representation of the CompileContext
   std::string trace_annotation;
 
-  CacheEntry(const py::handle& guarded_code, PyObject* backend);
+  CacheEntry(const py::handle& guarded_code, PyObject* backend, int64_t region_id);
   CacheEntry(const CacheEntry&) = default;
   CacheEntry(CacheEntry&&) = default;
   CacheEntry& operator=(const CacheEntry&) = default;

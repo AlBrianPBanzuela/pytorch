@@ -4,8 +4,12 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
-CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend{py::cast<py::object>(get_backend(backend))} {
+CacheEntry::CacheEntry(
+    const py::handle& guarded_code,
+    PyObject* backend,
+    int64_t region_id)
+    : backend{py::cast<py::object>(get_backend(backend))},
+      region_id{region_id} {
   this->guard_manager = guarded_code.attr("guard_manager");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
@@ -81,4 +85,12 @@ PyObject* get_backend(PyObject* callback) {
     handle = handle.attr("_torchdynamo_orig_backend");
   }
   return handle.ptr();
+}
+
+int64_t get_region_id(PyObject* callback) {
+  py::handle handle = py::handle(callback);
+  if (py::hasattr(handle, "_torchdynamo_region_id")) {
+    return handle.attr("_torchdynamo_region_id").cast<int64_t>();
+  }
+  return 0;
 }

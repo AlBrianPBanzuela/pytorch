@@ -1,4 +1,5 @@
 import logging
+import threading
 import weakref
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +11,8 @@ from .types import DynamoFrameType
 
 
 log: logging.Logger = logging.getLogger(__name__)
+
+_current_region_id: threading.local = threading.local()
 """
 [Note on cache size limit]
 
@@ -135,17 +138,19 @@ def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry: Any) -> bool:
 def compute_cache_size(
     frame: DynamoFrameType, cache_entry: Any
 ) -> CacheSizeRelevantForFrame:
-    # Walk the linked list to calculate the cache size
+    # Walk the linked list to calculate the cache size, filtered by region_id
+    region_id = getattr(_current_region_id, "value", 0)
     num_cache_entries = 0
     num_cache_entries_with_same_id_matched_objs = 0
 
     while cache_entry:
-        num_cache_entries += 1
-        # Track the number of cache entries having same ID_MATCH'd objects as
-        # that of frame.f_locals. This will be used later to compare against the
-        # recompile_limit.
-        if _has_same_id_matched_objs(frame, cache_entry):
-            num_cache_entries_with_same_id_matched_objs += 1
+        if region_id == 0 or cache_entry.region_id == region_id:
+            num_cache_entries += 1
+            # Track the number of cache entries having same ID_MATCH'd objects as
+            # that of frame.f_locals. This will be used later to compare against the
+            # recompile_limit.
+            if _has_same_id_matched_objs(frame, cache_entry):
+                num_cache_entries_with_same_id_matched_objs += 1
         cache_entry = cache_entry.next
 
     return CacheSizeRelevantForFrame(

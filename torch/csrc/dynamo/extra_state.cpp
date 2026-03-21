@@ -84,7 +84,19 @@ FrameState* extract_frame_state(ExtraState* extra_state) {
   return (FrameState*)extra_state->frame_state.ptr();
 }
 
-FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state) {
+FrameExecStrategy extra_state_get_exec_strategy(
+    ExtraState* extra_state,
+    int64_t region_id) {
+  // Global SKIP (from trace rules / skip_code) takes priority over per-region
+  if (extra_state->strategy.cur_action == FrameAction::SKIP) {
+    return extra_state->strategy;
+  }
+  if (region_id != 0) {
+    auto it = extra_state->per_region_strategy.find(region_id);
+    if (it != extra_state->per_region_strategy.end()) {
+      return it->second;
+    }
+  }
   return extra_state->strategy;
 }
 
@@ -92,6 +104,13 @@ void extra_state_set_exec_strategy(
     ExtraState* extra_state,
     FrameExecStrategy strategy) {
   extra_state->strategy = strategy;
+}
+
+void extra_state_set_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t region_id,
+    FrameExecStrategy strategy) {
+  extra_state->per_region_strategy[region_id] = strategy;
 }
 
 ExtraState* get_extra_state(PyCodeObject* code) {
@@ -141,6 +160,7 @@ void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
+    int64_t region_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
@@ -156,9 +176,9 @@ void lookup(
 
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
-
     bool valid = backend == Py_False ||
-        backend_match(cache_entry.backend.ptr(), backend);
+        (backend_match(cache_entry.backend.ptr(), backend) &&
+         (region_id == 0 || cache_entry.region_id == region_id));
 
     if (valid) {
       try {
@@ -207,13 +227,14 @@ void lookup(
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
-    PyObject* backend) {
+    PyObject* backend,
+    int64_t region_id) {
   std::list<CacheEntry>::iterator new_iter;
   if (use_lru) {
-    extra_state->cache_entry_list.emplace_front(guarded_code, backend);
+    extra_state->cache_entry_list.emplace_front(guarded_code, backend, region_id);
     new_iter = extra_state->cache_entry_list.begin();
   } else {
-    extra_state->cache_entry_list.emplace_back(guarded_code, backend);
+    extra_state->cache_entry_list.emplace_back(guarded_code, backend, region_id);
     new_iter = std::prev(extra_state->cache_entry_list.end());
   }
   new_iter->_owner = extra_state;

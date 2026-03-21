@@ -2448,9 +2448,15 @@ class CatchErrorsWrapper:
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            result = self._torchdynamo_orig_backend(
-                frame, cache_entry, self.hooks, frame_state, skip=1
-            )
+            from .cache_size import _current_region_id
+
+            _current_region_id.value = getattr(self, "_torchdynamo_region_id", 0)
+            try:
+                result = self._torchdynamo_orig_backend(
+                    frame, cache_entry, self.hooks, frame_state, skip=1
+                )
+            finally:
+                _current_region_id.value = 0
             return result
 
 
