@@ -77,6 +77,21 @@ on:
         type: boolean
         default: false
         description: If true, use ARC (OSDC) runner path instead of EC2.
+      python-version:
+        required: false
+        type: string
+        default: ""
+        description: Python version to use for the OSDC test.
+      compiler:
+        required: false
+        type: string
+        default: ""
+        description: Compiler to use for the OSDC test.
+      cuda-version:
+        required: false
+        type: string
+        default: ""
+        description: CUDA version to use for the OSDC test.
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -619,7 +634,9 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-linux@huydhn/setup-linux-osdc
         with:
           use-arc: true
-          build-environment: ${{ inputs.build-environment }}
+          python-version: ${{ inputs.python-version }}
+          compiler: ${{ inputs.compiler }}
+          cuda-version: ${{ inputs.cuda-version }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7

@@ -108,6 +108,21 @@ on:
         type: boolean
         default: false
         description: If true, use ARC (OSDC) runner path instead of EC2.
+      python-version:
+        required: false
+        type: string
+        default: ""
+        description: Python version to use for the OSDC build.
+      compiler:
+        required: false
+        type: string
+        default: ""
+        description: Compiler to use for the OSDC build.
+      cuda-version:
+        required: false
+        type: string
+        default: ""
+        description: CUDA version to use for the OSDC build.
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -513,7 +528,9 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-linux@huydhn/setup-linux-osdc
         with:
           use-arc: true
-          build-environment: ${{ inputs.build-environment }}
+          python-version: ${{ inputs.python-version }}
+          compiler: ${{ inputs.compiler }}
+          cuda-version: ${{ inputs.cuda-version }}
 
       - name: Get workflow job id
         id: get-job-id
