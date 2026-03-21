@@ -361,6 +361,9 @@ class MixOrderReduction:
         if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
+        if MixOrderReduction.is_split_reduction(contiguous_node):
+            return False
+
         # Other reduction types like max/min is not supported yet.
         # There are no real use case as well.
         out = all(
@@ -5593,8 +5596,10 @@ class Scheduler:
         def low_prec_fp(dtype: torch.dtype) -> bool:
             return dtype.itemsize <= 2 and dtype.is_floating_point
 
+        template_buf = template_node.get_template_node_or_throw()
         if (
-            low_prec_fp(template_node.get_template_node_or_throw().dtype)
+            not template_buf.is_multi_outputs_template()
+            and low_prec_fp(template_buf.dtype)
             and not prologue_node.can_codegen_in_low_precision()
         ):
             why(
@@ -7439,6 +7444,12 @@ class Scheduler:
                     )
 
             self.enter_context(node)
+
+            # pyrefly: ignore [unbound-name]
+            if config.size_asserts:
+                V.graph.wrapper_code.codegen_deferred_input_asserts(
+                    dep.name for dep in node.read_writes.reads
+                )
 
             if device := node.get_device():
                 if (
