@@ -418,19 +418,17 @@ class SizeVarAllocator:
         expr = sympy.Eq(Mod(numerator, denominator), 0)
         if self.statically_known_true(expr): # type: ignore[arg-type]
             return True
-
         # Check if the denominator divides the symbolic expression using GCD.
         # This handles cases like symbolic products and sums more robustly.
         if denominator == 0:
             return False
-        
+
         try:
             # Use Greatest Common Divisor (GCD) to verify if the numerator is a 
             # statically known multiple of the denominator. This approach natively 
             # handles symbolic products (sympy.Mul), sums (sympy.Add), and complex 
             # composite expressions without requiring explicit type checks.
             gcd_result = sympy.gcd(numerator, denominator)
-    
             # If the GCD is equal to the denominator, the divisibility is 
             # mathematically guaranteed for the given symbolic expression.
             return gcd_result == denominator
