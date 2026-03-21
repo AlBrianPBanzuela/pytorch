@@ -1547,11 +1547,12 @@ class LoweringTest(MultiProcContinuousTest):
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
-    def test_symm_mem_upstream_propagation(self):
+    def test_comm_buffer_inplace_prevention(self):
         """
-        Verify that when a pointwise op (add) sits between a data source and
-        a symm_mem collective, the ComputedBuffer's CommBufferLayout prevents
-        incorrect in-place reuse with the upstream regular CUDA buffer.
+        When a pointwise op (add) sits between a data source and a symm_mem
+        collective, the output gets CommBufferLayout. Verify that the scheduler
+        does not in-place reuse a regular CUDA buffer for a CommBufferLayout
+        output, which would place the allreduce input in non-P2P memory.
         """
         self._init_process()
 
@@ -1559,9 +1560,10 @@ class LoweringTest(MultiProcContinuousTest):
         x = torch.rand(N, N, device=self.device)
         w = torch.rand(N, N, device=self.device)
 
-        # Pattern: mm → cpu → cuda → add → allreduce
-        # The cpu→cuda roundtrip creates a fallback region (partition boundary).
-        # The add op's output needs P2P, but its input comes from the fallback.
+        # Pattern: mm -> cpu -> cuda -> add -> allreduce
+        # The add output needs P2P (CommBufferLayout), but its input
+        # comes from a regular CUDA buffer (cpu->cuda DeviceCopy output).
+        # The scheduler must not in-place the add into the DeviceCopy output.
         def func(x, w):
             y = torch.mm(x, w)
             y_cpu = y.cpu()
@@ -1572,7 +1574,6 @@ class LoweringTest(MultiProcContinuousTest):
         compiled = torch.compile(func, fullgraph=True)
         code = run_and_get_triton_code(compiled, x, w)
 
-        # Verify upstream propagation generated correct P2P allocation
         self.assertIn(
             "empty_strided_p2p",
             code,
@@ -1584,7 +1585,6 @@ class LoweringTest(MultiProcContinuousTest):
             "Expected out-variant allreduce in generated code",
         )
 
-        # Single-run correctness
         result = compiled(x, w)
         eager_y = torch.mm(x, w)
         eager_z = eager_y.cpu().cuda() + 1
@@ -1595,7 +1595,7 @@ class LoweringTest(MultiProcContinuousTest):
             eager_result,
             rtol=1e-5,
             atol=1e-5,
-            msg="Compiled (upstream propagation) and eager do not match",
+            msg="Compiled and eager do not match",
         )
 
 
