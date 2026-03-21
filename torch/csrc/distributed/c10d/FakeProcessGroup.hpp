@@ -81,16 +81,10 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
-  // NOTE [allgather on FakeProcessGroup]
-  // Assume each rank have the same input tensor so we just copy to the results
-  // since it's not a real allgather, we simply make this copying logic to let
-  // some simple validation works (i.e. calling allgather to see if each rank
-  // have the same tensor or not).
-  //
-  // NOTE: in general it's not good form to try to make FakeProcessGroup work
-  // with real data, but the reasoning here is that we want FakeProcessGroup to
-  // work with DeviceMesh's init code that have the data validation, which
-  // makes it worth the tradeoff.
+  // NOTE [FakeProcessGroup collective semantics]
+  // All collectives copy input to output following single-rank semantics
+  // (rank 0 communicating with itself). This avoids returning uninitialized
+  // memory and enables single-process validation of distributed code paths.
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
@@ -115,10 +109,15 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    for (size_t i = 0; i < inputTensors.size(); ++i) {
+      for (auto& tensor : outputTensorLists[i]) {
+        tensor.copy_(inputTensors[i]);
+      }
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -137,63 +136,84 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> gather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const GatherOptions& /* opts */ = GatherOptions()) override {
     checkCollectiveError();
+    if (!outputTensors.empty()) {
+      for (auto& tensor : outputTensors[0]) {
+        tensor.copy_(inputTensors[0]);
+      }
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& /* opts */ = ScatterOptions()) override {
     checkCollectiveError();
+    if (!inputTensors.empty()) {
+      outputTensors[0].copy_(inputTensors[0][rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    for (size_t i = 0; i < outputTensors.size(); ++i) {
+      outputTensors[i].copy_(inputTensors[i][rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> _reduce_scatter_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    auto chunks = inputBuffer.chunk(size_);
+    outputBuffer.copy_(chunks[rank_]);
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
-      std::vector<at::Tensor>& /* outputs */,
-      std::vector<at::Tensor>& /* inputs */,
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      auto chunks = inputs[i].chunk(size_);
+      outputs[i].copy_(chunks[rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> alltoall_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
       std::vector<int64_t>& /* outputSplitSizes */,
       std::vector<int64_t>& /* inputSplitSizes */,
       const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
     checkCollectiveError();
+    outputBuffer.copy_(inputBuffer);
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> alltoall(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) override {
     checkCollectiveError();
+    for (size_t i = 0; i < outputTensors.size(); ++i) {
+      outputTensors[i].copy_(inputTensors[i]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
