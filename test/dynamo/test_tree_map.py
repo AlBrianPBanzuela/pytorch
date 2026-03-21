@@ -418,9 +418,7 @@ class TreeMapCompileTests(TestCase):
         self.assertTrue(torch.allclose(result["tensor"], torch.ones(2)))
 
     @parametrize_pytree_module
-    def test_user_defined_object_multiple_trees(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_user_defined_object_multiple_trees(self, pytree_name: str, pytree) -> None:
         """User-defined objects should work correctly with multiple input trees."""
 
         class Point:
@@ -448,9 +446,7 @@ class TreeMapCompileTests(TestCase):
         self.assertEqual(result["val"], 30)
 
     @parametrize_pytree_module
-    def test_dict_subclass_treated_as_leaf(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_dict_subclass_treated_as_leaf(self, pytree_name: str, pytree) -> None:
         """Dict subclasses (not registered in pytree) should be treated as leaves."""
 
         class MyDict(dict):
@@ -482,9 +478,7 @@ class TreeMapCompileTests(TestCase):
         self.assertEqual(result["regular"]["x"], 3)
 
     @parametrize_pytree_module
-    def test_list_subclass_treated_as_leaf(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_list_subclass_treated_as_leaf(self, pytree_name: str, pytree) -> None:
         """List subclasses (not registered in pytree) should be treated as leaves."""
 
         class MyList(list):
@@ -514,9 +508,7 @@ class TreeMapCompileTests(TestCase):
         self.assertEqual(result["regular"], [14, 15, 16])
 
     @parametrize_pytree_module
-    def test_tuple_subclass_treated_as_leaf(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_tuple_subclass_treated_as_leaf(self, pytree_name: str, pytree) -> None:
         """Tuple subclasses (not registered in pytree) should be treated as leaves."""
 
         class MyTuple(tuple):  # noqa: SLOT001
@@ -896,9 +888,7 @@ class TreeMapCompileTests(TestCase):
         self.assertTrue(torch.allclose(result["direct_tensor"], torch.ones(2)))
 
     @parametrize_pytree_module
-    def test_user_defined_object_no_fallback(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_user_defined_object_no_fallback(self, pytree_name: str, pytree) -> None:
         """Verify user-defined objects use fastpath without triggering fallback."""
         import logging
 
@@ -981,9 +971,7 @@ class TreeMapCompileTests(TestCase):
         _assert_trees_allclose(self, expected, result)
 
     @parametrize_pytree_module
-    def test_namedtuple_tree_map_multiple_trees(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_namedtuple_tree_map_multiple_trees(self, pytree_name: str, pytree) -> None:
         """Test tree_map with multiple namedtuple trees."""
         Point = namedtuple("Point", ["x", "y"])
 
@@ -1049,9 +1037,7 @@ class TreeMapWithPathCompileTests(TestCase):
         torch._dynamo.reset()
 
     @parametrize_pytree_module_with_path
-    def test_basic_nested_tree(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_basic_nested_tree(self, pytree_name: str, pytree) -> None:
         """Keypaths are correctly constructed for nested dicts, lists, and tuples."""
         tree = {
             "tensor": torch.ones(2),
@@ -1101,9 +1087,7 @@ class TreeMapWithPathCompileTests(TestCase):
         _assert_trees_allclose(self, expected, result)
 
     @parametrize_pytree_module_with_path
-    def test_is_leaf_predicate(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_is_leaf_predicate(self, pytree_name: str, pytree) -> None:
         """is_leaf stops traversal and passes the subtree as a leaf."""
         tree = {"a": [torch.ones(2), torch.zeros(2)]}
 
@@ -1136,9 +1120,7 @@ class TreeMapWithPathCompileTests(TestCase):
         self.assertEqual(eager_keypaths, compiled_keypaths)
 
     @parametrize_pytree_module_with_path
-    def test_namedtuple_uses_getattr_key(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_namedtuple_uses_getattr_key(self, pytree_name: str, pytree) -> None:
         """Namedtuple fields produce GetAttrKey in keypaths."""
         Point = namedtuple("Point", ["x", "y"])
         tree = {"point": Point(torch.ones(2), torch.zeros(2))}
@@ -1168,9 +1150,7 @@ class TreeMapWithPathCompileTests(TestCase):
         self.assertEqual(eager_keypaths, compiled_keypaths)
 
     @parametrize_pytree_module_with_path
-    def test_deeply_nested_keypaths(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_deeply_nested_keypaths(self, pytree_name: str, pytree) -> None:
         """Deeply nested structures produce correct multi-level keypaths."""
         tree = {"outer": {"inner": [torch.ones(2)]}}
 
@@ -1199,9 +1179,7 @@ class TreeMapWithPathCompileTests(TestCase):
         _assert_trees_allclose(self, expected, result)
 
     @parametrize_pytree_module_with_path
-    def test_keypath_values_used_in_computation(
-        self, pytree_name: str, pytree
-    ) -> None:
+    def test_keypath_values_used_in_computation(self, pytree_name: str, pytree) -> None:
         """The map function can use keypath values to influence the result."""
         from torch.utils._pytree import MappingKey
 
