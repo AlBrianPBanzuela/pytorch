@@ -2943,6 +2943,26 @@
       ]
     }
   ],
+  "GB1817": [
+    {
+      "Gb_type": "Cannot determine object identity at trace time",
+      "Context": "comparing {type(lhs).__name__} and {type(rhs).__name__}",
+      "Explanation": "Dynamo cannot resolve identity of these objects at trace time.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB1709": [
+    {
+      "Gb_type": "Missing richcompare_impl",
+      "Context": "{type(self).__name__}.{op}({type(other).__name__})",
+      "Explanation": "Dynamo does not support {op} on {type(self).__name__}. Add richcompare_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0243": [
     {
       "Gb_type": "Attempted to use `torch.nn.modules.utils._ntuple` with unsupported argument type",

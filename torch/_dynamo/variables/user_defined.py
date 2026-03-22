@@ -307,8 +307,8 @@ def generic_richcompare(
         # CPython: fall back to identity (a is b)
         identity = vt_identity_compare(tx, lhs, rhs)
         if identity is None:
-            from ..exc import unimplemented
             from .. import graph_break_hints
+            from ..exc import unimplemented
 
             unimplemented(
                 gb_type="Cannot determine object identity at trace time",

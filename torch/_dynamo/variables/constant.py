@@ -395,11 +395,7 @@ its type to `common_constant_types`.
     ) -> "VariableTracker":
         # CPython: object_richcompare / PyBaseObject_Type.tp_richcompare
         # https://github.com/python/cpython/blob/main/Objects/typeobject.c
-        if (
-            other.is_python_constant()
-            and not tx.output.side_effects.has_pending_mutation(self)
-            and not tx.output.side_effects.has_pending_mutation(other)
-        ):
+        if other.is_python_constant():
             try:
                 return ConstantVariable.create(
                     cmp_name_to_op_mapping[op](
@@ -452,12 +448,16 @@ class FakeIdVariable(VariableTracker):
             return self.value == other.as_python_constant()
         return False
 
-    def richcompare_impl(self, tx: Any, other: "VariableTracker", op: str) -> "VariableTracker":
+    def richcompare_impl(
+        self, tx: Any, other: "VariableTracker", op: str
+    ) -> "VariableTracker":
         # FakeIdVariable wraps an integer id; compare as integers
         if not isinstance(other, (FakeIdVariable, ConstantVariable)):
             return ConstantVariable.create(NotImplemented)
         return ConstantVariable.create(
-            cmp_name_to_op_mapping[op](self.as_python_constant(), other.as_python_constant())
+            cmp_name_to_op_mapping[op](
+                self.as_python_constant(), other.as_python_constant()
+            )
         )
 
     def reconstruct(self, codegen: Any) -> None:
