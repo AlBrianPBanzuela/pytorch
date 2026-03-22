@@ -3732,16 +3732,16 @@ def linear_cross_entropy(
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
-    ::
+    The statement::
+
       loss = linear_cross_entropy(input, linear_weight, target, **kwargs)
 
-    is equivalent to the following reference implementation of linear_cross_entropy
+    is equivalent to the following reference implementation of linear_cross_entropy::
 
-    ::
       logits = linear(input, linear_weight)
       loss = cross_entropy(logits, target, **kwargs)
 
-    See :class:`~torch.nn.CrossEntropyLoss` for details.
+    See :class:`~torch.nn.Linear` and :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
         input (Tensor) : input samples.
