@@ -565,10 +565,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            from .user_defined import generic_richcompare
+        elif name in cmp_name_to_op_mapping and not kwargs:
+            if len(args) == 1:
+                from .user_defined import generic_richcompare
 
-            return generic_richcompare(tx, self, args[0], name)
+                return generic_richcompare(tx, self, args[0], name)
+            # Wrong number of args — mirror CPython's TypeError
+            msg = variables.ConstantVariable.create(
+                f"{name}() missing 1 required positional argument: 'other'"
+            )
+            raise_observed_exception(TypeError, tx, args=[msg])
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
             "Please report an issue to PyTorch.",
