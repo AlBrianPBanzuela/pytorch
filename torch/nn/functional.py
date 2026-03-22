@@ -3662,20 +3662,60 @@ class LinearCrossEntropyOptions:
     """
 
     batch_chunk_size: int | None = None
-    """Chunk size along the batches dimension. By default, the
-    chunk size is maximal.
+    """Chunk size along the batches dimension. The specified value may
+    be overridden by the computed value from chunking method. By
+    default, the chunk size is maximal.
+    """
+
+    chunking_method: str | None = None
+    """A method for computing chunk sizes. By default, the chunk sizes
+    are maximal.
+
+    The following methods are supported for computing chunk sizes:
+
+    - "liger" - use the same heuristics as in
+        `<https://github.com/linkedin/Liger-Kernel>`__ for computing
+        the batch chunk size. Specified ``batch_chunk_size`` will be
+        overridden.
     """
 
     def adjust(self, num_batches, in_features, num_classes):
         """Adjust options to input sizes.
 
-        The method returns a new LinearCrossEntropyOptions object with
-        default chunk sizes adjusted to the actual input sizes.
+        Return a new LinearCrossEntropyOptions object with default
+        chunk sizes adjusted to the actual input sizes.
         """
         if self.batch_chunk_size is None:
             batch_chunk_size = num_batches
         else:
             batch_chunk_size = min(self.batch_chunk_size, num_batches)
+
+        if self.chunking_method is not None:
+            if self.chunking_method == "liger":
+                # Heuristics used in liger_kernel.transformers.LigerFusedLinearCrossEntropyLoss:
+                #   next_pow_of_2(cdiv(num_batches, cdiv(num_classes, in_features)))
+                batch_chunk_size = (
+                    1
+                    << (
+                        -(num_batches // (num_classes // -in_features)) - 1
+                    ).bit_length()
+                )
+                if (
+                    self.batch_chunk_size is not None
+                    and self.batch_chunk_size != batch_chunk_size
+                ):
+                    warnings.warn(
+                        f"Specified batch_chunk_size (={self.batch_chunk_size}) is different"
+                        f" from one (={batch_chunk_size}) computed using chunking method"
+                        f"('{self.chunking_method}'). Using the latter.",
+                        stacklevel=2,
+                    )
+            else:
+                raise ValueError(
+                    f"Unknown chunking method: '{self.chunking_method}'."
+                    " Supported methods: 'liger' or None."
+                )
+
         return dataclasses.replace(self, batch_chunk_size=batch_chunk_size)
 
 
