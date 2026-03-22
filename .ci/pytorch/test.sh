@@ -221,13 +221,6 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Check XPU status before testing
   timeout 30 xpu-smi discovery || true
-
-  # setting sycl-tla (Intel cutlass)
-  install_sycl_tla "./third_party/sycl-tla" || exit 1
-  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla")
-  export TORCHINDUCTOR_CUTLASS_DIR
-  export ONEAPI_ROOT="/opt/intel/oneapi/${XPU_VERSION}"
-  # end setting sycl-tla
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -374,9 +367,11 @@ test_python_smoke_b200() {
   assert_git_not_dirty
 }
 
+
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
   time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time test_xpu_sycl_tla_backend
   assert_git_not_dirty
 }
 
@@ -426,6 +421,13 @@ test_h100_cutlass_backend() {
   git submodule update --init --depth 1 third_party/cutlass
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_backend -k "not addmm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+}
+
+test_xpu_sycl_tla_backend() {
+  # Inductor sycl-tla backend tests for XPU
+  sycl_tla_dir=$(realpath "./third_party/sycl-tla")
+  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.7 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend -k "not addmm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
 test_lazy_tensor_meta_reference_disabled() {
