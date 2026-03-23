@@ -1519,11 +1519,11 @@ class GraphLowering(torch.fx.Interpreter):
     def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
         raise AssertionError
 
-    # pyrefly: ignore [bad-override]
+    @typing_extensions.override
     def output(
         self,
-        target: str,  # type: ignore[override]
-        args: tuple[object],  # type: ignore[override]
+        target: torch.fx.node.Target,
+        args: tuple[torch.fx.node.Argument, ...],
         kwargs: dict[str, object],
     ) -> None:
         result = super().output(target, args, kwargs)  # type: ignore[arg-type]
