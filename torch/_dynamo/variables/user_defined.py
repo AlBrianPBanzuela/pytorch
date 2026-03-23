@@ -288,6 +288,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self) -> bool:
         return self.value in self._constant_fold_classes()
 
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from . import ConstantVariable
 
@@ -1689,6 +1690,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if inspect.isfunction(setter):
             return (descriptor, setter)
         return None
+
+    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
+        d = self.get_dict_vt(tx)
+        if d.contains(key):
+            value = d.getitem(key)
+            return not isinstance(value, variables.DeletedVariable)
+        return False
 
     def get_source_by_walking_mro(
         self, tx: "InstructionTranslator", name: str
