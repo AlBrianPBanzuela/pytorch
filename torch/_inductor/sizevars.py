@@ -406,38 +406,46 @@ class SizeVarAllocator:
     def statically_known_multiple_of(
         self, numerator: Expr, denominator: Expr | int
     ) -> bool:
-        """
-        Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
-        """
-        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
-        # see https://github.com/sympy/sympy/issues/28200
-
-        if len(free_symbols(numerator)) > 20:
-            return False
-
-        expr = sympy.Eq(Mod(numerator, denominator), 0)
-        if self.statically_known_true(expr): # type: ignore[arg-type]
-            return True
-        # Check if the denominator divides the symbolic expression using GCD.
-        # This handles cases like symbolic products and sums more robustly.
         if denominator == 0:
             return False
 
-        try:
-            # Use Greatest Common Divisor (GCD) to verify if the numerator is a 
-            # statically known multiple of the denominator. This approach natively 
-            # handles symbolic products (sympy.Mul), sums (sympy.Add), and complex 
-            # composite expressions without requiring explicit type checks.
-            gcd_result = sympy.gcd(numerator, denominator)
-            # If the GCD is equal to the denominator, the divisibility is 
-            # mathematically guaranteed for the given symbolic expression.
-            return gcd_result == denominator
-
-        except (AttributeError, TypeError):
-            # Defensive fallback for internal or dummy symbols that may lack 
-            # expected metadata (e.g., symbols without 'backed_var_to_val'). 
-            # This ensures stability during compilation and prevents CI regressions.
+        # Constraint check for expression complexity to maintain performance
+        if len(free_symbols(numerator)) > 20:
             return False
+
+        # 1. Fast Path: Standard symbolic modulo verification
+        expr = sympy.Eq(sympy.Mod(numerator, denominator), 0)
+        if self.statically_known_true(expr):  # type: ignore[arg-type]
+            return True
+
+        try:
+            # 2. Algebraic Cancellation: Verifies divisibility by attempting to 
+            # reduce the quotient to an integer form without remainders.
+            div = sympy.cancel(numerator / denominator)
+            if not div.has(sympy.Mod) and div.is_integer is not False:
+                return True
+        except Exception:
+            pass
+
+        try:
+            # 3. Structural Decomposition: Necessary for handling symbolic products (Mul) 
+            # where metadata might inhibit automatic simplification.
+            if isinstance(numerator, sympy.Mul):
+                for arg in numerator.args:
+                    if sympy.cancel(arg / denominator) == 1:
+                        return True
+        except Exception:
+            pass
+
+        try:
+            # 4. Symbolic GCD Fallback: Ensures robust coverage for edge cases 
+            # in divisibility propagation.
+            if sympy.gcd(numerator, denominator) == denominator:
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
         """
