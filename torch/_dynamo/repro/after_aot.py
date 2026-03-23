@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import typing
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
@@ -105,6 +106,8 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
 
+    from torch.distributed import GroupName
+
 
 log = logging.getLogger(__name__)
 
@@ -143,9 +146,10 @@ def _extract_distributed_info(
             continue
         _, kwargs = opt_args_kwargs
 
-        group_name = kwargs.get("group_name")
-        if not isinstance(group_name, str):
+        group_name_ = kwargs.get("group_name")
+        if not isinstance(group_name_, str):
             continue
+        group_name = typing.cast(GroupName, group_name_)
 
         if group_name in group_info:
             continue
