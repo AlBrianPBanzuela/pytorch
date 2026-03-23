@@ -14,9 +14,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-# Do not change workspace permissions for ROCm and s390x CI jobs
-# as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
+# Only change workspace permissions if passwordless sudo is available
+# (e.g. ROCm and s390x CI jobs lack it, and changing permissions
+# can leave the workspace in a bad state for cancelled jobs)
+if sudo -n true 2>/dev/null && [[ -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -249,7 +250,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
         export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
     else
         # ARC runners install clang-18 under /opt/clang-18 which is on PATH
-        export ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer)
+        ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer)
+        export ASAN_SYMBOLIZER_PATH
     fi
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
@@ -283,7 +285,15 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
 
+    # The ASAN runtime library name differs between installations:
+    # apt-installed clang uses libclang_rt.asan-x86_64.so (old convention),
+    # tarball clang on ARC runners uses libclang_rt.asan.so (new convention).
     LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan-x86_64.so)
+    if [ "$LD_PRELOAD" = "libclang_rt.asan-x86_64.so" ]; then
+        # clang returns the bare filename when it can't resolve the path,
+        # so fall back to the new naming convention.
+        LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan.so)
+    fi
     export LD_PRELOAD
     # Disable valgrind for asan
     export VALGRIND=OFF
@@ -364,6 +374,7 @@ test_python_smoke_b200() {
       inductor/test_torchinductor \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
+      test_varlen_attention \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
   assert_git_not_dirty
@@ -418,6 +429,7 @@ test_b200_symm_mem() {
 
 test_h100_cutlass_backend() {
   # cutlass backend tests for H100
+  git submodule update --init --depth 1 third_party/cutlass
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_backend -k "not addmm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
@@ -1900,6 +1912,8 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
+  # DEBUG
+  sleep 7200
   # Install numpy-2.0.2 and compatible scipy & numba versions
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
   TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)

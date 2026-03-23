@@ -186,6 +186,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     export USE_CUDA=1
   fi
+  # On ARC runners, clang-18 is installed under /opt/clang-18 without
+  # ldconfig registration, so the linker can't find the ASAN runtime.
+  # Add the clang runtime library directory to the library search path.
+  clang_rt_dir=$(dirname "$(clang --print-file-name=libclang_rt.asan.so)")
+  if [ -d "$clang_rt_dir" ]; then
+    export LD_LIBRARY_PATH="${clang_rt_dir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LIBRARY_PATH="${clang_rt_dir}${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  fi
   export USE_ASAN=1
   export REL_WITH_DEB_INFO=1
   export UBSAN_FLAGS="-fno-sanitize-recover=all"
