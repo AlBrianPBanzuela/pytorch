@@ -290,101 +290,6 @@ class OverlapPreservingBucketer:
                 checked_pgs.add(pg)
         return internode_pgs
 
-    def _bucketing_matches_across_ranks(
-        self,
-        all_buckets: list[CollBucket],
-    ) -> bool:
-        """Verify all ranks made identical bucketing decisions.
-
-        Defense-in-depth: even if the SPMD graph check passes, bucketing
-        decisions can still diverge due to different bucket keys, sizes, or
-        ordering. Detect and skip with diagnostics.
-        """
-        import torch.distributed as dist
-
-        if not dist.is_initialized() or dist.get_world_size() <= 1:
-            return True
-
-        local_details: list[tuple[str, int, int, list[str]]] = []
-        for b in all_buckets:
-            if len(b.collectives) <= 1:
-                continue
-            key = str(get_full_bucket_key(b.collectives[0], self.bucket_mode))
-            local_details.append(
-                (
-                    key,
-                    len(b.collectives),
-                    b.total_bytes,
-                    [n.name for n in b.collectives],
-                )
-            )
-        local_details.sort()
-
-        # Fingerprint for comparison (drop node names — they differ per rank)
-        fingerprint = [(d[0], d[1], d[2]) for d in local_details]
-
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-        from torch.distributed.distributed_c10d import _get_default_group
-
-        pg = _get_default_group()
-        world_size = dist.get_world_size()
-        with unset_fake_temporarily():
-            all_fingerprints: list[list[tuple[str, int, int]]] = [
-                [] for _ in range(world_size)
-            ]
-            dist.all_gather_object(all_fingerprints, fingerprint, pg)
-
-            all_details: list[list[tuple[str, int, int, list[str]]]] = [
-                [] for _ in range(world_size)
-            ]
-            dist.all_gather_object(all_details, local_details, pg)
-
-        if all(fp == all_fingerprints[0] for fp in all_fingerprints):
-            return True
-
-        from torch._inductor.fx_passes.overlap_scheduling import _find_uneven_sharding
-
-        lines = [
-            "=" * 80,
-            "OVERLAP BUCKETING MISMATCH — skipping bucketing to prevent NCCL timeout",
-            "=" * 80,
-            f"Rank {dist.get_rank()}, world_size={world_size}.",
-            "Bucketing decisions differ across ranks. Common cause: uneven Shard(0)",
-            "from parameter dimensions not divisible by world_size.",
-            "",
-        ]
-
-        uneven_lines = _find_uneven_sharding(self.graph.owning_module)
-        if uneven_lines:
-            lines.append("UNEVEN ALL-GATHER INPUTS (likely root cause):")
-            lines.extend(uneven_lines)
-            lines.append("")
-
-        for r in range(world_size):
-            lines.append(f"--- Rank {r}: {len(all_details[r])} buckets ---")
-            for key, n, total_bytes, names in all_details[r]:
-                mb = total_bytes / (1024 * 1024)
-                lines.append(
-                    f"  key={key}  n_colls={n}  size={mb:.1f}MiB  "
-                    f"nodes=[{', '.join(names)}]"
-                )
-            lines.append("")
-        lines.append("=" * 80)
-        report = "\n".join(lines)
-
-        print(report, flush=True)
-        bucket_log.warning("\n%s", report)
-
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_overlap_bucketing_mismatch",
-                "encoding": "string",
-            },
-            payload_fn=lambda: report,
-        )
-        return False
-
     def _bucket_collectives_impl(self) -> list[CollBucket]:
         """Find and apply bucket transformations for collectives."""
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -419,10 +324,6 @@ class OverlapPreservingBucketer:
                 buckets = self._find_buckets(collective_group, internode_pgs)
                 all_buckets.extend(buckets)
 
-        # Verify all ranks produced identical bucket decisions before applying.
-        if not self._bucketing_matches_across_ranks(all_buckets):
-            return []
-
         for coll_bucket in all_buckets:
             if len(coll_bucket.collectives) <= 1:
                 continue
@@ -437,7 +338,8 @@ class OverlapPreservingBucketer:
 
         # Clean up any remaining erased node references and cycles
         self.aug_graph.remove_erased_extra_deps()
-        self.aug_graph.remove_cyclic_extra_deps()
+        autofix = torch._inductor.config.aten_distributed_optimizations.overlap_scheduling_autofix_cycles
+        self.aug_graph.check_and_maybe_autofix_cyclic_extra_deps(autofix=autofix)
         additional_deps = self.aug_graph.get_all_extra_deps()
 
         for n, deps in additional_deps.items():
