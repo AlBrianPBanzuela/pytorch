@@ -387,7 +387,7 @@ def update_automatic_dynamic(
         # Do some logs (damn, I spend more code logging than I do actually doing
         # the updates lol)
         if is_update and old_entry.scalar != mut_entry.scalar:
-            symbolic_shape_log.info("marking %s as dynamic (from automatic dynamic)", name)
+            symbolic_shape_log.info("marking %s as dynamic (from automatic dynamic/PGO)", name)
             log.debug(
                 "automatic dynamic int %s val %s != %s",
                 name,
