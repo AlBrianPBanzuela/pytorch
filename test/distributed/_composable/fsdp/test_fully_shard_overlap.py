@@ -54,62 +54,6 @@ def _time_fn(fn: Callable):
     return start_event.elapsed_time(end_event)
 
 
-def _median(times: list[float]) -> float:
-    times = sorted(times)
-    return times[len(times) // 2]
-
-
-@contextlib.contextmanager
-def _delayed_foreach_reduce(comm_sleep_ms: int):
-    """Wrap foreach_reduce to add per-PG delay via separate CUDA streams.
-
-    Each process group gets its own delay stream, so delays for different PGs
-    run in parallel.  The RS event returned to FSDP is replaced with a delayed
-    event, making the compute-stream wait (which differs between HEAD and
-    HEAD~1) the distinguishing factor.
-    """
-    import torch.distributed.fsdp._fully_shard._fsdp_param_group as _pg_mod
-
-    orig = _pg_mod.foreach_reduce
-    delay_streams: dict[dist.ProcessGroup, torch.cuda.Stream] = {}
-
-    def wrapped(
-        fsdp_params,
-        unsharded_grads,
-        reduce_scatter_group,
-        reduce_scatter_stream,
-        *args,
-        **kwargs,
-    ):
-        result = orig(
-            fsdp_params,
-            unsharded_grads,
-            reduce_scatter_group,
-            reduce_scatter_stream,
-            *args,
-            **kwargs,
-        )
-        rs_input, rs_event, *rest = result
-
-        if reduce_scatter_group not in delay_streams:
-            delay_streams[reduce_scatter_group] = device_module.Stream()
-        ds = delay_streams[reduce_scatter_group]
-        ds.wait_event(rs_event)
-        with device_module.stream(ds):
-            device_module._sleep(int(comm_sleep_ms * get_cycles_per_ms()))
-            delayed_event = ds.record_event()
-
-        return (rs_input, delayed_event, *rest)
-
-    dist.barrier()
-    _pg_mod.foreach_reduce = wrapped
-    try:
-        yield
-    finally:
-        dist.barrier()
-        _pg_mod.foreach_reduce = orig
-
-
 class TestFullyShardOverlap(FSDPTest):
     """
     NOTE: Testing stream overlap in PyTorch CI is tricky.
@@ -192,8 +136,8 @@ class TestFullyShardOverlap(FSDPTest):
             with patch_all_gather(delayed_all_gather):
                 model(inp)
 
-        ref_fwd_time = self._time_fn(ref_fwd)
-        fwd_time = self._time_fn(fwd)
+        ref_fwd_time = _time_fn(ref_fwd)
+        fwd_time = _time_fn(fwd)
         # Forward: only 1st all-gather is exposed
         # NOTE: Do not enforce the expected forward time due to flakiness in CI
         # expected_fwd_time = comm_sleep_ms + num_linears * compute_sleep_ms + buffer_ms
@@ -234,8 +178,8 @@ class TestFullyShardOverlap(FSDPTest):
                 loss = model(inp).sum()
                 loss.backward()
 
-        ref_fwd_bwd_time = self._time_fn(ref_fwd_bwd)
-        fwd_bwd_time = self._time_fn(fwd_bwd)
+        ref_fwd_bwd_time = _time_fn(ref_fwd_bwd)
+        fwd_bwd_time = _time_fn(fwd_bwd)
         # Backward: only 1st all-gather and last reduce-scatter are exposed;
         # double the backward compute since computing two gradients per layer
         # NOTE: Do not enforce the expected forward-backward time due to
@@ -288,10 +232,8 @@ class TestFullyShardOverlap(FSDPTest):
 
         run_train_steps(1, False)  # warmup CUDA and allocator
         num_iters = 5
-        baseline_time = self._time_fn(
-            functools.partial(run_train_steps, num_iters, False)
-        )
-        test_time = self._time_fn(functools.partial(run_train_steps, num_iters, True))
+        baseline_time = _time_fn(functools.partial(run_train_steps, num_iters, False))
+        test_time = _time_fn(functools.partial(run_train_steps, num_iters, True))
 
         buffer_ms = 4  # CPU delays and copies
         # Baseline: FSDP all-gather is exposed since the FSDP module waits for
@@ -312,18 +254,6 @@ class TestFullyShardOverlap(FSDPTest):
         # ms, so we relax the baseline check to just that it is greater than
         # the test time rather than the expected test time
         self.assertGreater(baseline_time, test_time)
-
-    def _time_fn(self, fn: Callable):
-        start_event = device_module.Event(enable_timing=True)
-        end_event = device_module.Event(enable_timing=True)
-        dist.barrier()
-        device_module.synchronize()
-        start_event.record()
-        fn()
-        end_event.record()
-        device_module.synchronize()
-        elapsed_time = start_event.elapsed_time(end_event)
-        return elapsed_time
 
 
 class Matmul(torch.autograd.Function):
@@ -365,21 +295,13 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
     @skip_if_lt_x_gpu(4)
     @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
     def test_fully_shard_per_param_mesh_training_overlap(self):
-        """Test per-PG reduce-scatter state for per-param mesh FSDP.
+        """Verify per-param-group reduce-scatter state avoids cross-group
+        serialization in per-param-mesh FSDP with expert parallelism."""
+        from torch.distributed._composable.replicate_with_fsdp import replicate
 
-        With per-param mesh, each module has two param groups using different
-        process groups.  Per-PG reduce-scatter state (HEAD) lets peer param
-        group 0 skip the wait on the previous RS, while shared state (HEAD~1)
-        forces every param group to wait.  When comm_sleep > compute_sleep,
-        this extra wait on HEAD~1 adds exposed RS time to the critical path.
-
-        Uses a Transformer with expert parallelism so each fully_shard block
-        naturally produces two param groups (DP and expert-FSDP).
-        """
         ep_degree = 2
         efsdp_size = self.world_size // ep_degree
         comm_sleep_ms = 100
-
         world_mesh = init_device_mesh(
             device_type.type,
             (self.world_size,),
@@ -390,46 +312,15 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         ep_mesh = sparse_mesh["ep"]
         dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
         efsdp_mesh_info = FSDPMeshInfo(mesh=sparse_mesh["efsdp"], shard_mesh_dim=0)
-
         model_args = ModelArgs(
-            n_layers=4,
+            n_layers=20,
             vocab_size=1024,
             max_seq_len=64,
-            dim=1024,
+            dim=1280,
             n_heads=16,
             dropout_p=0.0,
-            num_experts=8,
+            num_experts=2,
         )
-        torch.manual_seed(42)
-        model = Transformer(model_args)
-        Transformer.parallelize(
-            model, tp_mesh=None, use_seq_parallel=False, ep_mesh=ep_mesh
-        )
-
-        for block in model.layers:
-            expert_params = set(block.expert_layer.experts.parameters())
-
-            def _shard_placement_fn(param, _expert_params=expert_params):
-                if param in _expert_params:
-                    return ShardPlacementResult(
-                        placement=Shard(0), mesh_info=efsdp_mesh_info
-                    )
-                return ShardPlacementResult(placement=Shard(0), mesh_info=dp_mesh_info)
-
-            fully_shard(block, mesh=dp_mesh, shard_placement_fn=_shard_placement_fn)
-        fully_shard(
-            [model.tok_embeddings, model.norm, model.output],
-            mesh=dp_mesh,
-            reshard_after_forward=True,
-        )
-        fully_shard(model, mesh=dp_mesh, reshard_after_forward=True)
-
-        blocks = model.layers
-        for i in range(len(blocks) - 1):
-            blocks[i].set_modules_to_forward_prefetch([blocks[i + 1]])
-        for i in range(1, len(blocks)):
-            blocks[i].set_modules_to_backward_prefetch([blocks[i - 1]])
-
         inp = torch.randint(
             0,
             model_args.vocab_size,
@@ -437,43 +328,147 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             device=device_type.type,
         )
 
-        def fwd_bwd():
-            model(inp).sum().backward()
+        def _build_fsdp_model():
+            torch.manual_seed(42)
+            model = Transformer(model_args)
+            Transformer.parallelize(
+                model, tp_mesh=None, use_seq_parallel=False, ep_mesh=ep_mesh
+            )
+            for block in model.layers:
+                expert_params = set(block.expert_layer.experts.parameters())
 
-        # Warmup
-        for _ in range(5):
-            fwd_bwd()
-            model.zero_grad(set_to_none=True)
+                def _shard_placement_fn(param, _expert_params=expert_params):
+                    if param in _expert_params:
+                        return ShardPlacementResult(
+                            placement=Shard(0), mesh_info=efsdp_mesh_info
+                        )
+                    return ShardPlacementResult(
+                        placement=Shard(0), mesh_info=dp_mesh_info
+                    )
 
-        # Baseline without delayed RS
-        baseline_times = [_time_fn(fwd_bwd) for _ in range(5)]
-        for _ in range(5):
-            model.zero_grad(set_to_none=True)
+                fully_shard(block, mesh=dp_mesh, shard_placement_fn=_shard_placement_fn)
+            fully_shard(
+                [model.tok_embeddings, model.norm, model.output],
+                mesh=dp_mesh,
+                reshard_after_forward=True,
+            )
+            fully_shard(model, mesh=dp_mesh, reshard_after_forward=True)
+            blocks = model.layers
+            for i in range(len(blocks) - 1):
+                blocks[i].set_modules_to_forward_prefetch([blocks[i + 1]])
+            for i in range(1, len(blocks)):
+                blocks[i].set_modules_to_backward_prefetch([blocks[i - 1]])
+            return model
 
-        # Measure with delayed reduce-scatter (per-PG delay streams)
+        def _build_replicate_model():
+            torch.manual_seed(42)
+            model = Transformer(model_args)
+            Transformer.parallelize(
+                model, tp_mesh=None, use_seq_parallel=False, ep_mesh=ep_mesh
+            )
+            for block in model.layers:
+                expert_params = set(block.expert_layer.experts.parameters())
+                replicate(block, mesh=dp_mesh, ignored_params=expert_params)
+            replicate([model.tok_embeddings, model.norm, model.output], mesh=dp_mesh)
+            replicate(model, mesh=dp_mesh)
+            return model
+
+        @contextlib.contextmanager
+        def _delayed_foreach_reduce(sleep_ms: int):
+            """Inject a CUDA sleep after each reduce-scatter / all-reduce.
+
+            Each process group gets its own delay stream so that delays for
+            different groups run concurrently (just like real NCCL ops on
+            separate communicators).  The event returned to FSDP is replaced
+            with a delayed event on this per-group stream.
+
+            This amplifies the difference between per-group and shared RS
+            state:
+            - Per-group RS state: the compute stream waits only on its own
+              group's delayed event, so dp and efsdp delays overlap.
+            - Shared RS state: the compute stream waits on *all* groups'
+              delayed events, serializing the dp and efsdp delays.
+            """
+            import torch.distributed.fsdp._fully_shard._fsdp_param_group as _pg_mod
+
+            orig = _pg_mod.foreach_reduce
+            # One delay stream per process group so that sleeps for different
+            # groups (e.g. dp vs efsdp reduce-scatter) execute in parallel,
+            # mirroring how real NCCL ops on separate communicators overlap.
+            delay_streams: dict[dist.ProcessGroup, torch.cuda.Stream] = {}
+
+            def wrapped(
+                fsdp_params,
+                unsharded_grads,
+                reduce_scatter_group,
+                reduce_scatter_stream,
+                *args,
+                **kwargs,
+            ):
+                result = orig(
+                    fsdp_params,
+                    unsharded_grads,
+                    reduce_scatter_group,
+                    reduce_scatter_stream,
+                    *args,
+                    **kwargs,
+                )
+                rs_input, rs_event, *rest = result
+                if reduce_scatter_group not in delay_streams:
+                    delay_streams[reduce_scatter_group] = device_module.Stream()
+                ds = delay_streams[reduce_scatter_group]
+                ds.wait_event(rs_event)
+                with device_module.stream(ds):
+                    device_module._sleep(int(sleep_ms * get_cycles_per_ms()))
+                    delayed_event = ds.record_event()
+                return (rs_input, delayed_event, *rest)
+
+            dist.barrier()
+            _pg_mod.foreach_reduce = wrapped
+            try:
+                yield
+            finally:
+                dist.barrier()
+                _pg_mod.foreach_reduce = orig
+
+        # Both models measured under _delayed_foreach_reduce so the delay
+        # applies uniformly to foreach_reduce (all-reduce for replicate,
+        # reduce-scatter for FSDP).
         with _delayed_foreach_reduce(comm_sleep_ms):
-            for _ in range(3):
-                fwd_bwd()
-                model.zero_grad(set_to_none=True)
-            delayed_times = [_time_fn(fwd_bwd) for _ in range(5)]
-            for _ in range(5):
-                model.zero_grad(set_to_none=True)
+            # --- replicate + EP (baseline) ---
+            rep_model = _build_replicate_model()
 
-        baseline = _median(baseline_times)
-        delayed = _median(delayed_times)
-        overhead = delayed - baseline
-        # 2 param groups * 4 layers * comm_sleep = total RS sleep injected.
-        # With per-PG state (HEAD), only the last peer waits per module,
-        # giving overhead ~= (N+1)/(2N) * total_rs.  With shared state
-        # (HEAD~1), peer 0 also waits on the previous module's RS, pushing
-        # overhead much higher.  The 0.75 threshold separates them.
-        n_layers = model_args.n_layers
-        total_rs = 2 * n_layers * comm_sleep_ms
+            def rep_fwd_bwd():
+                rep_model(inp).sum().backward()  # noqa: F821
+
+            for _ in range(5):
+                rep_fwd_bwd()
+                rep_model.zero_grad(set_to_none=True)
+            rep_time = _time_fn(rep_fwd_bwd)
+            rep_model.zero_grad(set_to_none=True)
+            del rep_model
+            # --- FSDP + EP ---
+            fsdp_model = _build_fsdp_model()
+
+            def fsdp_fwd_bwd():
+                fsdp_model(inp).sum().backward()  # noqa: F821
+
+            for _ in range(5):
+                fsdp_fwd_bwd()
+                fsdp_model.zero_grad(set_to_none=True)
+            fsdp_time = _time_fn(fsdp_fwd_bwd)
+            fsdp_model.zero_grad(set_to_none=True)
+        # replicate: 1 all-reduce/block → N+1 serialized waits.
+        # FSDP: 2 reduce-scatters/block (dp + efsdp).
+        #   Per-group RS state: dp reduce-scatter overlaps with efsdp's
+        #     wait → ~N+1 waits ≈ replicate (ratio ≈ 1.0).
+        #   Shared RS state: both reduce-scatters serialize → ~2N+1
+        #     waits → ratio ≈ (2N+1)/(N+1) → 1.95 for N=20.
         self.assertLess(
-            overhead,
-            0.75 * total_rs,
-            f"RS overhead {overhead:.0f}ms >= 75% of total RS {total_rs}ms; "
-            f"per-PG RS state may not be preventing cross-PG stalls",
+            fsdp_time / rep_time,
+            1.5,
+            f"FSDP/replicate ratio {fsdp_time / rep_time:.2f} >= 1.5; "
+            f"per-group RS state may not be preventing cross-group stalls",
         )
 
 
