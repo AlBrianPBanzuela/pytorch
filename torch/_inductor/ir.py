@@ -6347,6 +6347,13 @@ class ExternKernel(InputsKernel):
         Callable[[Any, Any], Any],
         dict[sympy.Symbol, pytree.KeyPath] | None,
     ]:
+        """Partition kernel args into tensor and non-tensor, realize tensor inputs,
+        re-run fake tensor propagation with the realized strides, and return
+        (example_output, tensor_args, non_tensor_args, unflatten_args, unbacked_bindings).
+
+        unflatten_args(new_tensor_args, new_non_tensor_args) reconstructs the
+        original (args, kwargs) tree from replacement lists.
+        """
         binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
