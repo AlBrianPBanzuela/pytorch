@@ -1128,10 +1128,10 @@ class aten_distributed_optimizations:
     # mismatches and hangs.
     spmd_check: bool = True
 
-    # When True, crash with RuntimeError on SPMD mismatch instead of warning.
-    # Fails fast instead of risking silent NCCL hang.
-    # TODO(ivankobzarev): enable by default after real-world testing.
-    spmd_check_crash_on_mismatch: bool = False
+    # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
+    # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
+    # TODO(ivankobzarev): change default to "error" after real-world testing.
+    spmd_mismatch: Literal["warn", "error"] = "warn"
 
 
 def parallel_compile_enabled_internally() -> bool:

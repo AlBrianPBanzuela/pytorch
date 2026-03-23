@@ -5,8 +5,8 @@ reordering passes. Non-SPMD graphs cause NCCL collective ordering
 mismatches and hangs.
 """
 
+import hashlib
 import logging
-import zlib
 from collections import Counter
 
 import torch
@@ -29,20 +29,22 @@ def _compute_hash(gm: torch.fx.GraphModule) -> int | None:
     """
     from torch._inductor.codecache import BypassFxGraphCache, FxGraphCachePickler
 
-    hash_data: list[object] = []
-    for n in gm.graph.nodes:
-        if n.op != "call_function":
-            continue
-        hash_data.append((str(n.target), n.meta.get("val")))
-
     try:
         pickler = FxGraphCachePickler(gm, device_id_agnostic=True)
-        return zlib.crc32(pickler.dumps(hash_data))
-    except BypassFxGraphCache as e:
+        data = pickler.dumps(
+            tuple(
+                (str(n.target), n.meta.get("val"))
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+            )
+        )
+        digest = hashlib.blake2b(data, digest_size=8).digest()
+        return int.from_bytes(digest, "big", signed=True)
+    except BypassFxGraphCache:
         # FxGraphCachePickler can't serialize certain objects:
         # mkldnn tensors, BackwardState, torchbind objects, or general
         # pickle failures. Skip the SPMD check gracefully.
-        log.warning("SPMD check: skipping due to unpicklable graph objects: %s", e)
+        log.warning("SPMD check: skipping, unpicklable graph objects", exc_info=True)
         return None
 
 
@@ -140,10 +142,10 @@ def spmd_check(gm: torch.fx.GraphModule) -> bool:
         payload_fn=lambda: report,
     )
 
-    if config.aten_distributed_optimizations.spmd_check_crash_on_mismatch:
+    if config.aten_distributed_optimizations.spmd_mismatch == "error":
         raise RuntimeError(
             "SPMD graph verification failed. "
-            "Set aten_distributed_optimizations.spmd_check_crash_on_mismatch=False "
+            'Set aten_distributed_optimizations.spmd_mismatch="warn" '
             "to warn instead of fail.\n" + report
         )
 

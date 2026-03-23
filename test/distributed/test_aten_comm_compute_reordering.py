@@ -1289,11 +1289,11 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             **get_bucket_patches(),
             "aten_distributed_optimizations.enable_overlap_scheduling": True,
             "aten_distributed_optimizations.spmd_check": True,
-            "aten_distributed_optimizations.spmd_check_crash_on_mismatch": True,
+            "aten_distributed_optimizations.spmd_mismatch": "error",
         }
     )
     def test_spmd_verify_crashes_on_mismatch(self):
-        """Test that spmd_check_crash_on_mismatch raises on non-SPMD graphs."""
+        """Test that spmd_mismatch="error" raises on non-SPMD graphs."""
 
         def func(a, *, ranks):
             # rank 0 gets (4, 8), rank 1 gets (3, 8) — different node counts
