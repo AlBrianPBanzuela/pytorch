@@ -318,6 +318,8 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
     int64_t other_padding = other.stride(1) - other.size(0);
 
     if (self_padding > 15 || other_padding > 15 || self_padding % 4 != 0 || other_padding % 4 != 0) {
+      TORCH_WARN_ONCE(
+          "MPS mm implementation has a known issue with this shape, dtype and slice. Dispatching to metal implementation instead. This may impact performance.");
       return true;
     }
   }
