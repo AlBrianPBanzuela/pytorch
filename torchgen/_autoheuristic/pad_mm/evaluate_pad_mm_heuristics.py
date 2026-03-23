@@ -2,79 +2,82 @@
 
 import argparse
 import csv
-import time
-import torch
 import functools
-from typing import Tuple, Optional
+import time
+
+import torch
+from torch._inductor.autoheuristic.autoheuristic_utils import AHContext, AHMetadata
 from torch._inductor.fx_passes.pad_mm import get_alignment_size_dtype
 from torch._inductor.utils import get_gpu_shared_memory
-from torch._inductor.autoheuristic.autoheuristic_utils import AHMetadata, AHContext
+
 
 def fits_in_memory(dtype, m: int, k: int, n: int) -> bool:
     threshold_memory = torch.cuda.get_device_properties(0).total_memory / 4
     return dtype.itemsize * (m * k + k * n + m * n) < threshold_memory
 
+
 def set_precision(dtype) -> None:
     precision = "highest" if dtype == torch.float32 else "high"
     torch.set_float32_matmul_precision(precision)
 
-def get_heuristic_decision(m: int, k: int, n: int, dtype: torch.dtype) -> Optional[str]:
-    from torch._inductor.fx_passes.pad_mm import (
-        get_context, get_padded_length, get_alignment_size, pad_mm_operations, pad_mm_precondition
-    )
+
+def get_heuristic_decision(m: int, k: int, n: int, dtype: torch.dtype) -> str | None:
     from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, LocalFeedback
+    from torch._inductor.fx_passes.pad_mm import (
+        get_alignment_size,
+        get_context,
+        get_padded_length,
+        pad_mm_operations,
+        pad_mm_precondition,
+    )
 
-    orig_autoheuristic_use = torch._inductor.config.autoheuristic_use
+    torch._inductor.config.autoheuristic_use = "pad_mm"
 
-    try:
-        torch._inductor.config.autoheuristic_use = "pad_mm"
-
-        if not torch._inductor.config.run_autoheuristic("pad_mm"):
-            return None
-
-        a = torch.randn(m, k, dtype=dtype, device="cuda")
-        b = torch.randn(k, n, dtype=dtype, device="cuda")
-
-        m_padded_length = get_padded_length(m, get_alignment_size(a))
-        k_padded_length = get_padded_length(k, get_alignment_size(a))
-        n_padded_length = get_padded_length(n, get_alignment_size(b))
-
-        context = get_context(
-            a, b,
-            mat1_pre_padded=False,
-            mat2_pre_padded=False,
-            m_padded_length=m_padded_length,
-            k_padded_length=k_padded_length,
-            n_padded_length=n_padded_length,
-        )
-
-        def dummy_feedback(choice: str) -> float:
-            return 1.0
-
-        def fallback() -> str:
-            return "autotune"
-
-        autoheuristic = AutoHeuristic(
-            fallback=fallback,
-            choices=["orig", "pad"],
-            feedback=LocalFeedback(dummy_feedback),
-            context=context,
-            name="pad_mm",
-            augment_context=pad_mm_operations(),
-            precondition=pad_mm_precondition,
-        )
-
-        choice = autoheuristic.get_choice()
-        # Return the actual choice made by the heuristic
-        # "autotune" means fallback to benchmarking (heuristic not confident)
-        return choice
-
-    except:
+    if not torch._inductor.config.run_autoheuristic("pad_mm"):
         return None
-    finally:
-        torch._inductor.config.autoheuristic_use = orig_autoheuristic_use
 
-def benchmark_both_choices(m: int, k: int, n: int, dtype: torch.dtype, num_reps: int = 3) -> Tuple[float, float]:
+    a = torch.randn(m, k, dtype=dtype, device="cuda")
+    b = torch.randn(k, n, dtype=dtype, device="cuda")
+
+    m_padded_length = get_padded_length(m, get_alignment_size(a))
+    k_padded_length = get_padded_length(k, get_alignment_size(a))
+    n_padded_length = get_padded_length(n, get_alignment_size(b))
+
+    context = get_context(
+        a,
+        b,
+        mat1_pre_padded=False,
+        mat2_pre_padded=False,
+        m_padded_length=m_padded_length,
+        k_padded_length=k_padded_length,
+        n_padded_length=n_padded_length,
+    )
+
+    def dummy_feedback(choice: str) -> float:
+        return 1.0
+
+    def fallback() -> str:
+        return "autotune"
+
+    autoheuristic = AutoHeuristic(
+        fallback=fallback,
+        choices=["orig", "pad"],
+        feedback=LocalFeedback(dummy_feedback),
+        context=context,
+        name="pad_mm",
+        augment_context=pad_mm_operations(),
+        precondition=pad_mm_precondition,
+    )
+
+    choice = autoheuristic.get_choice()
+    # Return the actual choice made by the heuristic
+    # "autotune" means fallback to benchmarking (heuristic not confident)
+    return choice
+
+
+def benchmark_both_choices(
+    m: int, k: int, n: int, dtype: torch.dtype, num_reps: int = 3
+) -> tuple[float, float]:
     set_precision(dtype)
     a = torch.randn(m, k, dtype=dtype, device="cuda")
     b = torch.randn(k, n, dtype=dtype, device="cuda")
@@ -95,7 +98,11 @@ def benchmark_both_choices(m: int, k: int, n: int, dtype: torch.dtype, num_reps:
 
     orig_time = benchmark_fn(lambda: torch.mm(a, b))
 
-    from torch._inductor.fx_passes.pad_mm import get_alignment_size, get_padded_length, pad_mm
+    from torch._inductor.fx_passes.pad_mm import (
+        get_alignment_size,
+        get_padded_length,
+        pad_mm,
+    )
 
     m_padded_length = get_padded_length(a.shape[0], get_alignment_size(a))
     k_padded_length = get_padded_length(a.shape[1], get_alignment_size(a))
@@ -110,20 +117,21 @@ def benchmark_both_choices(m: int, k: int, n: int, dtype: torch.dtype, num_reps:
     pad_time = benchmark_fn(pad_fn)
     return orig_time, pad_time
 
+
 def load_shapes_from_csv(csv_file: str) -> list:
     shapes = []
     try:
-        with open(csv_file, 'r') as f:
+        with open(csv_file) as f:
             reader = csv.DictReader(f)
             for row in reader:
-                m, k, n = int(row['M']), int(row['K']), int(row['N'])
-                dtype_str = row['dtype']
+                m, k, n = int(row["M"]), int(row["K"]), int(row["N"])
+                dtype_str = row["dtype"]
 
-                if dtype_str == 'float16':
+                if dtype_str == "float16":
                     dtype = torch.float16
-                elif dtype_str == 'bfloat16':
+                elif dtype_str == "bfloat16":
                     dtype = torch.bfloat16
-                elif dtype_str == 'float32':
+                elif dtype_str == "float32":
                     dtype = torch.float32
                 else:
                     continue
@@ -136,9 +144,11 @@ def load_shapes_from_csv(csv_file: str) -> list:
         print(f"Error loading shapes from {csv_file}: {e}")
         return []
 
+
 @functools.cache
 def get_shared_mem_size():
     return get_gpu_shared_memory()
+
 
 def check_shape_passes_precondition(m: int, k: int, n: int, dtype: torch.dtype) -> bool:
     """
@@ -147,7 +157,7 @@ def check_shape_passes_precondition(m: int, k: int, n: int, dtype: torch.dtype) 
     This uses the exact same pad_mm_precondition function that the AutoHeuristic system
     uses, avoiding hardcoded magic numbers by delegating to the source of truth.
     """
-    from torch._inductor.autoheuristic.autoheuristic_utils import pad_mm_precondition, AHMetadata, AHContext
+    from torch._inductor.autoheuristic.autoheuristic_utils import pad_mm_precondition
 
     shared_memory = get_shared_mem_size()
     device_capa = torch.cuda.get_device_capability()
@@ -157,7 +167,7 @@ def check_shape_passes_precondition(m: int, k: int, n: int, dtype: torch.dtype) 
         shared_memory=shared_memory,
         device_capa=device_capa,
         choices=["orig", "pad"],  # Required but not used for precondition check
-        name="pad_mm"  # Required but not used for precondition check
+        name="pad_mm",  # Required but not used for precondition check
     )
 
     context = AHContext()
@@ -167,6 +177,7 @@ def check_shape_passes_precondition(m: int, k: int, n: int, dtype: torch.dtype) 
 
     # Use the actual pad_mm_precondition function - no hardcoded values!
     return pad_mm_precondition(metadata, context)
+
 
 def filter_shapes(shapes: list) -> list:
     filtered = []
@@ -196,7 +207,7 @@ def filter_shapes(shapes: list) -> list:
         # This shape is suitable for evaluation
         filtered.append((m, k, n, dtype))
 
-    print(f"Filtering results:")
+    print("Filtering results:")
     print(f"  Already aligned (skipped): {aligned_count}")
     print(f"  Failed pad_mm_precondition (skipped): {precondition_failed_count}")
     print(f"  Too large for memory (skipped): {memory_count}")
@@ -204,12 +215,24 @@ def filter_shapes(shapes: list) -> list:
 
     return filtered
 
+
 def main():
-    parser = argparse.ArgumentParser(description='Evaluate trained AutoHeuristics for pad_mm optimization')
-    parser.add_argument('csv_file', help='Path to CSV file with M,K,N,dtype columns')
-    parser.add_argument('--num-reps', type=int, default=3, help='Benchmark repetitions (default: 3)')
-    parser.add_argument('--device', type=int, default=None, help='CUDA device (default: current)')
-    parser.add_argument('--max-shapes', type=int, default=10000, help='Max shapes to test (default: 10000)')
+    parser = argparse.ArgumentParser(
+        description="Evaluate trained AutoHeuristics for pad_mm optimization"
+    )
+    parser.add_argument("csv_file", help="Path to CSV file with M,K,N,dtype columns")
+    parser.add_argument(
+        "--num-reps", type=int, default=3, help="Benchmark repetitions (default: 3)"
+    )
+    parser.add_argument(
+        "--device", type=int, default=None, help="CUDA device (default: current)"
+    )
+    parser.add_argument(
+        "--max-shapes",
+        type=int,
+        default=10000,
+        help="Max shapes to test (default: 10000)",
+    )
 
     args = parser.parse_args()
 
@@ -231,7 +254,7 @@ def main():
         return
 
     if len(shapes) > args.max_shapes:
-        shapes = shapes[:args.max_shapes]
+        shapes = shapes[: args.max_shapes]
         print(f"Limited to first {args.max_shapes} shapes")
 
     print(f"Evaluating {len(shapes)} shapes with {args.num_reps} reps each")
@@ -239,15 +262,15 @@ def main():
 
     total_decisions = 0
     correct_decisions = 0
-    true_positives = 0   # Chose pad, should pad
-    true_negatives = 0   # Chose orig, should orig
+    true_positives = 0  # Chose pad, should pad
+    true_negatives = 0  # Chose orig, should orig
     false_positives = 0  # Chose pad, should orig
     false_negatives = 0  # Chose orig, should pad
     skipped_shapes = 0
     autotune_shapes = 0
 
-    tp_speedups = []     # Speed-up percentages for true positives
-    fp_slowdowns = []    # Speed-down percentages for false positives
+    tp_speedups = []  # Speed-up percentages for true positives
+    fp_slowdowns = []  # Speed-down percentages for false positives
 
     for i, (m, k, n, dtype) in enumerate(shapes, 1):
         try:
@@ -257,7 +280,7 @@ def main():
             print(f"  Heuristic: {heuristic_choice}")
 
             if heuristic_choice is None:
-                print(f"  (Skipped - error)")
+                print("  (Skipped - error)")
                 skipped_shapes += 1
                 continue
 
@@ -270,13 +293,13 @@ def main():
             if heuristic_choice == "autotune":
                 # Heuristic punted to benchmarking - this is correct behavior for small/uncertain shapes
                 autotune_shapes += 1
-                print(f"  Heuristic chose to benchmark (conservative)")
+                print("  Heuristic chose to benchmark (conservative)")
             else:
                 # Heuristic made a confident decision - evaluate accuracy
                 total_decisions += 1
                 if heuristic_choice == ground_truth:
                     correct_decisions += 1
-                    print(f"  ✓ CORRECT")
+                    print("  ✓ CORRECT")
                     if heuristic_choice == "pad":
                         true_positives += 1  # Correctly chose pad
                         # Calculate speed-up: (orig_time - pad_time) / orig_time * 100
@@ -286,7 +309,7 @@ def main():
                     else:
                         true_negatives += 1  # Correctly chose orig
                 else:
-                    print(f"  ✗ WRONG")
+                    print("  ✗ WRONG")
                     if heuristic_choice == "pad" and ground_truth == "orig":
                         false_positives += 1
                         # Calculate speed-down: (pad_time - orig_time) / orig_time * 100
@@ -296,8 +319,10 @@ def main():
                     elif heuristic_choice == "orig" and ground_truth == "pad":
                         false_negatives += 1
 
-            confident_rate = float(total_decisions) / float(i+1)
-            print(f"  Confidence Rate: {total_decisions}/{i+1} ({100 * confident_rate:.1f}%)")
+            confident_rate = float(total_decisions) / float(i + 1)
+            print(
+                f"  Confidence Rate: {total_decisions}/{i + 1} ({100 * confident_rate:.1f}%)"
+            )
             if total_decisions > 0:
                 accuracy = correct_decisions / total_decisions * 100
                 tp_rate = true_positives / total_decisions * 100
@@ -306,10 +331,20 @@ def main():
                 fn_rate = false_negatives / total_decisions * 100
 
                 # Compute average speedup/slowdown
-                avg_tp_speedup = sum(tp_speedups) / len(tp_speedups) if tp_speedups else 0
-                avg_fp_slowdown = sum(fp_slowdowns) / len(fp_slowdowns) if fp_slowdowns else 0
+                avg_tp_speedup = (
+                    sum(tp_speedups) / len(tp_speedups) if tp_speedups else 0
+                )
+                avg_fp_slowdown = (
+                    sum(fp_slowdowns) / len(fp_slowdowns) if fp_slowdowns else 0
+                )
 
-                print(f"  Accuracy: {correct_decisions}/{total_decisions} ({accuracy:.1f}%) | TP: {tp_rate:.1f}% (avg speedup: {avg_tp_speedup:.1f}%) | TN: {tn_rate:.1f}% | FP: {fp_rate:.1f}% (avg slowdown: {avg_fp_slowdown:.1f}%) | FN: {fn_rate:.1f}%")
+                print(
+                    f"  Accuracy: {correct_decisions}/{total_decisions} ({accuracy:.1f}%) "
+                    f"| TP: {tp_rate:.1f}% (avg speedup: {avg_tp_speedup:.1f}%) "
+                    f"| TN: {tn_rate:.1f}% "
+                    f"| FP: {fp_rate:.1f}% (avg slowdown: {avg_fp_slowdown:.1f}%)"
+                    f"| FN: {fn_rate:.1f}%"
+                )
 
         except Exception as e:
             print(f"  Error: {e}")
@@ -332,28 +367,47 @@ def main():
         avg_tp_speedup = sum(tp_speedups) / len(tp_speedups) if tp_speedups else 0
         avg_fp_slowdown = sum(fp_slowdowns) / len(fp_slowdowns) if fp_slowdowns else 0
 
-        print(f"\nConfident decision accuracy: {accuracy:.1f}% ({correct_decisions}/{total_decisions})")
+        print(
+            f"\nConfident decision accuracy: {accuracy:.1f}% ({correct_decisions}/{total_decisions})"
+        )
 
         if tp_speedups:
-            print(f"True Positives (chose pad, should pad): {tp_rate:.1f}% ({true_positives}) | Avg speed-up: {avg_tp_speedup:.1f}%")
+            print(
+                f"True Positives (chose pad, should pad): {tp_rate:.1f}% ({true_positives}) "
+                f"| Avg speed-up: {avg_tp_speedup:.1f}%"
+            )
         else:
-            print(f"True Positives (chose pad, should pad): {tp_rate:.1f}% ({true_positives})")
+            print(
+                f"True Positives (chose pad, should pad): {tp_rate:.1f}% ({true_positives})"
+            )
 
-        print(f"True Negatives (chose orig, should orig): {tn_rate:.1f}% ({true_negatives})")
+        print(
+            f"True Negatives (chose orig, should orig): {tn_rate:.1f}% ({true_negatives})"
+        )
 
         if fp_slowdowns:
-            print(f"False Positives (chose pad, should orig): {fp_rate:.1f}% ({false_positives}) | Avg speed-down: {avg_fp_slowdown:.1f}%")
+            print(
+                f"False Positives (chose pad, should orig): {fp_rate:.1f}% ({false_positives}) "
+                f"| Avg speed-down: {avg_fp_slowdown:.1f}%"
+            )
         else:
-            print(f"False Positives (chose pad, should orig): {fp_rate:.1f}% ({false_positives})")
+            print(
+                f"False Positives (chose pad, should orig): {fp_rate:.1f}% ({false_positives})"
+            )
 
-        print(f"False Negatives (chose orig, should pad): {fn_rate:.1f}% ({false_negatives})")
+        print(
+            f"False Negatives (chose orig, should pad): {fn_rate:.1f}% ({false_negatives})"
+        )
     else:
         print("No confident decisions made!")
 
     total_evaluated = total_decisions + autotune_shapes
     if total_evaluated > 0:
         confident_rate = total_decisions / total_evaluated * 100
-        print(f"\nConfidence rate: {confident_rate:.1f}% ({total_decisions}/{total_evaluated} made confident decisions)")
+        print(
+            f"\nConfidence rate: {confident_rate:.1f}% ({total_decisions}/{total_evaluated} made confident decisions)"
+        )
+
 
 if __name__ == "__main__":
     main()
