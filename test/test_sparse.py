@@ -23,7 +23,7 @@ from torch.testing._internal.common_cuda import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
-     expectedFailureMPSComplex, largeTensorTest)
+     largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -1961,7 +1961,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
 
     @coalescedonoff
-    @expectedFailureMPSComplex
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_norm(self, device, dtype, coalesced):
@@ -5770,10 +5769,7 @@ class TestSparseAny(TestCase):
             self.assertEqual(res.shape, xs.shape + (2,))
             self.assertEqual(res._values()[..., 0], xs._values().real)
             self.assertEqual(res._values()[..., 1], xs._values().imag)
-            if not (
-                dtype in (torch.complex32, torch.bcomplex32)
-                and torch.device(device).type == "cpu"
-            ):
+            if not (dtype is torch.complex32 and torch.device(device).type == "cpu"):
                 # ComplexHalf to_dense() is not supported on CPU.
                 self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
             self.assertEqual(torch.view_as_complex(torch.view_as_real(xs)), xs)
