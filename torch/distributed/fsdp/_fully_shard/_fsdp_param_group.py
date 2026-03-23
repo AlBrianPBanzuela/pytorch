@@ -525,10 +525,11 @@ class FSDPParamGroup:
             if self.reshard_after_backward:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:
-            # If the last param group (index N-1) has no grads,
-            # reduce_scatter_states won't be cleared here; the fallback
-            # in _root_post_backward_final_callback will wait on and
-            # clear them, losing per-group RS overlap for this iteration.
+            # If the highest-indexed param group (index N-1, first in
+            # backward order) has no grads, reduce_scatter_states won't
+            # be cleared here; the fallback in
+            # _root_post_backward_final_callback will wait on and clear
+            # them, losing per-group RS overlap for this iteration.
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
             if (
@@ -644,10 +645,10 @@ class FSDPParamGroup:
                 # starting too early.
                 if self._param_group_index != 1:
                     return
-                curr_fqn = self._module_fqn
+                curr_modules = self.modules
                 for step in range(1, curr_index + 1):
                     target = self.comm_ctx.post_forward_order[curr_index - step]
-                    if target._module_fqn != curr_fqn:
+                    if target.modules is not curr_modules:
                         self._prefetch_unshard(target, "backward")
                         break
             elif curr_index > 0:
