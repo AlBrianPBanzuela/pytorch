@@ -1912,8 +1912,6 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
-  # DEBUG
-  sleep 7200
   # Install numpy-2.0.2 and compatible scipy & numba versions
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
   TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)

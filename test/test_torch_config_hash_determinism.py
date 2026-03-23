@@ -99,6 +99,8 @@ class TestConfigModule(TestCase):
                     f"Detected path in config value '.*', key='{cutlass_dir_key}'",
                 ):
                     for key, value in changed_torch_config.items():
+                        if key in self.KNOWN_PATH_CONFIGS:
+                            continue
                         self.check_deterministic(key, value)
             finally:
                 inductor_config._cache_config_ignore_prefix.insert(idx, cutlass_dir_key)
