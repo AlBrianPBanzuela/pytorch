@@ -280,6 +280,8 @@ class FSDPState(_State):
         for fsdp_param_group in self._fsdp_param_groups:
             args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
         for fsdp_state in self._states_to_forward_prefetch:
+            # Forward order (not reversed) to match forward execution order;
+            # contrast with reversed() in _pre_backward for backward order.
             for target_param_group in fsdp_state._fsdp_param_groups:
                 FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
         return args, kwargs

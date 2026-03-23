@@ -524,14 +524,17 @@ class FSDPParamGroup:
                     fsdp_param.unsharded_param.grad = None
             if self.reshard_after_backward:
                 self.reshard()
+        # Wait on prior RS states before issuing new work, even if this
+        # group has no grads (must synchronize regardless).
         if (
             self._param_group_index == self._num_param_groups - 1
             and self.comm_ctx.reduce_scatter_states
         ):
-            for rs_state in self.comm_ctx.reduce_scatter_states:
-                if rs_state.event is not None:
-                    self.device_handle.current_stream().wait_event(rs_state.event)
-            self.comm_ctx.reduce_scatter_states.clear()
+            with record_function(self._with_fqn("FSDP::post_backward_rs_wait")):
+                for rs_state in self.comm_ctx.reduce_scatter_states:
+                    if rs_state.event is not None:
+                        self.device_handle.current_stream().wait_event(rs_state.event)
+                self.comm_ctx.reduce_scatter_states.clear()
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
