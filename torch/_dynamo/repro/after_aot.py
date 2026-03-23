@@ -144,7 +144,7 @@ def _extract_distributed_info(
         _, kwargs = opt_args_kwargs
 
         group_name = kwargs.get("group_name")
-        if group_name is None:
+        if not isinstance(group_name, str):
             continue
 
         if group_name in group_info:
