@@ -775,8 +775,8 @@ class BuiltinVariable(VariableTracker):
                 )
 
                 # Map operator function → dunder name (e.g. operator.eq → "__eq__")
-                _op_to_dunder = {v: k for k, v in richcmp_op.items()}
-                dunder_op = _op_to_dunder[op]
+                op_to_dunder = {v: k for k, v in richcmp_op.items()}
+                dunder_op = op_to_dunder[op]
 
                 def make_richcompare_handler(
                     dunder: str,
@@ -3348,16 +3348,9 @@ class BuiltinVariable(VariableTracker):
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
-        if other.is_python_constant():
-            try:
-                return ConstantVariable.create(
-                    richcmp_op[op](
-                        self.as_python_constant(), other.as_python_constant()
-                    )
-                )
-            except Exception:
-                pass
-        return ConstantVariable.create(NotImplemented)
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
 
 @contextlib.contextmanager

@@ -393,18 +393,9 @@ its type to `common_constant_types`.
         other: "VariableTracker",
         op: str,
     ) -> "VariableTracker":
-        # CPython: object_richcompare / PyBaseObject_Type.tp_richcompare
-        # https://github.com/python/cpython/blob/main/Objects/typeobject.c
-        if other.is_python_constant():
-            try:
-                return ConstantVariable.create(
-                    richcmp_op[op](
-                        self.as_python_constant(), other.as_python_constant()
-                    )
-                )
-            except Exception:
-                pass
-        return ConstantVariable.create(NotImplemented)
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
@@ -542,14 +533,6 @@ class EnumVariable(VariableTracker):
         other: "VariableTracker",
         op: str,
     ) -> "VariableTracker":
-        if other.is_python_constant():
-            try:
-                return ConstantVariable.create(
-                    richcmp_op[op](
-                        self.as_python_constant(),  # pyrefly: ignore[bad-argument-type]
-                        other.as_python_constant(),
-                    )
-                )
-            except Exception:
-                pass
-        return ConstantVariable.create(NotImplemented)
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)

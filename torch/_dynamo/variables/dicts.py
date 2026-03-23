@@ -60,6 +60,7 @@ from .constant import (
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
 )
+from .object_protocol import python_constant_richcompare_impl
 
 
 if TYPE_CHECKING:
@@ -1549,7 +1550,7 @@ class SetVariable(ConstDictVariable):
         op: str,
     ) -> VariableTracker:
         # CPython: set_richcompare in Objects/setobject.c
-        # https://github.com/python/cpython/blob/main/Objects/setobject.c
+        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L2093
         #
         # No polyfill needed: set_items is a concrete frozenset of VTs resolved
         # at trace time, so we can operate on it directly without tracing any
@@ -1558,9 +1559,6 @@ class SetVariable(ConstDictVariable):
         # polyfills.dict___eq__.
         if not isinstance(other, (SetVariable, variables.UserDefinedSetVariable)):
             return ConstantVariable.create(NotImplemented)
-        if op == "__eq__":
-            r = self.call_method(tx, "symmetric_difference", [other], {})
-            return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
         return VariableTracker.build(
             tx,
             richcmp_op[op](self.set_items, other.set_items),  # type: ignore[attr-defined]
@@ -1585,6 +1583,8 @@ class OrderedSetClassVariable(VariableTracker):
 
     def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
+
+    richcompare_impl = python_constant_richcompare_impl
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__new__":
@@ -1874,7 +1874,7 @@ class DictViewVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
 
-def _dictview_all_contained_in(
+def dictview_all_contained_in(
     a_elems: list["VariableTracker"], b_elems: list["VariableTracker"]
 ) -> bool:
     """Trace-time mirror of CPython's all_contained_in() in Objects/dictobject.c.
@@ -1887,7 +1887,7 @@ def _dictview_all_contained_in(
     )
 
 
-def _dictview_richcompare(
+def dictview_richcompare(
     a_elems: list["VariableTracker"],
     b_elems: list["VariableTracker"],
     op: str,
@@ -1895,17 +1895,17 @@ def _dictview_richcompare(
     """Trace-time mirror of CPython's dictview_richcompare() in Objects/dictobject.c."""
     len_a, len_b = len(a_elems), len(b_elems)
     if op == "__eq__":
-        return len_a == len_b and _dictview_all_contained_in(a_elems, b_elems)
+        return len_a == len_b and dictview_all_contained_in(a_elems, b_elems)
     elif op == "__ne__":
-        return not (len_a == len_b and _dictview_all_contained_in(a_elems, b_elems))
+        return not (len_a == len_b and dictview_all_contained_in(a_elems, b_elems))
     elif op == "__lt__":
-        return len_a < len_b and _dictview_all_contained_in(a_elems, b_elems)
+        return len_a < len_b and dictview_all_contained_in(a_elems, b_elems)
     elif op == "__le__":
-        return len_a <= len_b and _dictview_all_contained_in(a_elems, b_elems)
+        return len_a <= len_b and dictview_all_contained_in(a_elems, b_elems)
     elif op == "__gt__":
-        return len_a > len_b and _dictview_all_contained_in(b_elems, a_elems)
+        return len_a > len_b and dictview_all_contained_in(b_elems, a_elems)
     else:  # __ge__
-        return len_a >= len_b and _dictview_all_contained_in(b_elems, a_elems)
+        return len_a >= len_b and dictview_all_contained_in(b_elems, a_elems)
 
 
 class DictKeysVariable(DictViewVariable):
@@ -1992,7 +1992,7 @@ class DictKeysVariable(DictViewVariable):
                 tx,
                 richcmp_op[op](self.set_items, other.set_items),  # type: ignore[attr-defined]
             )
-        return VariableTracker.build(tx, _dictview_richcompare(a_elems, b_elems, op))
+        return VariableTracker.build(tx, dictview_richcompare(a_elems, b_elems, op))
 
 
 class DictValuesVariable(DictViewVariable):
@@ -2076,7 +2076,7 @@ class DictItemsVariable(DictViewVariable):
             b_elems = other.view_items_vt
         else:  # SetVariable
             b_elems = [k.vt for k in other.set_items]  # type: ignore[attr-defined]
-        return VariableTracker.build(tx, _dictview_richcompare(a_elems, b_elems, op))
+        return VariableTracker.build(tx, dictview_richcompare(a_elems, b_elems, op))
 
     def is_python_hashable(self) -> Literal[False]:
         """

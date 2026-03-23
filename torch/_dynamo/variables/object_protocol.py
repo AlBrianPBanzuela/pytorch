@@ -9,7 +9,7 @@ Per-type richcompare_impl hooks live in their respective VT files.
 from typing import TYPE_CHECKING
 
 from ..exc import raise_observed_exception, unimplemented
-from ..utils import istype, richcmp_op, richcmp_op_str
+from ..utils import istype, richcmp_op_str
 from .base import NO_SUCH_SUBOBJ, VariableTracker
 
 
@@ -55,12 +55,17 @@ def python_constant_richcompare_impl(
     """
     from .constant import ConstantVariable
 
-    try:
-        return ConstantVariable.create(
-            richcmp_op[op](self.as_python_constant(), other.as_python_constant())
-        )
-    except Exception:
+    if not other.is_python_constant():
         return ConstantVariable.create(NotImplemented)
+    try:
+        self_val = self.as_python_constant()
+    except NotImplementedError:
+        return ConstantVariable.create(NotImplemented)
+    # Call the dunder directly (not operator.* which dispatches both sides)
+    # so that unsupported comparisons return NotImplemented instead of raising
+    # TypeError, matching CPython's tp_richcompare slot semantics.
+    result = getattr(type(self_val), op)(self_val, other.as_python_constant())
+    return ConstantVariable.create(result)
 
 
 def vt_identity_compare(
