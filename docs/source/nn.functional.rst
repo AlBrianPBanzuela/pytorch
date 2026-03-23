@@ -240,4 +240,4 @@ Miscellaneous
     :toctree: generated
     :nosignatures:
 
-   LinearCrossEntropyOptions
+    LinearCrossEntropyOptions
