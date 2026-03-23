@@ -4,8 +4,11 @@ import argparse
 import csv
 import time
 import torch
+import functools
 from typing import Tuple, Optional
 from torch._inductor.fx_passes.pad_mm import get_alignment_size_dtype
+from torch._inductor.utils import get_gpu_shared_memory
+from torch._inductor.autoheuristic.autoheuristic_utils import AHMetadata, AHContext
 
 def fits_in_memory(dtype, m: int, k: int, n: int) -> bool:
     threshold_memory = torch.cuda.get_device_properties(0).total_memory / 4
@@ -133,16 +136,72 @@ def load_shapes_from_csv(csv_file: str) -> list:
         print(f"Error loading shapes from {csv_file}: {e}")
         return []
 
+@functools.cache
+def get_shared_mem_size():
+    return get_gpu_shared_memory()
+
+def check_shape_passes_precondition(m: int, k: int, n: int, dtype: torch.dtype) -> bool:
+    """
+    Check if a shape passes the same precondition used by the actual pad_mm AutoHeuristics.
+
+    This uses the exact same pad_mm_precondition function that the AutoHeuristic system
+    uses, avoiding hardcoded magic numbers by delegating to the source of truth.
+    """
+    from torch._inductor.autoheuristic.autoheuristic_utils import pad_mm_precondition, AHMetadata, AHContext
+
+    shared_memory = get_shared_mem_size()
+    device_capa = torch.cuda.get_device_capability()
+
+    # Create the same metadata and context that AutoHeuristics uses
+    metadata = AHMetadata(
+        shared_memory=shared_memory,
+        device_capa=device_capa,
+        choices=["orig", "pad"],  # Required but not used for precondition check
+        name="pad_mm"  # Required but not used for precondition check
+    )
+
+    context = AHContext()
+    context.add_feature("m", m)
+    context.add_feature("k", k)
+    context.add_feature("n", n)
+
+    # Use the actual pad_mm_precondition function - no hardcoded values!
+    return pad_mm_precondition(metadata, context)
+
 def filter_shapes(shapes: list) -> list:
     filtered = []
+    aligned_count = 0
+    precondition_failed_count = 0
+    memory_count = 0
+
     for m, k, n, dtype in shapes:
+        # Check if already aligned
         align_size = get_alignment_size_dtype(dtype)
         is_aligned = all((dim % align_size == 0) for dim in [m, k, n])
 
-        if not is_aligned and fits_in_memory(dtype, m, k, n):
-            filtered.append((m, k, n, dtype))
+        if is_aligned:
+            aligned_count += 1
+            continue
 
-    print(f"Filtered to {len(filtered)} unaligned shapes that fit in memory")
+        # Check if passes the actual precondition used by pad_mm AutoHeuristics
+        if not check_shape_passes_precondition(m, k, n, dtype):
+            precondition_failed_count += 1
+            continue
+
+        # Check if fits in memory
+        if not fits_in_memory(dtype, m, k, n):
+            memory_count += 1
+            continue
+
+        # This shape is suitable for evaluation
+        filtered.append((m, k, n, dtype))
+
+    print(f"Filtering results:")
+    print(f"  Already aligned (skipped): {aligned_count}")
+    print(f"  Failed pad_mm_precondition (skipped): {precondition_failed_count}")
+    print(f"  Too large for memory (skipped): {memory_count}")
+    print(f"  Suitable for evaluation: {len(filtered)}")
+
     return filtered
 
 def main():
@@ -159,7 +218,6 @@ def main():
         torch.cuda.set_device(args.device)
 
     print(f"Using CUDA device: {torch.cuda.current_device()}")
-    print(f"Device name: {torch.cuda.get_device_name()}")
     print()
 
     shapes = load_shapes_from_csv(args.csv_file)
@@ -238,6 +296,8 @@ def main():
                     elif heuristic_choice == "orig" and ground_truth == "pad":
                         false_negatives += 1
 
+            confident_rate = float(total_decisions) / float(i+1)
+            print(f"  Confidence Rate: {total_decisions}/{i+1} ({100 * confident_rate:.1f}%)")
             if total_decisions > 0:
                 accuracy = correct_decisions / total_decisions * 100
                 tp_rate = true_positives / total_decisions * 100
@@ -249,7 +309,7 @@ def main():
                 avg_tp_speedup = sum(tp_speedups) / len(tp_speedups) if tp_speedups else 0
                 avg_fp_slowdown = sum(fp_slowdowns) / len(fp_slowdowns) if fp_slowdowns else 0
 
-                print(f"  Progress: {correct_decisions}/{total_decisions} ({accuracy:.1f}%) | TP: {tp_rate:.1f}% (avg speedup: {avg_tp_speedup:.1f}%) | TN: {tn_rate:.1f}% | FP: {fp_rate:.1f}% (avg slowdown: {avg_fp_slowdown:.1f}%) | FN: {fn_rate:.1f}%")
+                print(f"  Accuracy: {correct_decisions}/{total_decisions} ({accuracy:.1f}%) | TP: {tp_rate:.1f}% (avg speedup: {avg_tp_speedup:.1f}%) | TN: {tn_rate:.1f}% | FP: {fp_rate:.1f}% (avg slowdown: {avg_fp_slowdown:.1f}%) | FN: {fn_rate:.1f}%")
 
         except Exception as e:
             print(f"  Error: {e}")
