@@ -436,12 +436,14 @@ test_dynamo_core() {
 }
 
 test_dynamo_cpython() {
+  export NO_TD=1
   time python test/run_test.py \
     --include-cpython-tests \
     --dynamo \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
+  unset NO_TD
 }
 
 test_dynamo_wrapped_shard() {
