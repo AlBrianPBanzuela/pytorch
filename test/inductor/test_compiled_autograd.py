@@ -3312,7 +3312,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
-    @mock.patch("torch._dynamo.config.inline_inbuilt_nn_modules", True)
     def test_verbose_logs_aot_id(self, _):
         def fn():
             model = torch.nn.Sequential(
@@ -3654,7 +3653,7 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_28 = hooks[0];  getitem_28 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], getitem_27);  getitem_1 = getitem_2 = getitem_27 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,));  getitem_1 = getitem_2 = getitem_27 = None
         aot0_primals_1 = call_aot_bwd_prologue[0]
         aot0_primals_2 = call_aot_bwd_prologue[1]
         aot0_tangents_1 = call_aot_bwd_prologue[2]
