@@ -5090,8 +5090,6 @@ class CPUReproTests(TestCase):
         positions = torch.tensor([[0, 0], [0, 0], [0, 0]], dtype=torch.int64)
         cache = torch.arange(3, dtype=torch.float32).reshape(1, 3)
 
-        torch._dynamo.reset()
-        metrics.reset()
         with config.patch({"cpp.enable_loop_tail_vec": True}):
             expected = fn(positions, cache)
             compiled_fn = torch.compile(fn, fullgraph=True)
