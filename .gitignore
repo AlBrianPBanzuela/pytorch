@@ -8,7 +8,6 @@
 
 ## PyTorch
 
-agent_space/
 .coverage
 coverage.xml
 .dmypy.json

@@ -3,7 +3,6 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -246,8 +245,9 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool stream_is_capturing(CUDAStream s) const override {
-    return c10::cuda::isStreamCapturingMayInitCtx(
-        static_cast<cudaStream_t>(s));
+    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+    C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
+    return status != cudaStreamCaptureStatusNone;
   }
 };
 

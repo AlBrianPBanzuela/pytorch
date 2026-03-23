@@ -125,7 +125,7 @@ has_side_effect(torch.ops.streams.join.default)
 def record_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    event.record(stream)
+    stream.record_event(event)
 
 
 @record_event.register_fake
@@ -143,7 +143,7 @@ has_side_effect(torch.ops.streams.record_event.default)
 def wait_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    event.wait(stream)
+    stream.wait_event(event)
 
 
 @wait_event.register_fake
@@ -155,20 +155,6 @@ def _(
 
 
 has_side_effect(torch.ops.streams.wait_event.default)
-
-
-@custom_op("streams::synchronize_event", mutates_args=())
-def synchronize_event(event_index: int) -> None:
-    event = _get_event_by_index(event_index)
-    event.synchronize()
-
-
-@synchronize_event.register_fake
-def _(event_index: int) -> None:
-    pass
-
-
-has_side_effect(torch.ops.streams.synchronize_event.default)
 
 
 @custom_op("streams::wait_stream", mutates_args=())
@@ -341,9 +327,6 @@ class StreamVariable(StreamContextVariable):
     def python_type(self) -> type:
         return torch.Stream
 
-    def get_real_python_backed_value(self) -> object:
-        return self.value
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -490,9 +473,6 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
-    def get_real_python_backed_value(self) -> object:
-        return self.value
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -529,10 +509,7 @@ class EventVariable(VariableTracker):
             return CONSTANT_VARIABLE_NONE
         elif name == "synchronize":
             tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.synchronize_event,
-                (self.user_object_index,),
-                {},
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
             return CONSTANT_VARIABLE_NONE
         elif name == "query":

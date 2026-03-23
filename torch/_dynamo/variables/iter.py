@@ -55,9 +55,6 @@ class ItertoolsVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
-    def get_real_python_backed_value(self) -> Any:
-        return self.value
-
     def call_function(
         self,
         tx: "InstructionTranslator",

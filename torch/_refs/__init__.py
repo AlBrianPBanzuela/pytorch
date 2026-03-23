@@ -50,7 +50,6 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch.testing._internal.common_dtype import highest_precision_float
 
 
 # Experimental module containing prototype Python references for existing
@@ -5470,13 +5469,13 @@ def linspace(
             start.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        start = _maybe_convert_to_dtype(start, highest_precision_float(device))
+        start = _maybe_convert_to_dtype(start, torch.float64)
     if isinstance(end, TensorLikeType):
         torch._check(
             end.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        end = _maybe_convert_to_dtype(end, highest_precision_float(device))
+        end = _maybe_convert_to_dtype(end, torch.float64)
 
     if builtins.any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(

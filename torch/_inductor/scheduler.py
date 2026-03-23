@@ -361,9 +361,6 @@ class MixOrderReduction:
         if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
-        if MixOrderReduction.is_split_reduction(contiguous_node):
-            return False
-
         # Other reduction types like max/min is not supported yet.
         # There are no real use case as well.
         out = all(
@@ -3288,7 +3285,7 @@ class Scheduler:
 
         # Map user_object_index to stream index (1-indexed for side streams)
         user_obj_to_stream_idx: dict[int, int] = {}
-        stream_idx_counter = itertools.count(1)  # 0 is reserved for default stream
+        next_stream_idx = 1  # 0 is reserved for default stream
 
         for node in self.nodes:
             stream_idx = DEFAULT_STREAM_IDX
@@ -3304,11 +3301,11 @@ class Scheduler:
                     if "stream" in custom_meta:
                         user_obj_idx = custom_meta["stream"]
                         if user_obj_idx not in user_obj_to_stream_idx:
-                            new_stream_idx = next(stream_idx_counter)
-                            user_obj_to_stream_idx[user_obj_idx] = new_stream_idx
-                            self.stream_idx_to_user_obj_idx[new_stream_idx] = (
+                            user_obj_to_stream_idx[user_obj_idx] = next_stream_idx
+                            self.stream_idx_to_user_obj_idx[next_stream_idx] = (
                                 user_obj_idx
                             )
+                            next_stream_idx += 1
                         stream_idx = user_obj_to_stream_idx[user_obj_idx]
                         # Use the first stream found
                         break

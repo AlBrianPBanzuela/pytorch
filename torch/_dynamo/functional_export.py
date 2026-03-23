@@ -605,11 +605,13 @@ def create_fx_graph_from_captured_output(
 
     graph_module = backend_input.graph_module
     if isinstance(root, torch.nn.Module):
-        graph_module._parameters = root._parameters
-        graph_module._buffers = root._buffers
+        graph_module._parameters = root._parameters.copy()
+        graph_module._buffers = root._buffers.copy()
         assert all(not hasattr(graph_module, m) for m in root._modules)
         graph_module._modules.update(root._modules)
-        graph_module._non_persistent_buffers_set = root._non_persistent_buffers_set
+        graph_module._non_persistent_buffers_set = (
+            root._non_persistent_buffers_set.copy()
+        )
         if sys.version_info >= (3, 14):
             import annotationlib  # added in 3.14
 

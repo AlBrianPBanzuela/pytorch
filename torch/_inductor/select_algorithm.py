@@ -4726,7 +4726,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     "All-reduce timeout when collecting benchmark results"
                 )
 
-            timing = time_tensor.item()
+            timing = cast(float, time_tensor.item())
 
             log.info(
                 "Collective benchmark for %s: %.6f ms",
@@ -5445,9 +5445,6 @@ class AlgorithmSelectorCache(PersistentCache):
         if isinstance(node, ir.Layout):
             node = ir.Buffer(name="fake", layout=node)
         # triton templates want the base tensor.
-        # Preserve the original dtype before unwrapping, since dtype views
-        # (e.g. uint8 -> float4_e2m1fn_x2) would be lost by unwrap_view.
-        original_dtype = node.get_dtype()
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
 
@@ -5455,7 +5452,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # stride is large enough. The V.graph.get_allocation_size takes this into account.
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
-        result = AlgorithmSelectorCache.generate_example_value(
+        return AlgorithmSelectorCache.generate_example_value(
             V.graph.sizevars.optimization_hints_with_override(
                 node.get_size(),
                 hint_override=hint_override,
@@ -5475,10 +5472,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 hint_override=hint_override,
             ),
         )
-        # Restore dtype if it was lost by unwrapping a dtype view
-        if result.dtype != original_dtype:
-            result = result.view(original_dtype)
-        return result
 
     @staticmethod
     def generate_example_value(
