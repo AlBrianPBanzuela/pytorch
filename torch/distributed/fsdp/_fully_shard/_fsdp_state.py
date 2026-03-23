@@ -320,6 +320,8 @@ class FSDPState(_State):
         for fsdp_param_group in self._fsdp_param_groups:
             fsdp_param_group.pre_backward(default_prefetch)
         for fsdp_state in self._states_to_backward_prefetch:
+            # Reverse so higher-indexed groups are prefetched first,
+            # matching backward execution order (reverse of forward).
             for target_param_group in reversed(fsdp_state._fsdp_param_groups):
                 FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
         return grad
@@ -329,7 +331,11 @@ class FSDPState(_State):
         logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
-                for fsdp_param_group in state._fsdp_param_groups:
+                # Reverse so that the last param group (which gates the
+                # reduce-scatter wait/clear) fires first, matching the
+                # autograd backward order and preserving RS overlap for
+                # per-param-mesh modules whose inputs lack gradients.
+                for fsdp_param_group in reversed(state._fsdp_param_groups):
                     if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
                         # Run post-backward in case forward inputs did not require
                         # gradient so the autograd backward did not run

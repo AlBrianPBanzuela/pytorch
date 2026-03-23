@@ -525,6 +525,10 @@ class FSDPParamGroup:
             if self.reshard_after_backward:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:
+            # If the last param group (index N-1) has no grads,
+            # reduce_scatter_states won't be cleared here; the fallback
+            # in _root_post_backward_final_callback will wait on and
+            # clear them, losing per-group RS overlap for this iteration.
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
             if (
@@ -633,16 +637,21 @@ class FSDPParamGroup:
                 # Can be cleared if running multiple `backward`s
                 return
             curr_index = self._post_forward_indices.pop()
-            # Prefetch using the reverse post-forward order. Walk back
-            # num_param_groups steps so that each group skips past
-            # same-block groups (already unsharded) and prefetches
-            # groups in the previous block. Redundant prefetches are
-            # no-ops.
-            for step in range(1, self._num_param_groups + 1):
-                target_index = curr_index - step
-                if target_index < 0:
-                    break
-                target = self.comm_ctx.post_forward_order[target_index]
+            if self._num_param_groups > 1:
+                # Backward fires groups in reverse forward order:
+                # N-1, N-2, ..., 1, 0. Prefetch from group 1 (2nd to
+                # last) so the AG overlaps with group 0's RS without
+                # starting too early.
+                if self._param_group_index != 1:
+                    return
+                curr_fqn = self._module_fqn
+                for step in range(1, curr_index + 1):
+                    target = self.comm_ctx.post_forward_order[curr_index - step]
+                    if target._module_fqn != curr_fqn:
+                        self._prefetch_unshard(target, "backward")
+                        break
+            elif curr_index > 0:
+                target = self.comm_ctx.post_forward_order[curr_index - 1]
                 self._prefetch_unshard(target, "backward")
 
     @staticmethod
