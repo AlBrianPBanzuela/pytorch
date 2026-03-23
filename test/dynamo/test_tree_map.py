@@ -299,6 +299,7 @@ class TreeMapCompileTests(TestCase):
             self.skipTest("optree treats None as an internal node by default")
 
         def fn(a, b):
+            _ = torch.randn(1) + 0
             return tree_map_impl(lambda u, v: (u, v), a, b)
 
         tree = {"k": None}
@@ -316,6 +317,8 @@ class TreeMapCompileTests(TestCase):
 
         def run_case(none_is_leaf_flag):
             def fn(arg):
+                _ = torch.randn(1) + 0
+
                 def mapper(node):
                     if node is None:
                         return "visited"

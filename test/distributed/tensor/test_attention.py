@@ -86,7 +86,6 @@ class SDPAWrapper(torch.nn.Module):
         if compiled:
             self.sdpa = torch.compile(
                 F.scaled_dot_product_attention,
-                fullgraph=True,
                 backend="aot_eager",
             )
         else:
