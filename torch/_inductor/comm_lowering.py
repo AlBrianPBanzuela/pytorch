@@ -506,8 +506,6 @@ def register_symm_mem_lowerings():
         Fallback: insert a Pointwise identity copy allocated in P2P via
         CommBufferLayout.  Used when we don't control the input's allocation.
         """
-        # TODO: Follow-up PR replaces this with a DMA .copy_() outside the graph
-        # for InputBuffer with static shapes.
         inp.realize()
         copy = ir.Pointwise.create(
             device=inp.get_device(),
@@ -515,7 +513,6 @@ def register_symm_mem_lowerings():
             inner_fn=inp.make_loader(),
             ranges=inp.get_size(),
         )
-        assert can_realize_as_comm_buffer(copy, comm_buffer_type)
         realize_as_comm_buffer(copy, comm_buffer_type, group_name)
         return copy
 
@@ -526,12 +523,16 @@ def register_symm_mem_lowerings():
         """
         Ensure inp is in P2P memory for a symm_mem collective.
 
-        If the buffer can be realized as CommBufferLayout (e.g. a
-        ComputedBuffer), it is done in-place (zero-copy).  Otherwise
-        an identity copy to a P2P-allocated buffer is inserted.
+        If inductor controls the buffer's allocation (ComputedBuffer,
+        or any buffer with FlexibleLayout/FixedLayout), switch its
+        layout to CommBufferLayout in-place, zero-copy.
 
-        Returns the (possibly replaced) TensorBox.  Callers must use
-        the return value since a new buffer may be created.
+        If inductor does not control allocation (e.g. InputBuffer),
+        insert a Pointwise identity copy into a new CommBufferLayout buffer.
+        This adds an extra Triton kernel. Returns the possibly new TensorBox.
+
+        TODO(tianrengao): eliminate the extra kernel for static-shape
+        InputBuffers by pre-allocating P2P memory in the wrapper and DMA .copy_()
         """
         if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
