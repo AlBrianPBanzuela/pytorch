@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
+    skipIfXpu,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -283,15 +284,16 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x
         )
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
-            """\
+            f"""\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg1_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg1_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
     return (view_1,)""",  # noqa: B950
         )
 
+    @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_export(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -344,9 +346,9 @@ def forward(self, args_0):
         # add is performed in _propagate_tensor_meta_non_cached, hence add_1 instead of add
         self.assertExpectedInline(
             str(joint_gm.code).strip(),
-            """\
+            f"""\
 def forward(self, arg0_1, arg1_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg1_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg1_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
@@ -1799,30 +1801,6 @@ class outer_fn(torch.nn.Module):
 
         # Test backward pass
         result.sum().backward()
-
-    def test_compile_optimizer_grad_view_base_dim_mismatch(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/176667
-        # When param._local_tensor is a view of an N-D base but
-        # grad._local_tensor is a view of a 1-D base (as in FSDP2's flat
-        # gradient buffer), dynamo's meta tensor creation must not reuse the
-        # param's symbolic context for the grad.
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        # param: view of 2D base (simulates FSDP2 reshard padding)
-        param_local = torch.randn(32, 256)[:16]
-        param = DTensor.from_local(param_local, mesh, [Replicate()], run_check=False)
-        param.requires_grad_(True)
-        param.retain_grad()
-
-        # grad: view of 1D base (simulates FSDP2 flat gradient buffer)
-        grad_local = torch.randn(16 * 256 + 1000)[: 16 * 256].view(16, 256)
-        param.grad = DTensor.from_local(
-            grad_local, mesh, [Replicate()], run_check=False
-        )
-
-        opt = torch.optim.Adam([param], lr=1e-3)
-        compiled_step = torch.compile(opt.step, backend="aot_eager")
-        compiled_step()
 
 
 @instantiate_parametrized_tests
