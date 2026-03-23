@@ -794,11 +794,12 @@ def pallas_ensure_nonzero_rank(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
-def pallas_make_block_spec_non_tiled(shape: tuple[int, ...]) -> "pl.BlockSpec":
+def pallas_make_block_spec_non_tiled(shape: tuple[int, ...]) -> Any:
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
     from jax.experimental import (  # pyrefly: ignore [import-error, missing-import]
         pallas as pl,
     )
-    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
     nonzero_rank_shape = shape if len(shape) > 0 else (1,)
     return pl.BlockSpec(
         nonzero_rank_shape,
