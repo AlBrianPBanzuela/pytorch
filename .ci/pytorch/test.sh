@@ -245,8 +245,12 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
-    # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
+    if [ -f /usr/lib/llvm-18/bin/llvm-symbolizer ]; then
+        export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
+    else
+        # ARC runners install clang-18 under /opt/clang-18 which is on PATH
+        export ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer)
+    fi
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
