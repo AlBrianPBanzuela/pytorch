@@ -9,7 +9,7 @@ import torch
 
 __all__ = [
     "PRNGKey",
-    "PhiloxKey",
+    "Philox4x32_10Key",
     "set_rng_state",
     "get_rng_state",
     "manual_seed",
@@ -95,7 +95,7 @@ class PRNGKey(torch.Tensor):
         raise NotImplementedError
 
 
-class PhiloxKey(PRNGKey):
+class Philox4x32_10Key(PRNGKey):
     """Philox 4x32-10 PRNG key. Data layout: (*batch, 2) uint64 [seed, offset]."""
 
     @classmethod
@@ -103,10 +103,10 @@ class PhiloxKey(PRNGKey):
         return cls(inner_tensors["_data"])
 
     def _split(self, num):
-        return PhiloxKey(torch.ops.aten._philox_key_split(self, num))
+        return Philox4x32_10Key(torch.ops.aten._philox_key_split(self, num))
 
     def _fold_in(self, data):
-        return PhiloxKey(torch.ops.aten._philox_key_fold_in(self, data))
+        return Philox4x32_10Key(torch.ops.aten._philox_key_fold_in(self, data))
 
     def _uniform(self, out, low, high, portable):
         return torch.ops.aten._philox_uniform_(out, self, low, high, portable)
@@ -115,10 +115,10 @@ class PhiloxKey(PRNGKey):
         return torch.ops.aten._philox_normal_(out, self, mean, std, portable)
 
 
-_IMPLS: dict[str, type[PRNGKey]] = {"philox": PhiloxKey}
+_IMPLS: dict[str, type[PRNGKey]] = {"philox4x32-10": Philox4x32_10Key}
 
 
-def key(seed: int, impl: str = "philox", device: torch.device = None) -> PRNGKey:
+def key(seed: int, impl: str = "philox4x32-10", device: torch.device = None) -> PRNGKey:
     cls = _IMPLS.get(impl)
     if cls is None:
         raise NotImplementedError(
