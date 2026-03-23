@@ -702,7 +702,7 @@ class ExceptionVariable(VariableTracker):
         elif name == "__traceback__":
             return self.__traceback__
         elif name == "args":
-            return VariableTracker.build(tx, self.args)
+            return VariableTracker.build(tx, self.args, source=self.source and AttrSource(self.source, "args"))
         return super().var_getattr(tx, name)
 
     def __str__(self) -> str:
