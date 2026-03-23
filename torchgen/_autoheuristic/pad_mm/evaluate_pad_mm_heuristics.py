@@ -319,10 +319,7 @@ def main():
                     elif heuristic_choice == "orig" and ground_truth == "pad":
                         false_negatives += 1
 
-            confident_rate = float(total_decisions) / float(i + 1)
-            print(
-                f"  Confidence Rate: {total_decisions}/{i + 1} ({100 * confident_rate:.1f}%)"
-            )
+            print(f"  Confidence Rate: {total_decisions}/{i}")
             if total_decisions > 0:
                 accuracy = correct_decisions / total_decisions * 100
                 tp_rate = true_positives / total_decisions * 100
@@ -403,9 +400,8 @@ def main():
 
     total_evaluated = total_decisions + autotune_shapes
     if total_evaluated > 0:
-        confident_rate = total_decisions / total_evaluated * 100
         print(
-            f"\nConfidence rate: {confident_rate:.1f}% ({total_decisions}/{total_evaluated} made confident decisions)"
+            f"\nConfidence rate: ({total_decisions}/{total_evaluated} made confident decisions)"
         )
 
 
