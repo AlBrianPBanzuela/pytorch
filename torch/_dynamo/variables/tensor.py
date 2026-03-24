@@ -1388,11 +1388,8 @@ class TensorVariable(VariableTracker):
         from .streams import StreamVariable
 
         if not isinstance(stream, StreamVariable):
-            unimplemented(
-                gb_type="record_stream requires a StreamVariable",
-                context=f"record_stream({stream})",
-                explanation="tensor.record_stream() expects a stream argument.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+            raise RuntimeError(
+                f"record_stream() expects a Stream argument, got {stream.python_type().__name__}"
             )
         tx.output.create_proxy(
             "call_function",
