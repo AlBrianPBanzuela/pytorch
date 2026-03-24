@@ -1382,8 +1382,7 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
     def world_size(self):
         return 2
 
-    @skip_if_lt_x_gpu(2)
-    def test_prefetch_writeback_sync(self):
+    def _test_prefetch_writeback_sync(self, cpu_offload: bool):
         device = torch.device(device_type, self.rank)
         compute_done = torch.ones(1, device=device, dtype=torch.int32)
         writeback_reads: list[torch.Tensor] = []
@@ -1421,7 +1420,7 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
             )
             model = FSDP(
                 model,
-                cpu_offload=CPUOffload(offload_params=True),
+                cpu_offload=CPUOffload(offload_params=cpu_offload),
                 use_orig_params=True,
                 forward_prefetch=True,
                 backward_prefetch=BackwardPrefetch.BACKWARD_POST,
@@ -1447,6 +1446,14 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
                 f"_writeback_orig_params read stale data (call {i}): "
                 "pre_unshard_stream was not synchronized with compute stream",
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_prefetch_writeback_sync_cpu_offload(self):
+        self._test_prefetch_writeback_sync(cpu_offload=True)
+
+    @skip_if_lt_x_gpu(2)
+    def test_prefetch_writeback_sync_no_cpu_offload(self):
+        self._test_prefetch_writeback_sync(cpu_offload=False)
 
 
 class TestFSDPUseOrigParamsInit(FSDPTest):

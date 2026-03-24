@@ -600,8 +600,6 @@ class FlatParamHandle:
         self._needs_pre_backward_unshard = False
         # Was the handle prefetched? Set on successful _prefetch_handle and unshard
         self._prefetched = False
-        # The compute stream at the time _unshard() is called, used by
-        # pre_unshard() to synchronize before _writeback_orig_params()
         self._compute_stream: torch.Stream | None = None
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
@@ -1327,7 +1325,6 @@ class FlatParamHandle:
         if self._use_orig_params and not self._skip_writeback_check:
             # Wait for the compute stream since _writeback_orig_params reads
             # original parameters that may still be in use during prefetch.
-            # _compute_stream is set by _unshard() before calling pre_unshard().
             self._device_handle.current_stream().wait_stream(self._compute_stream)
             ret = self._writeback_orig_params()
         if (
