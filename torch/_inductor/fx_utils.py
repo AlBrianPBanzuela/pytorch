@@ -3,7 +3,7 @@ import contextlib
 import operator
 import warnings
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -111,7 +111,29 @@ class FakeTensorUpdater:
             self.processed_hashes.add(self.hash_node(node))
 
     def hash_node(self, node: torch.fx.Node) -> _FxNodeHash:
-        return _FxNodeHash(node, node.target, id(node.args), id(node.kwargs))
+        def get_node_ids(n_iter: Iterable[Any]) -> tuple[int, ...]:
+            return tuple(id(n) for n in n_iter if isinstance(n, torch.fx.Node))
+
+        # It's a bit kludgy to hash node IDs, but hashing nodes themselves is currently
+        # not implemented, and IDs get us reasonably close.  If a node changes enough
+        # for the hash to be silently incorrect, it should be caught when we update,
+        # since all the args and kwargs are updated first.
+        return _FxNodeHash(
+            node,
+            node.target,
+            hash(
+                (
+                    id(node.args),
+                    *get_node_ids(node.args),
+                )
+            ),
+            hash(
+                (
+                    id(node.kwargs),
+                    *get_node_ids(node.kwargs.values()),
+                )
+            ),
+        )
 
     def incremental_update(self) -> int:
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work."""
