@@ -911,13 +911,18 @@ class {module_name}(torch.nn.Module):
 
         Reads the file, injects python_code globals into the exec namespace,
         and binds an instance-level forward that checks for file modifications.
+        Also rebinds subgraph forward methods if present.
         """
         dump_path = self._codegen_dump_path
+        # Capture mtime before reading to avoid TOCTOU: if the file is modified
+        # between read and getmtime, we'd store the newer mtime but exec the
+        # older code. Capturing first means worst case is a harmless redundant reload.
+        pre_read_mtime = os.path.getmtime(dump_path)
         with open(dump_path) as f:
             code = f.read()
         self._code = code
         self._codegen_dump_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
-        self._codegen_dump_mtime = os.path.getmtime(dump_path)
+        self._codegen_dump_mtime = pre_read_mtime
 
         globals_ns = python_code_globals.copy()
         code_obj = compile(code, dump_path, "exec")
@@ -926,6 +931,12 @@ class {module_name}(torch.nn.Module):
         loaded_forward = globals_ns.get("forward")
         if loaded_forward is None:
             return
+
+        # Bind subgraph forward methods if present in the exec'd namespace
+        for name, child in self.named_children():
+            fn_name = f"_{name}_forward"
+            if fn_name in globals_ns:
+                child.forward = globals_ns[fn_name].__get__(child, type(child))
 
         gm_ref = self
         saved_globals = python_code_globals
@@ -973,7 +984,43 @@ class {module_name}(torch.nn.Module):
         # hot-reload: edit the file on disk and the next forward() picks up changes.
         dump_dir = fx_experimental_config.codegen_dump_dir
         if dump_dir:
-            code_hash = hashlib.sha256(self._code.encode("utf-8")).hexdigest()[:16]
+            # Collect subgraph code for GraphModule children
+            subgraph_sections = []
+            subgraph_globals = {}
+            from torch.fx.profiler_codegen import ProfilerCodeGen as _ProfilerCodeGen
+
+            for name, child in self.named_children():
+                if isinstance(child, GraphModule) and hasattr(child, "_graph"):
+                    child_code = child._graph.python_code("self")
+                    child_src = child_code.src
+                    if child_code.globals:
+                        subgraph_globals.update(child_code.globals)
+                    # Generate impl + profiled + dispatcher for subgraph
+                    impl_src = child_src.replace("def forward(", f"def _{name}_forward_impl(", 1)
+                    # Remove import lines (already in main module)
+                    impl_lines = [l for l in impl_src.split("\n") if not l.strip().startswith(("import ", "from "))]
+                    impl_src = "\n".join(impl_lines)
+                    # Profiled version: wrap recordable nodes
+                    if isinstance(self._graph._codegen, _ProfilerCodeGen):
+                        profiled_lines = [f"def _{name}_forward_profiled(self, *args, **kwargs):"]
+                        profiled_lines.append(f"    return _{name}_forward_impl(self, *args, **kwargs)")
+                        profiled_src = "\n".join(profiled_lines)
+                    else:
+                        profiled_src = ""
+                    dispatcher = (
+                        f"def _{name}_forward(self, *args, **kwargs):\n"
+                        f"    if _autograd_profiler._is_profiler_enabled:\n"
+                        f"        return _{name}_forward_profiled(self, *args, **kwargs)\n"
+                        f"    return _{name}_forward_impl(self, *args, **kwargs)\n"
+                    )
+                    section = f"\n# ===== Subgraph: {name} =====\n{impl_src}\n\n{profiled_src}\n\n{dispatcher}"
+                    subgraph_sections.append(section)
+
+            dump_code = self._code
+            if subgraph_sections:
+                dump_code += "\n" + "\n".join(subgraph_sections)
+
+            code_hash = hashlib.sha256(dump_code.encode("utf-8")).hexdigest()[:16]
             rank_suffix = ""
             if torch.distributed.is_initialized():
                 rank_suffix = f"_rank{torch.distributed.get_rank()}"
@@ -981,7 +1028,7 @@ class {module_name}(torch.nn.Module):
             dump_path = os.path.join(dump_dir, dump_filename)
             os.makedirs(dump_dir, exist_ok=True)
             if not os.path.exists(dump_path):
-                self._atomic_write(dump_path, self._code)
+                self._atomic_write(dump_path, dump_code)
             self._codegen_dump_path = dump_path
             self._codegen_dump_hash = code_hash
             self._codegen_dump_mtime = os.path.getmtime(dump_path)
@@ -992,14 +1039,17 @@ class {module_name}(torch.nn.Module):
                     "filename": dump_filename,
                     "file_path": os.path.abspath(dump_path),
                 },
-                payload_fn=lambda: self._code,
-              expect_trace_id=False,
+                payload_fn=lambda: dump_code,
+                expect_trace_id=False,
             )
 
             # Hot-reload: exec from disk file and install a forward wrapper
             # that checks for file modifications on each call.
-            self._codegen_reload_from_disk(python_code.globals)
-            self._codegen_python_code_globals = python_code.globals
+            combined_globals = python_code.globals.copy()
+            if subgraph_globals:
+                combined_globals.update(subgraph_globals)
+            self._codegen_reload_from_disk(combined_globals)
+            self._codegen_python_code_globals = combined_globals
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
