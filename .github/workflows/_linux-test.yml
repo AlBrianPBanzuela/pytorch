@@ -78,17 +78,17 @@ on:
         default: false
         description: If true, use ARC (OSDC) runner path instead of EC2.
       python-version:
-        required: true
+        required: false
         type: string
         default: ""
         description: Python version to use for the OSDC test.
       compiler:
-        required: true
+        required: false
         type: string
         default: ""
         description: Compiler to use for the OSDC test.
       cuda-version:
-        required: true
+        required: false
         type: string
         default: ""
         description: CUDA version to use for the OSDC test.
