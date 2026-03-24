@@ -272,6 +272,10 @@ def main():
     tp_speedups = []  # Speed-up percentages for true positives
     fp_slowdowns = []  # Speed-down percentages for false positives
 
+    # Track non-confident decisions and confident decisions by dtype
+    autotune_shape_list = []  # List of (M, K, N, dtype) where heuristic chose autotune
+    confident_by_dtype = {}  # Count of confident decisions by dtype
+
     for i, (m, k, n, dtype) in enumerate(shapes, 1):
         try:
             print(f"Shape {i}/{len(shapes)}: M={m}, K={k}, N={n}, dtype={dtype}")
@@ -293,10 +297,14 @@ def main():
             if heuristic_choice == "autotune":
                 # Heuristic punted to benchmarking - this is correct behavior for small/uncertain shapes
                 autotune_shapes += 1
+                autotune_shape_list.append((m, k, n, dtype))
                 print("  Heuristic chose to benchmark (conservative)")
             else:
                 # Heuristic made a confident decision - evaluate accuracy
                 total_decisions += 1
+                # Track confident decisions by dtype
+                dtype_str = str(dtype).replace("torch.", "")
+                confident_by_dtype[dtype_str] = confident_by_dtype.get(dtype_str, 0) + 1
                 if heuristic_choice == ground_truth:
                     correct_decisions += 1
                     print("  ✓ CORRECT")
@@ -403,6 +411,26 @@ def main():
         print(
             f"\nConfidence rate: ({total_decisions}/{total_evaluated} made confident decisions)"
         )
+
+    # Print shapes where AutoHeuristics did not make a confident decision
+    print(f"\n=== NON-CONFIDENT DECISIONS ({len(autotune_shape_list)}) ===")
+    if autotune_shape_list:
+        print("Shapes where AutoHeuristics chose 'autotune' (non-confident):")
+        for m, k, n, dtype in autotune_shape_list:
+            dtype_str = str(dtype).replace("torch.", "")
+            print(f"  M={m}, K={k}, N={n}, dtype={dtype_str}")
+    else:
+        print("All shapes had confident decisions!")
+
+    # Print confident decisions by dtype
+    print("\n=== CONFIDENT DECISIONS BY DTYPE ===")
+    if confident_by_dtype:
+        print("Number of confident decisions per dtype:")
+        for dtype_str, count in sorted(confident_by_dtype.items()):
+            print(f"  {dtype_str}: {count} confident decisions")
+        print(f"Total confident decisions: {sum(confident_by_dtype.values())}")
+    else:
+        print("No confident decisions made!")
 
 
 if __name__ == "__main__":
