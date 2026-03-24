@@ -362,6 +362,7 @@ def is_reuse_eligible(
     fingerprint: InputFingerprint,
     tracing_info: "SubgraphTracingInfo",
     traced_sources: OrderedSet[Source] | None = None,
+    has_reuse_hash_fn: bool = False,
 ) -> bool:
     """Best-effort check for whether a traced subgraph result can be reused.
 
@@ -377,19 +378,24 @@ def is_reuse_eligible(
         unspecialized NN module — for sourceless or other input types we
         rely on the treespec and tags for structural matching, so only
         types with well-defined comparison semantics are supported.
-    """
-    if tracing_info.side_effect_stack is not None:
-        stack_msg = "\n" + "".join(
-            traceback.format_list(tracing_info.side_effect_stack)
-        )
-        hc_log.debug(
-            "subgraph_reuse: not eligible -- subgraph has side effects%s",
-            stack_msg,
-        )
-        return False
 
-    if traced_sources and has_mutated_vars(tx, traced_sources):
-        return False
+    When ``has_reuse_hash_fn`` is True, side-effect and mutation checks are
+    skipped because the hash key replaces guards — there are no guards to
+    go stale from mutations.
+    """
+    if not has_reuse_hash_fn:
+        if tracing_info.side_effect_stack is not None:
+            stack_msg = "\n" + "".join(
+                traceback.format_list(tracing_info.side_effect_stack)
+            )
+            hc_log.debug(
+                "subgraph_reuse: not eligible -- subgraph has side effects%s",
+                stack_msg,
+            )
+            return False
+
+        if traced_sources and has_mutated_vars(tx, traced_sources):
+            return False
 
     if isinstance(body_r, TensorVariable):
         pass
@@ -1260,8 +1266,20 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         if reuse:
             fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
             if reuse_hash_fn is not None:
-                # Hash-key path: save unconditionally (no guard eligibility
-                # check needed — the hash key is the reuse condition).
+                traced_sources = tracing_info.traced_sources
+                if not is_reuse_eligible(
+                    tx,
+                    body_r,
+                    fingerprint,
+                    tracing_info,
+                    traced_sources,
+                    has_reuse_hash_fn=True,
+                ):
+                    raise RuntimeError(
+                        "reuse_hash_fn was provided but the subgraph is not "
+                        "eligible for reuse. Check the logs with "
+                        "TORCH_LOGS='+hierarchical_compile' for details."
+                    )
                 save_reuse_entry(
                     tx,
                     fn_var,

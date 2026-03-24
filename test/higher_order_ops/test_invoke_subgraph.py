@@ -4201,6 +4201,62 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
         self.assertEqual(ref2, res2)
         self.assertEqual(cnt.frame_count, frame_count_before)
 
+    def test_reuse_hash_fn_side_effect_allowed(self):
+        """Side effects (attribute mutation) should not block reuse with reuse_hash_fn."""
+
+        def hash_fn(mod, x):
+            return 0
+
+        @nested_compile_region(reuse_hash_fn=hash_fn)
+        def layer_fn(mod, x):
+            mod.call_count += 1
+            return x.sin() + mod.weight
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.call_count = 0
+                self.weight = torch.nn.Parameter(torch.randn(8))
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer() for _ in range(3)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer_fn(layer, x)
+                return x
+
+        mod = Model()
+        x = torch.randn(8)
+
+        # Without reuse_hash_fn, the side effect (mod.call_count += 1)
+        # would prevent reuse. With reuse_hash_fn, it should still reuse.
+        with self._count_speculate_calls() as count:
+            torch.compile(mod, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+
+    def test_reuse_hash_fn_unsupported_output_raises(self):
+        """Nested output (tuple of tuple of tensors) should raise with reuse_hash_fn."""
+
+        def hash_fn(x):
+            return 0
+
+        @nested_compile_region(reuse_hash_fn=hash_fn)
+        def gn(x):
+            return ((x.sin(), x.cos()),)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8)
+        with self.assertRaisesRegex(
+            RuntimeError, "reuse_hash_fn was provided but the subgraph is not eligible"
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
 
 if __name__ == "__main__":
     run_tests()
