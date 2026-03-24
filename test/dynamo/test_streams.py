@@ -1681,9 +1681,16 @@ class <lambda>(torch.nn.Module):
         #
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
 
-        #
-        synchronize_event = torch.ops.streams.synchronize_event.default(0);  synchronize_event = None
+        # No stacktrace found for following nodes
+        subgraph_synchronize_event = self.subgraph_synchronize_event
+        control_deps = torch.ops.higher_order.control_deps((add,), subgraph_synchronize_event, add);  subgraph_synchronize_event = control_deps = None
         return (add,)
+
+    class subgraph_synchronize_event(torch.nn.Module):
+        def forward(self, dep_0: "f32[2, 2]"):
+            #
+            synchronize_event_default = torch.ops.streams.synchronize_event.default(0)
+            return (synchronize_event_default, dep_0)
 """,  # noqa: B950
         )
 
