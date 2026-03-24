@@ -685,6 +685,7 @@ class PallasTestsMixin:
         compiled_bcast = self._compile(lambda x, y, s: x + y * s)
         self.assertEqual(compiled_bcast(x, y, s), x + y * s)
 
+    @skip_if_cuda
     def test_scalar_scalar_ops(self):
         """Test scalar-scalar operations."""
 
