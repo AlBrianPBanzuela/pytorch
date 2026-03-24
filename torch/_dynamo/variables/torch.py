@@ -1907,6 +1907,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     device_type = accelerator.type
                 device = torch.device(device_type)
 
+            # CPU synchronize is a no-op, skip emitting the op
+            if device.type == "cpu":
+                return CONSTANT_VARIABLE_NONE
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
