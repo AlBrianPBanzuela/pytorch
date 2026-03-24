@@ -29,6 +29,7 @@ from torch.distributed.utils import (
 )
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
+from torch.utils._typing_utils import not_none
 
 from ._fsdp_extensions import (
     _ext_post_unflatten_transform,
@@ -1325,8 +1326,9 @@ class FlatParamHandle:
         if self._use_orig_params and not self._skip_writeback_check:
             # Wait for the compute stream since _writeback_orig_params reads
             # original parameters that may still be in use during prefetch.
-            if self._compute_stream is not None:
-                self._device_handle.current_stream().wait_stream(self._compute_stream)
+            self._device_handle.current_stream().wait_stream(
+                not_none(self._compute_stream)
+            )
             ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
