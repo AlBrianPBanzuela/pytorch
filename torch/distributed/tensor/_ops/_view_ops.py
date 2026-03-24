@@ -244,7 +244,7 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
 
 
 def normalize_sizes(sizes: Shape | tuple[Shape]) -> Shape:
-    if isinstance(sizes[0], int):
+    if isinstance(sizes[0], (int, torch.SymInt)):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
         return sizes[0]
@@ -389,7 +389,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     from_len = len(from_size)
     to_len = len(to_size)
 
-    result_pp = []
+    result_pp: list[DimSpec] = []
 
     while from_idx < from_len or to_idx < to_len:
         from_group_dim, to_group_shape = [], []
@@ -420,7 +420,9 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
         else:
             # produces ([1], [1]),  ([2], [2]), ([2,3], [6])
             while guard_or_true(f != t):
-                if f < t:
+                if (
+                    t % f == 0 or t > f
+                ):  # for easier symbolic comparisons, e.g. u0*u1 > u0
                     nf = from_size[from_idx]
                     from_group_dim.append(from_idx)
                     from_idx += 1
