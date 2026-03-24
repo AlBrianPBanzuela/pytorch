@@ -42,6 +42,15 @@ struct InputBuffer {
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
   static std::vector<Variable> variables(InputBuffer&& g);
 
+  // Snapshot version counters for all defined tensors in the buffer.
+  // Called when the buffer is finalized (all dependencies satisfied).
+  void save_versions();
+
+  // Check that version counters haven't changed since save_versions().
+  // Errors if a gradient was modified in-place between production and
+  // consumption.
+  void check_versions(const Node& consumer) const;
+
   std::vector<Variable> buffer;
   // The stream used for accumulation when a variable is used multiple times.
   std::vector<std::optional<c10::Stream>> opt_accum_streams;
@@ -51,6 +60,10 @@ struct InputBuffer {
   // The streams corresponding to the events above. This is only used to
   // check if more synchronization is needed or not.
   std::vector<std::optional<c10::Stream>> ready_streams;
+  // Version counters saved when the buffer was finalized (all deps satisfied).
+  // Used to detect in-place modification of gradients between production
+  // and consumption.
+  std::vector<uint32_t> saved_versions_;
 };
 
 } // namespace torch::autograd

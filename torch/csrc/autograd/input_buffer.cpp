@@ -323,4 +323,44 @@ auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   return result;
 }
 
+void InputBuffer::save_versions() {
+  saved_versions_.resize(buffer.size());
+  for (const auto i : c10::irange(buffer.size())) {
+    if (buffer[i].defined() &&
+        buffer[i].unsafeGetTensorImpl()->version_counter().enabled()) {
+      saved_versions_[i] =
+          buffer[i].unsafeGetTensorImpl()->version_counter().current_version();
+    } else {
+      saved_versions_[i] = 0;
+    }
+  }
+}
+
+void InputBuffer::check_versions(const Node& consumer) const {
+  if (saved_versions_.empty()) {
+    return;
+  }
+  for (const auto i : c10::irange(buffer.size())) {
+    if (!buffer[i].defined() ||
+        !buffer[i].unsafeGetTensorImpl()->version_counter().enabled()) {
+      continue;
+    }
+    auto current_version =
+        buffer[i].unsafeGetTensorImpl()->version_counter().current_version();
+    TORCH_CHECK(
+        current_version == saved_versions_[i],
+        "gradient input ",
+        i,
+        " of ",
+        consumer.name(),
+        " was modified in-place after the gradient was produced by the "
+        "autograd engine. This is not allowed because it can lead to "
+        "incorrect gradient computation. (expected version ",
+        saved_versions_[i],
+        " but found version ",
+        current_version,
+        ")");
+  }
+}
+
 } // namespace torch::autograd

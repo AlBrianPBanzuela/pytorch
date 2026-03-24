@@ -1088,6 +1088,8 @@ void Engine::evaluate_function(
     }
   }
 
+  inputs.check_versions(*func);
+
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
@@ -1204,6 +1206,7 @@ void Engine::evaluate_function(
           next.function.get());
 
       if (is_ready) {
+        input_buffer.save_versions();
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
@@ -1223,6 +1226,7 @@ void Engine::evaluate_function(
           opt_next_stream,
           next.function.get());
       if (is_ready) {
+        input_buffer.save_versions();
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
@@ -1427,6 +1431,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
 
     // Now that all the non-thread safe fields of the graph_task have been
     // populated, we can enqueue it.
+    input_buffer.save_versions();
     queue->push(
         NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
 
@@ -1447,6 +1452,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
 
     // Now that all the non-thread safe fields of the graph_task have been
     // populated, we can enqueue it.
+    input_buffer.save_versions();
     queue->push(
         NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
 
