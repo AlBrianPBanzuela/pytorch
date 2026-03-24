@@ -2032,6 +2032,64 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(eager_result, compiled_result)
 
 
+    @requires_cuda
+    def test_control_deps_wrapping_record_stream(self) -> None:
+        """Test wrapping record_stream with control_deps.
+
+        record_stream takes (tensor, stream_index), so its tensor arg must
+        flow through the control_deps subgraph as a placeholder.
+        """
+
+        def fn(x) -> torch.Tensor:
+            s = torch.Stream(device="cuda")
+            y = x + 1
+            y.record_stream(s)
+            return y
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        gm = fw_graphs[0]
+        graph = gm.graph
+
+        import operator
+
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        control_deps_nodes = list(
+            graph.find_nodes(op="call_function", target=control_deps)
+        )
+        self.assertEqual(len(control_deps_nodes), 1)
+
+        ctrl_node = control_deps_nodes[0]
+        # The tensor arg (add node) should be passed as an arg to control_deps
+        # after additional_deps and subgraph: (deps, subgraph, *node_args, *pass_through)
+        # args[0] = additional_deps tuple, args[1] = subgraph, args[2:] = node_args + pass_through
+        self.assertGreaterEqual(len(ctrl_node.args), 3)
+        # The tensor arg should be an fx.Node (the add result)
+        tensor_arg = ctrl_node.args[2]
+        self.assertIsInstance(tensor_arg, torch.fx.Node)
+
+        # Verify getitem nodes thread the dependency through
+        getitem_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function"
+            and n.target == operator.getitem
+            and n.args[0] is ctrl_node
+        ]
+        self.assertGreaterEqual(len(getitem_nodes), 1)
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
