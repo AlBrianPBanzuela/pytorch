@@ -333,13 +333,15 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     if infers:
         size = -size
         missing_size = total_size // size
-        if not total_size % size == 0:
-            raise AssertionError(
-                f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
-            )
+        torch._check(
+            total_size % size == 0,
+            lambda: f"size inferred for -1 is not integral {sizes} should have {total_size} elements.",
+        )
         return tuple(s if not guard_or_false(s == -1) else missing_size for s in sizes)
-    if not size == total_size:
-        raise AssertionError(f"sizes do not match {total_size} vs {size}")
+    torch._check(
+        size == total_size,
+        lambda: f"sizes do not match {total_size} vs {size}",
+    )
     return sizes
 
 
@@ -377,8 +379,10 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
-    if not from_nelem == prod(to_size):
-        raise AssertionError("Total view shape does not add up")
+    torch._check(
+        from_nelem == prod(to_size),
+        lambda: "Total view shape does not add up",
+    )
 
     from_idx = 0
     to_idx = 0
