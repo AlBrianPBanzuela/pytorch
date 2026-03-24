@@ -1898,7 +1898,8 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
-  lumen test pytorch-core --group-id pytorch_numpy_2 --build-env "$BUILD_ENVIRONMENT"
+  (cd .ci/lumen_cli && python -m pip install -e .)
+  python -m cli.run test pytorch-core --group-id pytorch_numpy_2 --build-env "$BUILD_ENVIRONMENT"
  elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
@@ -1922,7 +1923,7 @@ elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   (cd .ci/lumen_cli && python -m pip install -e .)
   echo "===== test_python_legacy_jit uses lumen_cli ====="
-  python -m cli.run pytorch-core  --build-env "$BUILD_ENVIRONMENT" --group-id pytorch_jit_legacy
+  python -m cli.run test pytorch-core  --build-env "$BUILD_ENVIRONMENT" --group-id pytorch_jit_legacy
   echo "===== test_python_legacy_jit uses legacy ====="
   test_python_legacy_jit
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
