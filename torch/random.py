@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
-from collections.abc import Generator, Sequence
-from typing import Optional, TYPE_CHECKING
+from collections.abc import Generator
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 from torch._C import default_generator
 
 
-def key(seed: int, impl: str = "philox4x32-10", device: torch.device = None) -> torch.Tensor:
+def key(
+    seed: int, impl: str = "philox4x32-10", device: torch.device | None = None
+) -> torch.Tensor:
     if impl != "philox4x32-10":
         raise NotImplementedError(
             f"torch.random.key() does not support PRNG impl '{impl}'"
@@ -254,7 +256,7 @@ def fork_rng(
             device_mod.set_rng_state(device_rng_state, device)
 
 
-def thread_safe_generator() -> Optional[torch.Generator]:
+def thread_safe_generator() -> torch.Generator | None:
     """Returns a thread-safe random number generator for use in DataLoader workers.
     This function provides a convenient way for transforms and user code to use
     thread-safe random number generation without manually checking worker context.
