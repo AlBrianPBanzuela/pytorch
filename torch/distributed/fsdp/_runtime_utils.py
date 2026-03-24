@@ -290,9 +290,9 @@ def _unshard(
     """
     if not handle:
         return
-    compute_stream = state._device_handle.current_stream()
+    handle._compute_stream = state._device_handle.current_stream()
     with state._device_handle.stream(pre_unshard_stream):
-        ran_pre_unshard = handle.pre_unshard(compute_stream)
+        ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
     if state.limit_all_gathers:

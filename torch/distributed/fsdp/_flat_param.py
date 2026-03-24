@@ -600,6 +600,9 @@ class FlatParamHandle:
         self._needs_pre_backward_unshard = False
         # Was the handle prefetched? Set on successful _prefetch_handle and unshard
         self._prefetched = False
+        # The compute stream at the time _unshard() is called, used by
+        # pre_unshard() to synchronize before _writeback_orig_params()
+        self._compute_stream: torch.Stream | None = None
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1304,7 +1307,7 @@ class FlatParamHandle:
     ###################
     # UNSHARD/RESHARD #
     ###################
-    def pre_unshard(self, compute_stream: torch.Stream) -> bool:
+    def pre_unshard(self) -> bool:
         """
         Return ``False`` if this is a no-op and ``True`` otherwise.
 
@@ -1322,7 +1325,11 @@ class FlatParamHandle:
             self._use_sharded_views()
         ret = False
         if self._use_orig_params and not self._skip_writeback_check:
-            ret = self._writeback_orig_params(compute_stream)
+            # Wait for the compute stream since _writeback_orig_params reads
+            # original parameters that may still be in use during prefetch.
+            if self._compute_stream is not None:
+                self._device_handle.current_stream().wait_stream(self._compute_stream)
+            ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
             and not self._offload_params
@@ -2240,7 +2247,7 @@ class FlatParamHandle:
 
     @no_type_check
     @torch.no_grad()
-    def _writeback_orig_params(self, compute_stream: torch.Stream) -> bool:
+    def _writeback_orig_params(self) -> bool:
         """
         Write back any parameters that changed storage to the handle's ``FlatParameter``.
 
@@ -2254,9 +2261,6 @@ class FlatParamHandle:
             but no longer has the expected flattened shape.
         Returns: ``True`` if some writeback happened, and ``False`` otherwise.
         """
-        # This runs on pre_unshard_stream during prefetch while the compute
-        # stream may still be using the original parameters.
-        self._device_handle.current_stream().wait_stream(compute_stream)
         if (
             self.uses_sharded_strategy
             and not self.is_sharded(self.flat_param)

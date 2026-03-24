@@ -1403,8 +1403,8 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
 
         orig_pre_unshard = FlatParamHandle.pre_unshard
 
-        def _pre_unshard_with_check(self_handle, compute_stream):
-            ret = orig_pre_unshard(self_handle, compute_stream)
+        def _pre_unshard_with_check(self_handle):
+            ret = orig_pre_unshard(self_handle)
             # Read the flag after pre_unshard returns. If _writeback_orig_params
             # properly waited for the compute stream, this clone (on
             # pre_unshard_stream) is ordered after the wait and reads 1.
