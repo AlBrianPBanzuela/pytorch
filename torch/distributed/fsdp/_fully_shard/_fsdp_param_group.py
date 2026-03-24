@@ -524,8 +524,8 @@ class FSDPParamGroup:
                     fsdp_param.unsharded_param.grad = None
             if self.reshard_after_backward:
                 self.reshard()
-        # Wait on prior RS states before issuing new work, even if this
-        # group has no grads (must synchronize regardless).
+        # Wait on prior module's RS states (assumes backward fires groups
+        # N-1 first; if not, overlap degrades but correctness is preserved).
         if (
             self._param_group_index == self._num_param_groups - 1
             and self.comm_ctx.reduce_scatter_states
@@ -645,6 +645,10 @@ class FSDPParamGroup:
                 # happen if we prefetched from N-1).
                 if self._param_group_index != 1:
                     return
+                # E.g. fully_shard(block, shard_placement_fn=...) creates two
+                # param groups per block (dense + moe), giving
+                # post_forward_order = [block0, block0.moe, block1, block1.moe].
+                # block1.moe walks back past block1 to prefetch block0.moe then block0.
                 curr_modules = self.modules
                 target_modules: tuple[nn.Module, ...] | None = None
                 for step in range(1, curr_index + 1):
