@@ -3738,6 +3738,16 @@
       ]
     }
   ],
+  "GB2269": [
+    {
+      "Gb_type": "record_stream requires a StreamVariable",
+      "Context": "record_stream({stream})",
+      "Explanation": "tensor.record_stream() expects a stream argument.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3343": [
     {
       "Gb_type": "Cannot reconstruct P2POpVariable",

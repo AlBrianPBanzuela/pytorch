@@ -29,6 +29,7 @@ _SYNC_OPS = (
     torch.ops.streams.record_event.default,
     torch.ops.streams.wait_event.default,
     torch.ops.streams.synchronize_event.default,
+    torch.ops.streams.record_stream.default,
 )
 
 
@@ -375,6 +376,7 @@ def _wrap_sync_node(
     """
     from torch._inductor.fx_passes.control_dependencies import (
         _create_subgraph_for_node,
+        _extract_unique_nodes,
         control_deps,
         get_subgraph_name,
     )
@@ -395,8 +397,11 @@ def _wrap_sync_node(
     subgraph_attr_name = get_subgraph_name(gm, sync_node.name)
     setattr(gm, subgraph_attr_name, subgraph_module)
 
+    # Extract the sync node's own Node args (e.g., the tensor arg for record_stream).
+    # For event-based ops (record_event/wait_event) this is empty since all args are ints.
+    node_args, _, _ = _extract_unique_nodes(sync_node.args, sync_node.kwargs)
+
     # Create control_deps call
-    # Note: sync nodes (record_event/wait_event) only take int args, no Node args.
     with graph.inserting_before(sync_node):
         get_subgraph = graph.get_attr(subgraph_attr_name)
         control_deps_node = graph.call_function(
@@ -404,6 +409,7 @@ def _wrap_sync_node(
             args=(
                 tuple(deps_before_sync),  # additional_deps (all deps for ordering)
                 get_subgraph,  # subgraph
+                *node_args,  # sync node's own Node args (if any)
                 *deps_with_uses_after_sync,  # only pass through deps that are used
             ),
             kwargs={},
@@ -479,7 +485,14 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
 
         if node.op == "call_function":
             if node.target in _SYNC_OPS:
-                event_index: int = node.args[0]  # type: ignore[assignment]
+                is_record_stream = (
+                    node.target is torch.ops.streams.record_stream.default
+                )
+
+                # record_stream takes (tensor, stream_index) — no event_index.
+                # Event-based ops take (event_index, stream_index).
+                if not is_record_stream:
+                    event_index: int = node.args[0]  # type: ignore[assignment]
 
                 # synchronize_event blocks the CPU thread, so it acts
                 # as a barrier across all streams. Collect deps from every
@@ -496,6 +509,12 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         deps_before_sync = [*placeholders, *all_stream_deps]
                     else:
                         deps_before_sync = all_stream_deps
+                elif is_record_stream:
+                    # record_stream(tensor, stream_index): deps come from the
+                    # tensor's producing stream (where the tensor lives), not
+                    # the target stream_index.
+                    sync_stream = get_stream(node.args[0])  # type: ignore[arg-type]
+                    deps_before_sync = list(stream_to_nodes.get(sync_stream, ()))
                 else:
                     sync_stream = node.args[1]  # type: ignore[assignment]
                     deps_before_sync = list(stream_to_nodes.get(sync_stream, ()))

@@ -1380,6 +1380,28 @@ class TensorVariable(VariableTracker):
     ) -> "DataPtrVariable":
         return DataPtrVariable(self)
 
+    def method_record_stream(
+        self,
+        tx: "InstructionTranslator",
+        stream: VariableTracker,
+    ) -> VariableTracker:
+        from .streams import StreamVariable
+
+        if not isinstance(stream, StreamVariable):
+            unimplemented(
+                gb_type="record_stream requires a StreamVariable",
+                context=f"record_stream({stream})",
+                explanation="tensor.record_stream() expects a stream argument.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_stream,
+            (self.as_proxy(), stream.user_object_index),
+            {},
+        )
+        return CONSTANT_VARIABLE_NONE
+
     def method_item(
         self,
         tx: "InstructionTranslator",
