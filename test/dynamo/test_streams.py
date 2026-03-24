@@ -495,7 +495,7 @@ class GraphModule(torch.nn.Module):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(2, 0)
             return (record_event_default, dep_0, dep_1)
-""",
+""",  # noqa: B950
         )
 
     @requires_cuda
