@@ -2066,7 +2066,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         # flattening on non-first dimension should fail
         dt = create_dt(1)
         with self.assertRaisesRegex(
-            RuntimeError, "cannot be performed without redistribution"
+            RuntimeError, "is not evenly divisible by mesh dimension"
         ):
             flatten_on_even_mesh(dt)
 
@@ -2077,7 +2077,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         # uneven case: not informing compiler of divisibility will crash
         dt = create_dt(0)
         with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten unevenly sharded dimension 0"
+            RuntimeError, "is not evenly divisible by mesh dimension"
         ):
             flatten(dt)
 

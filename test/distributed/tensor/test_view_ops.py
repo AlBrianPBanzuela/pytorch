@@ -699,19 +699,28 @@ class TestViewOps(DTensorContinuousTestBase):
         - Replicate -> remains Replicate
         """
         mesh: DeviceMesh = init_device_mesh(self.device_type, (self.world_size,))
+        even = 2 * mesh.size(0)
+        dim_values = [even - 1, even, even + 1]
         for tensor_ndim in [2, 3, 4]:
             for flatten_start in range(tensor_ndim):
                 for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
                     # Shard
                     for shard_dim in range(flatten_start, flatten_end):
-                        tensor_dim_values = [
-                            2 * mesh.size(0) - 1,
-                            2 * mesh.size(0),
-                            2 * mesh.size(0) + 1,
-                        ]
-                        for tensor_dims in list(
-                            itertools.product(tensor_dim_values, repeat=tensor_ndim)
-                        ):
+                        if self.is_local_tensor_enabled:
+                            # Only vary the sharded dim to avoid combinatorial
+                            # explosion under LocalTensorMode dispatch overhead.
+                            all_dims = [
+                                tuple(
+                                    v if i == shard_dim else even
+                                    for i in range(tensor_ndim)
+                                )
+                                for v in dim_values
+                            ]
+                        else:
+                            all_dims = list(
+                                itertools.product(dim_values, repeat=tensor_ndim)
+                            )
+                        for tensor_dims in all_dims:
                             placements = (Shard(shard_dim),)
                             ctx = contextlib.nullcontext()
                             # uneven shard on last dim (flatten_end - 1) is supported
@@ -739,14 +748,13 @@ class TestViewOps(DTensorContinuousTestBase):
                                 )
 
                     # Replicate
-                    tensor_dim_values = [
-                        2 * mesh.size(0) - 1,
-                        2 * mesh.size(0),
-                        2 * mesh.size(0) + 1,
-                    ]
-                    for tensor_dims in list(
-                        itertools.product(tensor_dim_values, repeat=tensor_ndim)
-                    ):
+                    if self.is_local_tensor_enabled:
+                        all_dims = [(even,) * tensor_ndim]
+                    else:
+                        all_dims = list(
+                            itertools.product(dim_values, repeat=tensor_ndim)
+                        )
+                    for tensor_dims in all_dims:
                         placements = (Replicate(),)
                         with self.subTest(
                             dims=tensor_dims, flat=(flatten_start, flatten_end)
@@ -831,14 +839,21 @@ class TestViewOps(DTensorContinuousTestBase):
                     # # S, R and R, S
                     for shard_dim in range(flatten_start, flatten_end):
                         for shard_placement_idx in range(mesh_ndim):
-                            tensor_dim_values = [
-                                2 * mesh.size(shard_placement_idx) - 1,
-                                2 * mesh.size(shard_placement_idx),
-                                2 * mesh.size(shard_placement_idx) + 1,
-                            ]
-                            for tensor_dims in list(
-                                itertools.product(tensor_dim_values, repeat=tensor_ndim)
-                            ):
+                            even_val = 2 * mesh.size(shard_placement_idx)
+                            dim_vals = [even_val - 1, even_val, even_val + 1]
+                            if self.is_local_tensor_enabled:
+                                all_dims = [
+                                    tuple(
+                                        v if i == shard_dim else even_val
+                                        for i in range(tensor_ndim)
+                                    )
+                                    for v in dim_vals
+                                ]
+                            else:
+                                all_dims = list(
+                                    itertools.product(dim_vals, repeat=tensor_ndim)
+                                )
+                            for tensor_dims in all_dims:
                                 placements = tuple(
                                     Shard(shard_dim)
                                     if idx == shard_placement_idx
@@ -947,15 +962,15 @@ class TestViewOps(DTensorContinuousTestBase):
                                         )
 
                     # Replicate, Replicate
-                    # Test multiple tensor dimension combinations
-                    tensor_dim_values = [
-                        2 * mesh.size(0) - 1,
-                        2 * mesh.size(0),
-                        2 * mesh.size(0) + 1,
-                    ]
-                    for tensor_dims in itertools.product(
-                        tensor_dim_values, repeat=tensor_ndim
-                    ):
+                    rr_even = 2 * mesh.size(0)
+                    if self.is_local_tensor_enabled:
+                        all_rr_dims = [(rr_even,) * tensor_ndim]
+                    else:
+                        rr_vals = [rr_even - 1, rr_even, rr_even + 1]
+                        all_rr_dims = list(
+                            itertools.product(rr_vals, repeat=tensor_ndim)
+                        )
+                    for tensor_dims in all_rr_dims:
                         placements = (Replicate(), Replicate())
                         with self.subTest(
                             dims=tensor_dims, flat=(flatten_start, flatten_end)
