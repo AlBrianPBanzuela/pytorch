@@ -491,8 +491,9 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
 
                 # record_stream takes (tensor, stream_index) — no event_index.
                 # Event-based ops take (event_index, stream_index).
+                event_index: int = -1
                 if not is_record_stream:
-                    event_index: int = node.args[0]  # type: ignore[assignment]
+                    event_index = node.args[0]  # type: ignore[assignment]
 
                 # synchronize_event blocks the CPU thread, so it acts
                 # as a barrier across all streams. Collect deps from every
