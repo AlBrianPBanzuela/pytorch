@@ -109,17 +109,17 @@ on:
         default: false
         description: If true, use ARC (OSDC) runner path instead of EC2.
       python-version:
-        required: false
+        required: true
         type: string
         default: ""
         description: Python version to use for the OSDC build.
       compiler:
-        required: false
+        required: true
         type: string
         default: ""
         description: Compiler to use for the OSDC build.
       cuda-version:
-        required: false
+        required: true
         type: string
         default: ""
         description: CUDA version to use for the OSDC build.
@@ -179,6 +179,10 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        with:
+          python-version: ${{ inputs.python-version }}
+          compiler: ${{ inputs.compiler }}
+          cuda-version: ${{ inputs.cuda-version }}
 
       - name: Login to ECR
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
@@ -525,7 +529,7 @@ jobs:
           checkout-mode: treeless
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@huydhn/setup-linux-osdc
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
