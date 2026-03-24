@@ -375,7 +375,7 @@ def backward(
             grad_tensors=grad_tensors,
             retain_graph=retain_graph,
             create_graph=create_graph,
-            inputs=inputs_tuple,
+            inputs=inputs_tuple if inputs is not None else None,
         )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
