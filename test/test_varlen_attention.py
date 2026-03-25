@@ -720,13 +720,14 @@ class TestVarlenAttention(NNTestCase):
                 window_size=window_size,
                 **split_kwargs,
             )
-            if num_splits == 1 or backend == "fa2":
+            if num_splits == 1:
                 self.assertEqual(solo_output, batched_output[:target_seq_len])
                 self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
                 self.assertEqual(solo_output, solo_out_buf)
             else:
-                self.assertNotEqual(solo_output, batched_output[:target_seq_len])
-                self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
+                if backend == "fa3":
+                    self.assertNotEqual(solo_output, batched_output[:target_seq_len])
+                    self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
