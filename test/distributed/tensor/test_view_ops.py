@@ -41,33 +41,33 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils import _pytree as pytree
 
 
-def _get_all_factorizations(n):
-    """Return all ways to factor n into a sorted tuple of integers > 1.
-
-    Each factorization has length >= 2 (non-trivial unflatten).
-    Only sorted (non-decreasing) factorizations are returned since permutations
-    exercise the same split_factor logic with different constants.
-
-    Examples:
-        12 -> [(2, 6), (3, 4), (2, 2, 3)]
-        36 -> [(2, 18), (3, 12), (4, 9), (6, 6), (2, 2, 9), (2, 3, 6), (3, 3, 4), (2, 2, 3, 3)]
-    """
-
-    def get_sorted_factorizations(remaining, min_factor=2):
-        if remaining == 1:
-            return [()]
-        result = []
-        for f in range(min_factor, remaining + 1):
-            if remaining % f == 0:
-                for sub in get_sorted_factorizations(remaining // f, f):
-                    result.append((f,) + sub)
-        return result
-
-    return [f for f in get_sorted_factorizations(n) if len(f) >= 2]
-
-
 class TestViewOps(DTensorContinuousTestBase):
     world_size = 6
+
+    @staticmethod
+    def _get_all_factorizations(n):
+        """Return all ways to factor n into a sorted tuple of integers > 1.
+
+        Each factorization has length >= 2 (non-trivial unflatten).
+        Only sorted (non-decreasing) factorizations are returned since permutations
+        exercise the same split_factor logic with different constants.
+
+        Examples:
+            12 -> [(2, 6), (3, 4), (2, 2, 3)]
+            36 -> [(2, 18), (3, 12), (4, 9), (6, 6), (2, 2, 9), (2, 3, 6), (3, 3, 4), (2, 2, 3, 3)]
+        """
+
+        def get_sorted_factorizations(remaining, min_factor=2):
+            if remaining == 1:
+                return [()]
+            result = []
+            for f in range(min_factor, remaining + 1):
+                if remaining % f == 0:
+                    for sub in get_sorted_factorizations(remaining // f, f):
+                        result.append((f,) + sub)
+            return result
+
+        return [f for f in get_sorted_factorizations(n) if len(f) >= 2]
 
     def test_view_groups(self):
         self.assertEqual(
@@ -1401,7 +1401,7 @@ class TestViewOps(DTensorContinuousTestBase):
 
         # Get all non-trivial factorizations of unflatten_dim size
         unflatten_size = tensor_dims[unflatten_dim]
-        factorizations = _get_all_factorizations(unflatten_size)
+        factorizations = self._get_all_factorizations(unflatten_size)
 
         # Skip if no non-trivial factorization exists (prime number)
         if not factorizations:
@@ -1490,7 +1490,7 @@ class TestViewOps(DTensorContinuousTestBase):
             mesh_ndim = len(mesh_shape)
             num_shard = mesh_ndim - num_rep
             flattened_size = math.prod(mesh_shape) * 12
-            factorizations = _get_all_factorizations(flattened_size)
+            factorizations = self._get_all_factorizations(flattened_size)
 
             if num_shard == 0:
                 # All-replicate: test that Replicate is preserved
