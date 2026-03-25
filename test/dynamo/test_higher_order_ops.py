@@ -7289,7 +7289,6 @@ xfail_hops_compile = {
     # inductor
     "while_loop",  # LoweringException: AssertionError
     "flex_attention",  # LoweringException: AssertionError
-    "flex_attention_backward",  # AssertionError: Input shapes should have M >= 16, N >= 16 and K >= 16
 }
 
 

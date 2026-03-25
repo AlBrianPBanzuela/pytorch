@@ -966,6 +966,17 @@ def sdpa_dense_backward(
             f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
             f"and value.dtype={value.dtype}"
         )
+    if joint_graph is None:
+        example_vals = (
+            query.new_zeros((), requires_grad=True),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+        )
+        _, joint_graph = create_fw_bw_graph(
+            fw_graph, example_vals, score_mod_other_buffers
+        )
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     Bq, Hq, seq_len_q, qk_head_dim = query.shape
