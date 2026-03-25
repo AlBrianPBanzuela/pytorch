@@ -525,8 +525,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         )
 
         _, codes = run_fw_bw_and_get_code(lambda: compiled_module(x))
-        # flex in forward and flex_backward in backward
-        self.assertEqual(len(codes), 2)
+        # flex in forward and flex_backward in backward; contiguous partitioning
+        # may split non-contiguous annotated nodes into separate regions
+        self.assertGreaterEqual(len(codes), 2)
 
     def test_refcounts(self):
         """Tests that activations can be cleared before the end of graph"""
@@ -1522,6 +1523,129 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         post_compiled = fw_compiled.post_compile(loaded_code, fx_config)
         self.assertIsNotNone(post_compiled)
         self.assertIsNotNone(post_compiled._graph_module)  # Now deserialized
+
+
+class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
+    """Tests for _RegionScooper partitioning behavior.
+
+    Ensures that non-contiguous annotated regions are NOT horizontally fused
+    into a single compiled partition.
+    """
+
+    def _build_annotated_graph(self, tags):
+        """Build a simple linear chain graph where specified node indices are annotated.
+
+        Creates: x -> op0 -> op1 -> ... -> opN -> output
+        Each op is a simple aten.mul with scalar 1.0.
+        Returns the GraphModule and the list of call_function nodes.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        current = x
+        nodes = []
+        for i, tagged in enumerate(tags):
+            node = g.call_function(torch.ops.aten.mul.Scalar, (current, 1.0))
+            if tagged:
+                node.meta["custom"] = {"compile_with_inductor": True}
+            # Add fake tensor metadata for compilation
+            node.meta["val"] = torch.empty(10)
+            nodes.append(node)
+            current = node
+        g.output(current)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        return gm, nodes
+
+    def _count_partitions(self, gm):
+        """Count __marked_inductor_submod partitions in the graph."""
+        return sum(
+            1
+            for node in gm.graph.nodes
+            if node.op == "call_module"
+            and node.target.startswith("__marked_inductor_submod")
+        )
+
+    def test_contiguous_single_region(self):
+        """A single contiguous annotated region should produce 1 partition."""
+        from torch.fx.passes.regional_inductor import _RegionScooper
+
+        #            tagged tagged tagged
+        gm, _ = self._build_annotated_graph([False, True, True, True, False])
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            partitioned = _RegionScooper.scoop_regions(gm)
+        self.assertEqual(self._count_partitions(partitioned), 1)
+
+    def test_two_separate_regions_no_horizontal_fusion(self):
+        """Two non-contiguous annotated regions separated by an untagged node
+        must produce 2 separate partitions, not 1 fused partition."""
+        from torch.fx.passes.regional_inductor import _RegionScooper
+
+        #            tagged tagged  gap  tagged tagged
+        gm, _ = self._build_annotated_graph([True, True, False, True, True])
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            partitioned = _RegionScooper.scoop_regions(gm)
+        self.assertEqual(self._count_partitions(partitioned), 2)
+
+    def test_three_separate_regions(self):
+        """Three non-contiguous annotated regions should produce 3 partitions."""
+        from torch.fx.passes.regional_inductor import _RegionScooper
+
+        #            T   gap  T   gap  T
+        gm, _ = self._build_annotated_graph([True, False, True, False, True])
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            partitioned = _RegionScooper.scoop_regions(gm)
+        self.assertEqual(self._count_partitions(partitioned), 3)
+
+    def test_alternating_tagged_untagged(self):
+        """Alternating tagged/untagged nodes: each tagged node is its own region."""
+        from torch.fx.passes.regional_inductor import _RegionScooper
+
+        #            T   gap  T   gap  T   gap  T
+        gm, _ = self._build_annotated_graph(
+            [True, False, True, False, True, False, True]
+        )
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            partitioned = _RegionScooper.scoop_regions(gm)
+        self.assertEqual(self._count_partitions(partitioned), 4)
+
+    def test_no_tagged_nodes(self):
+        """No tagged nodes should produce no partitions."""
+        from torch.fx.passes.regional_inductor import _RegionScooper
+
+        gm, _ = self._build_annotated_graph([False, False, False])
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            partitioned = _RegionScooper.scoop_regions(gm)
+        self.assertEqual(self._count_partitions(partitioned), 0)
+
+    @requires_cuda_and_triton
+    def test_no_horizontal_fusion_numerics(self):
+        """Two separate annotated regions with an untagged op between them
+        should produce correct results (regression test for horizontal fusion bug)."""
+
+        def fn(x):
+            # Region 1: annotated
+            with fx_traceback.annotate({"compile_with_inductor": True}):
+                a = x * 2.0
+                b = a + 1.0
+
+            # Untagged gap
+            c = torch.sin(b)
+
+            # Region 2: annotated
+            with fx_traceback.annotate({"compile_with_inductor": True}):
+                d = c * 3.0
+                e = d + 2.0
+
+            return e
+
+        opt_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(), fullgraph=True
+        )
+        x = torch.randn(10, device="cuda", requires_grad=True)
+        expected = fn(x)
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        self.assertEqual(result, expected)
+        # 2 regions in fwd + 2 regions in bwd = 4 compiled regions
+        self.assertEqual(len(codes), 4)
 
 
 if __name__ == "__main__":
