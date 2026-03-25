@@ -133,6 +133,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         r = buf.getvalue()
         self.assertIn("reader.opaque('__torch__.MyClass')", r)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_extract_distributed_info_skips_non_string_group_name(self):
         """_extract_distributed_info should skip ops where group_name is an FX Node."""
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
