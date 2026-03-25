@@ -114,7 +114,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-    from torch._library.opaque_object import OpaqueType
+    from torch._opaque_base import OpaqueBase
     from torch.utils._pytree import TreeSpec
 
 
@@ -285,7 +285,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
-    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueType] = []
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueBase] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
         get_plain_tensors(tensor, out=plain_tensors)
@@ -336,7 +336,9 @@ def _collect_tensors_with_sources(
                 out=plain,  # pyrefly: ignore[bad-argument-type]
             )
             assert all(
-                isinstance(t, torch._subclasses.fake_tensor.FakeTensor) for t in plain
+                isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
+                for t in plain
+                if isinstance(t, torch.Tensor)
             ), (
                 f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
             )
