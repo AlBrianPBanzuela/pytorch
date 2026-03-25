@@ -1666,6 +1666,9 @@ class UserMethodVariable(UserFunctionVariable):
             return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
         return super().var_getattr(tx, name)
 
+    def get_real_python_backed_value(self) -> Any:
+        return self.fn
+
 
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(

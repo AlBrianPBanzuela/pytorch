@@ -2429,6 +2429,27 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         result = fn(obj)
         self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
+    def test_method_dict_direct_fullgraph(self):
+        """
+        Regression test: Accessing __dict__ directly on UserMethodVariable.
+        This should fail with: unsupported variable type for __dict__ access
+        """
+
+        class Foo:
+            def bar(self):
+                return 42
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = Foo()
+            # Access __dict__ on bound method - creates UserMethodVariable
+            method = obj.bar
+            d = method.__dict__
+            return d
+
+        # This should not raise Unsupported
+        fn()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
