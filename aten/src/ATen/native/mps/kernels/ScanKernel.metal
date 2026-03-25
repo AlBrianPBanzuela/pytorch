@@ -3,10 +3,9 @@
 using namespace metal;
 
 #include <c10/metal/common.h>
-#include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
 
-using c10::metal::accum_t;
+using namespace c10::metal;
 
 struct LogAddExp {
   template <typename T>
