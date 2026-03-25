@@ -66,26 +66,6 @@ def _get_all_factorizations(n):
     return [f for f in get_sorted_factorizations(n) if len(f) >= 2]
 
 
-# (mesh_shape, placement_patterns) for flatten test consolidation.
-# Each pattern is a tuple of "S" (Shard) or "R" (Replicate) per mesh dim.
-_FLATTEN_CASES = [
-    ((6,), [("S",), ("R",)]),
-    ((3, 2), [("S", "R"), ("R", "S"), ("S", "S"), ("R", "R")]),
-]
-
-# (mesh_shape, num_replicate) for unflatten test consolidation.
-# num_replicate = number of leading Replicate dims in the placement.
-_UNFLATTEN_MULTI_MESH_CASES = [
-    ((3, 2), 0),  # (SS, SS)
-    ((3, 2), 1),  # (R, SS)
-    ((3, 2), 2),  # (R, R)
-    ((2, 2, 2), 0),  # (SS, SS, SS)
-    ((2, 2, 2), 1),  # (R, SS, SS)
-    ((2, 2, 2), 2),  # (R, R, SS)
-    ((2, 2, 2), 3),  # (R, R, R)
-]
-
-
 class TestViewOps(DTensorContinuousTestBase):
     world_size = 6
 
@@ -753,10 +733,14 @@ class TestViewOps(DTensorContinuousTestBase):
     def test_dtensor_flatten_multi_mesh(self):
         """Test flatten operations across 1D and 2D meshes with all placement patterns.
 
-        Iterates _FLATTEN_CASES to test single-shard (S, SR, RS), multi-shard (SS),
-        and replicate (R, RR) patterns with even/uneven tensor dim sizes.
+        Iterates over 1D and 2D mesh configurations to test single-shard (S, SR, RS),
+        multi-shard (SS), and replicate (R, RR) patterns with even/uneven tensor dim sizes.
         """
-        for mesh_shape, patterns in _FLATTEN_CASES:
+        cases = [
+            ((6,), [("S",), ("R",)]),
+            ((3, 2), [("S", "R"), ("R", "S"), ("S", "S"), ("R", "R")]),
+        ]
+        for mesh_shape, patterns in cases:
             if self.world_size < math.prod(mesh_shape):
                 continue
             mesh = init_device_mesh(self.device_type, mesh_shape)
@@ -1486,10 +1470,20 @@ class TestViewOps(DTensorContinuousTestBase):
     def test_dtensor_unflatten_multi_mesh(self):
         """Test unflatten across 2D and 3D meshes with all placement patterns.
 
-        Iterates _UNFLATTEN_MULTI_MESH_CASES to test multi-shard (SS, SSS),
+        Iterates over 2D and 3D mesh configurations to test multi-shard (SS, SSS),
         mixed (R+SS, RR+SS), and replicate (RR, RRR) patterns.
         """
-        for mesh_shape, num_rep in _UNFLATTEN_MULTI_MESH_CASES:
+        # (mesh_shape, num_replicate_dims)
+        cases = [
+            ((3, 2), 0),  # (SS, SS)
+            ((3, 2), 1),  # (R, SS)
+            ((3, 2), 2),  # (R, R)
+            ((2, 2, 2), 0),  # (SS, SS, SS)
+            ((2, 2, 2), 1),  # (R, SS, SS)
+            ((2, 2, 2), 2),  # (R, R, SS)
+            ((2, 2, 2), 3),  # (R, R, R)
+        ]
+        for mesh_shape, num_rep in cases:
             if self.world_size < math.prod(mesh_shape):
                 continue
             mesh = init_device_mesh(self.device_type, mesh_shape)
