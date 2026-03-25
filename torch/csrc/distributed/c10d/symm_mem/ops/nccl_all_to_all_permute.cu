@@ -31,7 +31,7 @@ namespace c10d::nccl_extension {
 
 using namespace c10d::symmetric_memory;
 
-#ifdef NCCL_DEVICE_HAS_REDUCE_COPY
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
 namespace {
 
@@ -43,7 +43,23 @@ __device__ inline void copy_bytes_vec16_aligned(
     size_t tid,
     size_t stride) {
   const size_t n_vec = nbytes / 16;
-  for (size_t vec_idx = tid; vec_idx < n_vec; vec_idx += stride) {
+  constexpr int kUnroll = 4;
+  size_t vec_idx = tid;
+  for (; vec_idx + static_cast<size_t>(kUnroll - 1) * stride < n_vec;
+       vec_idx += static_cast<size_t>(kUnroll) * stride) {
+    at::native::memory::Vec<16> chunk[kUnroll];
+#pragma unroll 4
+    for (int u = 0; u < kUnroll; ++u) {
+      const size_t i = vec_idx + static_cast<size_t>(u) * stride;
+      chunk[u] = at::native::memory::ld_vec<16>(src + i * 16);
+    }
+#pragma unroll 4
+    for (int u = 0; u < kUnroll; ++u) {
+      const size_t i = vec_idx + static_cast<size_t>(u) * stride;
+      at::native::memory::st_vec<16>(dst + i * 16, chunk[u]);
+    }
+  }
+  for (; vec_idx < n_vec; vec_idx += stride) {
     const char* src_ptr = src + vec_idx * 16;
     char* dst_ptr = dst + vec_idx * 16;
     auto v = at::native::memory::ld_vec<16>(src_ptr);
@@ -113,14 +129,14 @@ __global__ void all_to_all_lsa_kernel(
         reinterpret_cast<const char*>(src_row),
         reinterpret_cast<char*>(dst_row),
         copy_row_bytes,
-        threadIdx.x,
-        blockDim.x);
+        coop.thread_rank(),
+        coop.size());
   }
 
   bar.sync(coop, cuda::memory_order_release);
 }
 
-#endif // NCCL_DEVICE_HAS_REDUCE_COPY
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
 // Host entry point.  Validates arguments, builds the devcomm (cached), and
 // launches the kernel.  See file-level comment for semantics.
@@ -130,7 +146,7 @@ void nccl_all_to_all_permute(
     int64_t scatter_dim,
     int64_t gather_dim,
     const std::string& group_name) {
-#ifdef NCCL_DEVICE_HAS_REDUCE_COPY
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   TORCH_CHECK(
       input.stride(-1) == 1,
       "nccl_all_to_all_permute: innermost dimension must be contiguous (stride[-1] == 1)");
@@ -358,8 +374,8 @@ void nccl_all_to_all_permute(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 #else
-  TORCH_CHECK(false, "nccl_all_to_all_permute requires NCCL >= 2.29.7 with reduce copy support");
-#endif // NCCL_DEVICE_HAS_REDUCE_COPY
+  TORCH_CHECK(false, "nccl_all_to_all_permute requires NCCL >= 2.28 with symmetric memory device support");
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 }
 
 } // namespace c10d::nccl_extension

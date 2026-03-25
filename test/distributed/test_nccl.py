@@ -581,7 +581,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 29, 7), "nccl_all_to_all_permute requires nccl 2.29.7")
+    @requires_nccl_version((2, 28, 0), "nccl_all_to_all_permute requires nccl 2.28")
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "scatter_gather,out_2d,input_3d",
