@@ -9033,9 +9033,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         def causal(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        ref_bm = create_block_mask(
-            causal, B=B, H=H, Q_LEN=S, KV_LEN=S, device=device
-        )
+        ref_bm = create_block_mask(causal, B=B, H=H, Q_LEN=S, KV_LEN=S, device=device)
         ref_out = ref_attn(q, k, v, ref_bm, scale)
 
         self.assertTrue(
