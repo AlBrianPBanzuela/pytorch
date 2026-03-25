@@ -372,21 +372,22 @@ class RecompileLimitKwargTests(torch._dynamo.test_case.TestCase):
             self._num_cache_entries(f), torch._dynamo.config.recompile_limit
         )
 
-    def test_recompile_limit_fullgraph_raises(self):
-        """With fullgraph=True, hitting the recompile_limit kwarg raises
-        FailOnRecompileLimitHit, consistent with the fullgraph contract."""
+    def test_recompile_limit_stricter_than_global(self):
+        """recompile_limit kwarg can be stricter than the global config."""
         cnt = torch._dynamo.testing.CompileCounter()
 
         def f(x):
             return x.sin()
 
-        opt_f = torch.compile(f, backend=cnt, fullgraph=True, recompile_limit=1)
+        # Global default is 8, but this region only allows 1
+        opt_f = torch.compile(f, backend=cnt, recompile_limit=1)
 
         opt_f(torch.randn(3))
         self.assertEqual(cnt.frame_count, 1)
 
-        with self.assertRaises(FailOnRecompileLimitHit):
-            opt_f(torch.randn(3, dtype=torch.float64))
+        # Should stop — recompile_limit=1 reached
+        opt_f(torch.randn(3, dtype=torch.float64))
+        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes=True)
     def test_recompile_limit_resume_function_auto_dynamic(self):

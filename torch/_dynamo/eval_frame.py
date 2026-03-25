@@ -1563,7 +1563,6 @@ def _optimize(
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
             package=package,
-            recompile_limit=recompile_limit,
         )
 
     backend = get_compiler_fn(backend)
@@ -2440,7 +2439,6 @@ def _optimize_assert(
     export_constraints: Any | None = None,
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
-    recompile_limit: int | None = None,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
@@ -2471,7 +2469,6 @@ def _optimize_assert(
             export=export,
             export_constraints=export_constraints,
             package=package,
-            recompile_limit=recompile_limit,
         ),
         hooks,
         backend_ctx_ctor,
