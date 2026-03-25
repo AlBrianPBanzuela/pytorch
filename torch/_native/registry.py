@@ -177,7 +177,7 @@ def _register_node_impl(
 ) -> None:
     """Helper function to register a single node implementation with proper parameters."""
     lib.impl(
-        op_symbol,
+        node.op_symbol,
         node.override_fn,
         dispatch_key,
         with_keyset=not node.unconditional_override,
