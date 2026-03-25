@@ -106,6 +106,11 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
 
   rng_state_seed_extragraph_ = at::empty({1}, options);
   rng_state_offset_extragraph_ = at::empty({1}, options);
+
+  // Synchronize the default stream so that any prior work completes before
+  // a different stream writes to this memory.
+  c10::cuda::getDefaultCUDAStream().synchronize();
+
   offset_intragraph_ = 0;
 }
 
@@ -152,18 +157,21 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
  * Create and initialize capture state for a given capture ID.
  * Called during capture_begin for each registered generator.
  */
-CUDAGeneratorCaptureState* CUDAGeneratorState::init_capture_state(CaptureId_t capture_id) {
+void CUDAGeneratorState::init_capture_state(CaptureId_t capture_id) {
+  {
+    std::lock_guard<std::mutex> lock(capture_states_mutex_);
+    if (capture_states_.count(capture_id)) {
+      return;
+    }
+  }
+
   auto capture_state = make_intrusive<CUDAGeneratorCaptureState>();
   capture_state->initialize(seed_);
 
   std::lock_guard<std::mutex> lock(capture_states_mutex_);
-  auto it = capture_states_.find(capture_id);
-  if (it != capture_states_.end()) {
-    return it->second.get();
+  if (!capture_states_.count(capture_id)) {
+    capture_states_[capture_id] = std::move(capture_state);
   }
-  auto* ptr = capture_state.get();
-  capture_states_[capture_id] = std::move(capture_state);
-  return ptr;
 }
 
 /**
