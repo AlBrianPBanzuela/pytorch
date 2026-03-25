@@ -141,6 +141,7 @@ void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
+    int64_t region_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
@@ -159,6 +160,14 @@ void lookup(
 
     bool valid = backend == Py_False ||
         backend_match(cache_entry.backend.ptr(), backend);
+
+    // Filter by region_id: when region_id >= 0, only match entries from
+    // the same region. Entries with region_id -1 (no region) are visible
+    // to all, and callers with region_id -1 see all entries.
+    if (valid && region_id >= 0 && cache_entry.region_id >= 0 &&
+        cache_entry.region_id != region_id) {
+      valid = false;
+    }
 
     if (valid) {
       try {

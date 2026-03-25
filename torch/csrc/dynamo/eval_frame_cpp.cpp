@@ -478,6 +478,7 @@ PyObject* dynamo__custom_eval_frame(
   std::unique_ptr<FrameLocalsMapping> locals =
       std::make_unique<FrameLocalsMapping>(frame);
   PyObject* backend = get_backend(callback.ptr()); // borrowed
+  int64_t region_id = get_region_id(callback.ptr());
 
   // We don't run the current custom_eval_frame behavior for guards.
   // So we temporarily set the callback to Py_None to drive the correct behavior
@@ -494,6 +495,7 @@ PyObject* dynamo__custom_eval_frame(
       extra,
       locals.get(),
       backend,
+      region_id,
       &maybe_cached_code,
       &trace_annotation,
       is_skip_guard_eval_unsafe);

@@ -436,6 +436,327 @@ class RecompileLimitKwargTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(num_resume_entries, 2)
 
 
+class IsolatedRegionTests(torch._dynamo.test_case.TestCase):
+    """Tests for isolated_region=True on torch.compile(). Each compile region
+    gets its own isolated cache via C++ region_id filtering."""
+
+    @staticmethod
+    def _num_cache_entries(code):
+        return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
+
+    @torch._dynamo.config.patch(recompile_limit=2)
+    def test_isolated_region_basic(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        opt_f = torch.compile(f, backend=cnt, isolated_region=True)
+
+        opt_f(torch.randn(3), torch.randn(3))
+        self.assertEqual(self._num_cache_entries(f), 1)
+
+        opt_f(torch.randn(3, dtype=torch.float64), torch.randn(3, dtype=torch.float64))
+        self.assertEqual(self._num_cache_entries(f), 2)
+
+        opt_f(torch.randn(3, dtype=torch.float16), torch.randn(3, dtype=torch.float16))
+        self.assertEqual(self._num_cache_entries(f), 2)
+
+    def test_isolated_region_same_function_different_regions(self):
+        """Two torch.compile() calls on the same function with isolated_region
+        get fully independent caches."""
+        cnt1 = torch._dynamo.testing.CompileCounter()
+        cnt2 = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        opt_f = torch.compile(f, backend=cnt1, isolated_region=True)
+        opt_g = torch.compile(f, backend=cnt2, isolated_region=True)
+
+        opt_f(torch.randn(3), torch.randn(3))
+        self.assertEqual(cnt1.frame_count, 1)
+
+        opt_f(
+            torch.randn(3, dtype=torch.float64),
+            torch.randn(3, dtype=torch.float64),
+        )
+        self.assertEqual(cnt1.frame_count, 2)
+
+        # opt_g can compile despite f.__code__ having 2 entries from opt_f
+        opt_g(torch.randn(3, dtype=torch.float16), torch.randn(3, dtype=torch.float16))
+        self.assertEqual(cnt2.frame_count, 1)
+
+    @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
+    def test_isolated_region_factory_pattern(self):
+        """Factory creates multiple torch.compile wrappers around the same
+        inner function. Each gets its own isolated cache."""
+        from functools import cache
+
+        def core(x):
+            return x.sum()
+
+        @cache
+        def factory(key):
+            @torch.compile(fullgraph=True, dynamic=False, isolated_region=True)
+            def frontend(x, n):
+                return core(x) + n
+
+            return frontend
+
+        factory("foo")(torch.ones(3), 3)
+        factory("bar")(torch.ones(4), 3)
+        factory("baz")(torch.ones(5), 3)
+
+    def test_isolated_region_static_and_dynamic(self):
+        """Two compile regions on the same function: one static, one dynamic.
+        Their cache entries don't interfere."""
+        cnt_static = torch._dynamo.testing.CompileCounter()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+
+        def magic(x, y):
+            return x.sum() - y.sum()
+
+        magic_static = torch.compile(
+            magic, backend=cnt_static, dynamic=False, isolated_region=True
+        )
+        magic_dynamic = torch.compile(
+            magic, backend=cnt_dynamic, dynamic=True, isolated_region=True
+        )
+
+        magic_static(torch.randn(128, 32), torch.randn(128, 32))
+        self.assertEqual(cnt_static.frame_count, 1)
+
+        magic_dynamic(torch.randn(64, 16), torch.randn(64, 16))
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+        magic_static(torch.randn(128, 32), torch.randn(128, 32))
+        self.assertEqual(cnt_static.frame_count, 1)
+
+        magic_dynamic(torch.randn(32, 8), torch.randn(32, 8))
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+    @torch._dynamo.config.patch(recompile_limit=1)
+    def test_isolated_region_fullgraph_raises(self):
+        """With fullgraph=True, hitting the recompile limit raises
+        FailOnRecompileLimitHit."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt_f = torch.compile(
+            f, backend=cnt, fullgraph=True, isolated_region=True
+        )
+
+        opt_f(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+
+        with self.assertRaisesRegex(
+            FailOnRecompileLimitHit,
+            "fullgraph=True",
+        ):
+            opt_f(torch.randn(3, dtype=torch.float64))
+
+    def test_isolated_region_two_models_independent(self):
+        """Two compile regions wrapping the same model. Recompilations in
+        one region don't affect the other."""
+        cnt1 = torch._dynamo.testing.CompileCounter()
+        cnt2 = torch._dynamo.testing.CompileCounter()
+
+        def helper(x):
+            return x.sin()
+
+        def model(x):
+            return helper(x).cos()
+
+        opt_a = torch.compile(model, backend=cnt1, isolated_region=True)
+        opt_b = torch.compile(model, backend=cnt2, isolated_region=True)
+
+        opt_a(torch.randn(3))
+        frame_count_a = cnt1.frame_count
+
+        opt_b(torch.randn(4))
+        frame_count_b = cnt2.frame_count
+
+        opt_a(torch.randn(3, dtype=torch.float64))
+        self.assertGreater(cnt1.frame_count, frame_count_a)
+
+        opt_b(torch.randn(4))
+        self.assertEqual(cnt2.frame_count, frame_count_b)
+
+    @torch._dynamo.config.patch(recompile_limit=3, accumulated_recompile_limit=64)
+    def test_global_recompile_limit_resume_function(self):
+        """Documents existing behavior: global recompile_limit is per-code-object.
+        Resume functions independently accumulate entries."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        mode = {"value": "a"}
+
+        def f(x):
+            a = x.sin()
+            print("graph break")
+            if mode["value"] == "a":
+                return a.cos()
+            elif mode["value"] == "b":
+                return a.tan()
+            elif mode["value"] == "c":
+                return a.exp()
+            else:
+                return a + 1
+
+        opt_f = torch.compile(f, backend=cnt)
+
+        opt_f(torch.randn(4, 8))
+        frame_count_after_1 = cnt.frame_count
+
+        mode["value"] = "b"
+        opt_f(torch.randn(4, 8))
+        self.assertGreater(cnt.frame_count, frame_count_after_1)
+
+        mode["value"] = "c"
+        opt_f(torch.randn(4, 8))
+        frame_count_after_3 = cnt.frame_count
+
+        mode["value"] = "d"
+        opt_f(torch.randn(4, 8))
+        self.assertEqual(cnt.frame_count, frame_count_after_3)
+
+    def test_isolated_region_mark_dynamic_vs_static(self):
+        """Two regions on the same function: one with mark_static, one with
+        mark_dynamic. Their guards don't interfere."""
+        cnt_static = torch._dynamo.testing.CompileCounter()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt_static = torch.compile(f, backend=cnt_static, isolated_region=True)
+        opt_dynamic = torch.compile(f, backend=cnt_dynamic, isolated_region=True)
+
+        x_static = torch.randn(4, 8)
+        torch._dynamo.mark_static(x_static, 0)
+        opt_static(x_static)
+        self.assertEqual(cnt_static.frame_count, 1)
+
+        x_dynamic = torch.randn(4, 8)
+        torch._dynamo.mark_dynamic(x_dynamic, 0)
+        opt_dynamic(x_dynamic)
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+        x_static2 = torch.randn(4, 8)
+        torch._dynamo.mark_static(x_static2, 0)
+        opt_static(x_static2)
+        self.assertEqual(cnt_static.frame_count, 1)
+
+        x_dynamic2 = torch.randn(7, 8)
+        opt_dynamic(x_dynamic2)
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+        x_static3 = torch.randn(7, 8)
+        torch._dynamo.mark_static(x_static3, 0)
+        opt_static(x_static3)
+        self.assertEqual(cnt_static.frame_count, 2)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=True)
+    def test_isolated_region_auto_dynamic_shared_pgo(self):
+        """With isolated_region, PGO (frame_state) is shared. Region B
+        benefits from region A's shape observations."""
+        cnt_a = torch._dynamo.testing.CompileCounter()
+        cnt_b = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt_a = torch.compile(f, backend=cnt_a, isolated_region=True)
+        opt_b = torch.compile(f, backend=cnt_b, isolated_region=True)
+
+        opt_a(torch.randn(3, 4))
+        opt_a(torch.randn(5, 4))
+        self.assertEqual(cnt_a.frame_count, 2)
+
+        opt_b(torch.randn(7, 4))
+        self.assertEqual(cnt_b.frame_count, 1)
+
+        opt_b(torch.randn(9, 4))
+        self.assertEqual(cnt_b.frame_count, 1)
+
+    def test_isolated_region_explicit_dispatch(self):
+        """Explicit dispatch between static and dynamic regions."""
+        cnt_static = torch._dynamo.testing.CompileCounter()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+
+        def magic(x, y):
+            return x.sum() - y.sum()
+
+        magic_static = torch.compile(
+            magic, backend=cnt_static, dynamic=False, isolated_region=True
+        )
+        magic_dynamic = torch.compile(
+            magic, backend=cnt_dynamic, dynamic=True, isolated_region=True
+        )
+
+        static_shape = (128, 32)
+        magic_static(torch.randn(*static_shape), torch.randn(*static_shape))
+        magic_static(torch.randn(*static_shape), torch.randn(*static_shape))
+        self.assertEqual(cnt_static.frame_count, 1)
+
+        magic_dynamic(torch.randn(64, 16), torch.randn(64, 16))
+        magic_dynamic(torch.randn(32, 8), torch.randn(32, 8))
+        magic_dynamic(torch.randn(128, 64), torch.randn(128, 64))
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+        magic_static(torch.randn(*static_shape), torch.randn(*static_shape))
+        self.assertEqual(cnt_static.frame_count, 1)
+
+        magic_static(torch.randn(64, 16), torch.randn(64, 16))
+        self.assertEqual(cnt_static.frame_count, 2)
+
+        magic_dynamic(torch.randn(256, 128), torch.randn(256, 128))
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+    def test_isolated_region_runtime_dispatch(self):
+        """Runtime dispatch between two isolated regions."""
+        cnt_small = torch._dynamo.testing.CompileCounter()
+        cnt_large = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt_small = torch.compile(f, backend=cnt_small, isolated_region=True)
+        opt_large = torch.compile(f, backend=cnt_large, isolated_region=True)
+
+        def dispatch(x):
+            if x.shape[0] <= 16:
+                return opt_small(x)
+            else:
+                return opt_large(x)
+
+        dispatch(torch.randn(4, 8))
+        self.assertEqual(cnt_small.frame_count, 1)
+        self.assertEqual(cnt_large.frame_count, 0)
+
+        dispatch(torch.randn(32, 8))
+        self.assertEqual(cnt_small.frame_count, 1)
+        self.assertEqual(cnt_large.frame_count, 1)
+
+        dispatch(torch.randn(8, 16))
+        self.assertEqual(cnt_small.frame_count, 2)
+        self.assertEqual(cnt_large.frame_count, 1)
+
+        dispatch(torch.randn(64, 4))
+        self.assertEqual(cnt_small.frame_count, 2)
+        self.assertEqual(cnt_large.frame_count, 2)
+
+        dispatch(torch.randn(4, 8))
+        dispatch(torch.randn(32, 8))
+        self.assertEqual(cnt_small.frame_count, 2)
+        self.assertEqual(cnt_large.frame_count, 2)
+
+        x = torch.randn(4, 8)
+        self.assertEqual(dispatch(x), x.sin() + x.cos())
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

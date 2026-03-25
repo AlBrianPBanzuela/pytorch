@@ -171,6 +171,7 @@ void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
+    int64_t region_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe);
@@ -189,6 +190,9 @@ CacheEntry* create_cache_entry(
 
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
+
+// Extracts the region_id from the callback chain (-1 = no region).
+int64_t get_region_id(PyObject* callback);
 
 #ifdef __cplusplus
 

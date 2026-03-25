@@ -1505,6 +1505,7 @@ def _optimize(
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
+    isolated_region: bool = False,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1563,6 +1564,7 @@ def _optimize(
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
             package=package,
+            isolated_region=isolated_region,
         )
 
     backend = get_compiler_fn(backend)
@@ -1587,6 +1589,7 @@ def _optimize(
             hooks,
             package=package,
             recompile_limit=recompile_limit,
+            isolated_region=isolated_region,
         ),
         hooks,
         backend_ctx_ctor,
@@ -2439,6 +2442,7 @@ def _optimize_assert(
     export_constraints: Any | None = None,
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
+    isolated_region: bool = False,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
@@ -2469,6 +2473,7 @@ def _optimize_assert(
             export=export,
             export_constraints=export_constraints,
             package=package,
+            isolated_region=isolated_region,
         ),
         hooks,
         backend_ctx_ctor,

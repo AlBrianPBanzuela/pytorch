@@ -85,6 +85,12 @@ class CacheSizeRelevantForFrame:
     # Number of CacheEntry objects having same ID_MATCH'd objects as given frame.
     num_cache_entries_with_same_id_matched_objs: int = 0
 
+    # Whether this compile region has isolated cache (via C++ region_id)
+    isolated_region: bool = False
+
+    # Max compilations across all code objects in this region.
+    region_num_compilations: int = 0
+
     def will_compilation_exceed(self, limit: int) -> bool:
         # Checks if a compilation will exceed the given limit (that's why >=).
         return (
