@@ -117,16 +117,17 @@ class _RegionScooper:
     def scoop_regions(gm):
         from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
-        # Collect contiguous runs of marked nodes (no horizontal fusion)
-        partitions: list[list[torch.fx.Node]] = []
-        current_run: list[torch.fx.Node] = []
+        # Collect contiguous runs of marked nodes (no horizontal fusion).
+        # Each partition maps nodes to None (no partition-id needed).
+        partitions: list[dict[torch.fx.Node, int | None]] = []
+        current_run: dict[torch.fx.Node, int | None] = {}
         for node in gm.graph.nodes:
             if _needs_inductor_compile(node):
-                current_run.append(node)
+                current_run[node] = None
             else:
                 if current_run:
                     partitions.append(current_run)
-                    current_run = []
+                    current_run = {}
         if current_run:
             partitions.append(current_run)
 
@@ -153,7 +154,10 @@ class _RegionScooper:
                 continue
             submod = getattr(gm, node.target)
             # Track by id: multiple get_attr nodes may reference the same GraphModule
-            if isinstance(submod, torch.fx.GraphModule) and id(submod) not in _processed:
+            if (
+                isinstance(submod, torch.fx.GraphModule)
+                and id(submod) not in _processed
+            ):
                 _processed.add(id(submod))
                 _RegionScooper.recursively_scoop_regions(submod, _processed)
 
