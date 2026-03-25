@@ -85,7 +85,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.2xlarge' }}" },
@@ -139,7 +139,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.14t-clang15
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3.14t-clang15' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3.14t-clang15' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-128' || 'linux.4xlarge' }}" },
@@ -208,7 +208,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-gcc11-no-ops
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -233,7 +233,7 @@ jobs:
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.4xlarge' }}"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3-clang18-asan' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3-clang18-asan' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-128' || 'linux.4xlarge' }}" },
@@ -288,7 +288,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-clang15-onnx
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3-clang15-onnx' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3-clang15-onnx' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}" },
@@ -333,7 +333,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-clang15
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3.10-clang15' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3.10-clang15' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-128' || 'linux.4xlarge' }}" },
@@ -388,7 +388,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.14-clang15
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3.14-clang15' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3.14-clang15' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-16-128' || 'linux.4xlarge' }}" },
@@ -442,7 +442,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-cuda12.8-cudnn9-py3.10-clang15
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -490,7 +490,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3.10-gcc11' }}"
       build-generates-artifacts: false
       test-matrix: |
         { include: [
@@ -517,7 +517,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-rocm-py3.10
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-rocm-n-py3' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-rocm-n-py3' }}"
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
       test-matrix: |
@@ -545,7 +545,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm75
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cuda-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks' }}"
       test-matrix: |
         { include: [
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'mt-l-bx86iavx512-94-344-t4-8' || 'linux.g4dn.metal.nvidia.gpu' }}" },
@@ -590,7 +590,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.4xlarge' }}"
       build-environment: linux-noble-xpu-n-py3.10
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-noble-xpu-n-py3' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-noble-xpu-n-py3' }}"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
@@ -614,7 +614,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}"
       build-environment: linux-jammy-py3.13-clang15
-      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-a9481ae' || 'ci-image:pytorch-linux-jammy-py3.13-clang15' }}"
+      docker-image-name: "${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/test-infra:cpu-x86_64-1972edf' || 'ci-image:pytorch-linux-jammy-py3.13-clang15' }}"
       test-matrix: |
         { include: [
           { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-label-type.outputs.use-arc == 'true' && 'l-x86iavx512-8-64' || 'linux.c7i.2xlarge' }}" },

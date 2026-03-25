@@ -99,17 +99,6 @@ try:
 except ImportError:
     has_pytest = False
 
-# In containerized environments (e.g., k8s pods), std::thread::hardware_concurrency()
-# returns the host CPU count instead of the cgroup limit, causing the interop thread
-# pool to be oversized. run_test.py detects the actual CPU limit via sched_getaffinity
-# and sets PYTORCH_INTEROP_THREADS so child test processes can pick it up here.
-_interop_threads = os.environ.get("PYTORCH_INTEROP_THREADS")
-if _interop_threads is not None:
-    try:
-        torch.set_num_interop_threads(int(_interop_threads))
-    except RuntimeError:
-        pass  # Pool already initialized, nothing we can do
-
 SEED = 1234
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)

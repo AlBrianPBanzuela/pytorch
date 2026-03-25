@@ -24,16 +24,6 @@ from pathlib import Path
 from typing import Any, cast, NamedTuple
 
 
-# In containerized environments (e.g., k8s pods on ARC runners),
-# std::thread::hardware_concurrency() returns the host CPU count rather than
-# the cgroup limit. Detect the actual available CPUs via sched_getaffinity
-# (which is cgroup-aware) and propagate to child test processes so they can
-# set torch.set_num_interop_threads() accordingly.
-if hasattr(os, "sched_getaffinity"):
-    _num_cpus = len(os.sched_getaffinity(0))
-    if _num_cpus != os.cpu_count():
-        os.environ.setdefault("PYTORCH_INTEROP_THREADS", str(_num_cpus))
-
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
