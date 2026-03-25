@@ -265,16 +265,18 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertEqual(list(output), [Shard(0), Shard(0)])
 
         # Incompatible: reshape (12,)→(3,4) with [Shard(0), Shard(0)] on mesh (2,3)
-        # submesh_size = 2*3 = 6, split_id=0 out_size=3, 3%6!=0 → error
-        with self.assertRaisesRegex(AssertionError, "not divisible by its mesh"):
+        # out_size=3 is not divisible by mesh dim 0 size=2 → error
+        with self.assertRaisesRegex(
+            RuntimeError, "not evenly divisible by mesh dimension"
+        ):
             propagate_shape_and_sharding(
                 [Shard(0), Shard(0)],
                 (12,),
                 dim_maps[torch.Tensor.view](torch.empty(12), [3, 4]),
                 (2, 3),
+                strict_view=True,
             )
 
-    @with_comms
     def test_view_ops(self):
         mesh_shape = (dist.get_world_size() // 2, 2)
         self.device_mesh = init_device_mesh(
