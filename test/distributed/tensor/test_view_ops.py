@@ -1704,6 +1704,9 @@ TestViewOpsWithLocalTensor = create_local_tensor_test_class(
         # These tests use ShapeEnv directly, not local tensor tests
         "test_view_groups_unbacked_symint",
         "test_view_groups_unbacked_sharding_propagation",
+        # Too many test cases for LocalTensorMode dispatch overhead
+        "test_dtensor_flatten_1d",
+        "test_dtensor_flatten_2d",
     ],
     base_class=LocalDTensorContinuousTestBase,
 )
