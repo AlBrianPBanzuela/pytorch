@@ -273,10 +273,10 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(backend.graphs[0].code).strip(),
             """\
-def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_self_buffers_buffer_device_mesh : torch.distributed.device_mesh.DeviceMesh, L_x_ : torch.Tensor):
+def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x_ : torch.Tensor, L_self_buffers_buffer_device_mesh : torch.distributed.device_mesh.DeviceMesh):
     l_self_buffers_buffer_ = L_self_buffers_buffer_
-    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
     l_x_ = L_x_
+    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
@@ -285,8 +285,8 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_s
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
             f"""\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg3_1 = None
+def forward(self, arg0_1, arg1_1, arg2_1):
+    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg1_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
@@ -1666,19 +1666,17 @@ class outer_fn(torch.nn.Module):
         view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
         repeated_subgraph0 = self.repeated_subgraph0
         _opaque_obj0 = self._opaque_obj0
-        _opaque_obj0_1 = self._opaque_obj0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view, _opaque_obj0, _opaque_obj0_1);  repeated_subgraph0 = view = _opaque_obj0 = _opaque_obj0_1 = None
-        getitem: "f32[8, 4]" = invoke_subgraph[0]
-        getitem_1 = invoke_subgraph[1];  invoke_subgraph = getitem_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view, _opaque_obj0);  repeated_subgraph0 = view = _opaque_obj0 = None
+        getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
         view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
         return view_1
 
     class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4, 4]", arg1_1, arg2_1):
+        def forward(self, arg0_1: "f32[4, 4]", arg1_1):
             # No stacktrace found for following nodes
             all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
             wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-            return (wait_tensor, arg2_1)""",  # noqa: B950
+            return (wait_tensor,)""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
