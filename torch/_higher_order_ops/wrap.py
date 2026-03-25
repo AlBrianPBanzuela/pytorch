@@ -460,6 +460,8 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
 
     def context_fn_with_graph_id():
         fwd_ctx, recomp_ctx = context_fn()
+        # Plumb ac_graph_id so _CachingTorchDispatchMode tags all nodes
+        # (including ops from desugared HOPs like custom autograd.Function).
         fwd_ctx.ac_graph_id = unique_graph_id
         return fwd_ctx, recomp_ctx
 

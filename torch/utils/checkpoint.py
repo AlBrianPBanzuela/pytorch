@@ -1560,7 +1560,7 @@ def _checkpoint_without_reentrant_generator(
                     "must generate a tuple of two `TorchDispatchMode`s."
                 )
         # For the make_fx path (no HOP), ac_graph_id isn't set yet.
-        # The HOP path sets it via context_fn_with_graph_id before we get here.
+        # The HOP path sets it via context_fn_with_graph_id during the context_fn() call above.
         if getattr(forward_context, "ac_graph_id", None) is None:
             forward_context.ac_graph_id = next(_ac_graph_id_counter)  # pyrefly: ignore[missing-attribute]
         with forward_context:
