@@ -3,7 +3,7 @@ how to use lumen cli to reproduce a pytorch test failure
 
 ```bash
  uv pip install -r requirements.txt
- uv pip installl -r .ci/docker/requirements-ci.txt
+ uv pip install -r .ci/docker/requirements-ci.txt
  uv pip download torch==2.11.0 --index-url https://download.pytorch.org/whl/test/cpu -d ./wheels
 
  lumen test pytorch-core \

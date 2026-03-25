@@ -13,9 +13,9 @@ from cli.lib.common.utils import run_command
 # Environment condition types
 # ---------------------------------------------------------------------------
 
-EnvCondition = Union[str, Callable[[str], bool]]
-EnvVarsSpec = Union[dict[str, str], Callable[[str], dict[str, str]]]
-ExtraArg = Union[str, Callable[[str], "str | None"]]
+EnvCondition = Union[str, Callable[[str], bool]]  # noqa: UP007
+EnvVarsSpec = Union[dict[str, str], Callable[[str], dict[str, str]]]  # noqa: UP007
+ExtraArg = Union[str, Callable[[str], "str | None"]]  # noqa: UP007
 
 
 def matches_env(condition: EnvCondition, build_env: str) -> bool:
@@ -61,9 +61,9 @@ def resolve_to_list(spec: Any, build_env: str) -> list[str]:
     return [value] if isinstance(value, str) else list(value)
 
 
-DeviceSpec = Union[str, EnvMap]
-ModeSpec = Union[list[str], EnvMap]
-DtypeSpec = Union[str, list[str], EnvMap]
+DeviceSpec = Union[str, EnvMap]  # noqa: UP007
+ModeSpec = Union[list[str], EnvMap]  # noqa: UP007
+DtypeSpec = Union[str, list[str], EnvMap]  # noqa: UP007
 
 
 # ---------------------------------------------------------------------------
