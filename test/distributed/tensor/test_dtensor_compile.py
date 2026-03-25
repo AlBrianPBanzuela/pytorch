@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
+    skipIfXpu,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -283,15 +284,16 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x
         )
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
-            """\
+            f"""\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg1_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg1_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
     return (view_1,)""",  # noqa: B950
         )
 
+    @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_export(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -344,9 +346,9 @@ def forward(self, args_0):
         # add is performed in _propagate_tensor_meta_non_cached, hence add_1 instead of add
         self.assertExpectedInline(
             str(joint_gm.code).strip(),
-            """\
+            f"""\
 def forward(self, arg0_1, arg1_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg1_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg1_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
@@ -2106,6 +2108,63 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertEqual(len(result), len(expected))
             for dt_chunk, tensor_chunk in zip(result, expected):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
+
+    @with_comms
+    def test_dtensor_processgroup_backward(self):
+        """Test that ProcessGroups are correctly handled in backward graph."""
+        from torch._functorch.aot_autograd import aot_function
+
+        with patch("torch.distributed.config.compile_on_one_rank", True):
+            mesh = self.build_device_mesh()
+
+            def fn(dt):
+                out = dt.redistribute(mesh, [Replicate()])
+                return out.sum()
+
+            local_tensor = torch.randn(
+                4, 8, device=self.device_type, requires_grad=True
+            )
+            dt_input = DTensor.from_local(
+                local_tensor, mesh, [Shard(0)], run_check=False
+            )
+
+            fw_graph_cell = [None]
+            bw_graph_cell = [None]
+
+            def extract_fw_graph(fx_g, _):
+                fw_graph_cell[0] = fx_g
+                return fx_g
+
+            def extract_bw_graph(fx_g, _):
+                bw_graph_cell[0] = fx_g
+                return fx_g
+
+            compiled_fn = aot_function(
+                fn,
+                fw_compiler=extract_fw_graph,
+                bw_compiler=extract_bw_graph,
+            )
+
+            output = compiled_fn(dt_input)
+            output.backward()
+
+            fw_graph = fw_graph_cell[0]
+            if fw_graph is not None:
+                fw_code = fw_graph.code
+                self.assertNotIn(
+                    "_opaque_obj",
+                    fw_code,
+                    f"Forward graph should not contain opaque objects. Graph:\n{fw_code}",
+                )
+
+            bw_graph = bw_graph_cell[0]
+            if bw_graph is not None:
+                bw_code = bw_graph.code
+                self.assertNotIn(
+                    "_opaque_obj",
+                    bw_code,
+                    f"Backward graph should not contain opaque objects. Graph:\n{bw_code}",
+                )
 
 
 if __name__ == "__main__":
