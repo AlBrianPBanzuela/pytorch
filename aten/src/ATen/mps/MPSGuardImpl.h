@@ -91,7 +91,8 @@ struct TORCH_API MPSGuardImpl final
         (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
         (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) |
         (1ULL << kIndex_Bool) | (1ULL << kIndex_BFloat16) |
-        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) | (1ULL << kIndex_UInt64);
+        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) |
+        (1ULL << kIndex_UInt64);
     return cap;
   }
 

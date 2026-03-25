@@ -3,6 +3,7 @@
 import gc
 import sys
 import unittest
+from contextlib import nullcontext
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -13,7 +14,6 @@ from torch.testing._internal.common_utils import (
     TEST_MULTIACCELERATOR,
     TestCase,
 )
-from contextlib import nullcontext
 
 
 if not TEST_ACCELERATOR:
@@ -281,7 +281,11 @@ class TestAccelerator(TestCase):
         ]
         for dtype in all_dtypes:
             with self.subTest(dtype=dtype):
-                ctx = nullcontext() if dtype in supported_dtypes else self.assertRaises((RuntimeError, TypeError))
+                ctx = (
+                    nullcontext()
+                    if dtype in supported_dtypes
+                    else self.assertRaises((RuntimeError, TypeError))
+                )
                 with ctx:
                     t = torch.empty(16, dtype=dtype, device=acc)
                     t = t.to(reference_dtype)
