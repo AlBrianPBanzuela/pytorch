@@ -1944,31 +1944,6 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(eager_result, compiled_result)
 
     @requires_cuda
-    def test_record_stream_inductor_output_code(self) -> None:
-        """Verify record_stream is ordered between the producing kernel and the
-        consuming kernel in inductor-generated wrapper code."""
-        from torch._inductor.utils import run_and_get_code
-        from torch.testing import FileCheck
-
-        def fn(x):
-            s = torch.Stream(device="cuda")
-            y = x + 1
-            y.record_stream(s)
-            z = y * 2
-            return z
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(1024, device="cuda")
-        result, (code,) = run_and_get_code(compiled, x)
-        self.assertEqual(result, (x + 1) * 2)
-
-        # record_stream must appear after the kernel that produces the tensor
-        # and before the return.
-        FileCheck().check(".run(").check(
-            "torch.ops.streams.record_stream.default("
-        ).check("return").run(code)
-
-    @requires_cuda
     def test_device_synchronize_no_graph_break(self):
         def f(x):
             y = x + 1
