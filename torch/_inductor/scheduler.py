@@ -1546,6 +1546,19 @@ class SchedulerNode(BaseSchedulerNode):
         recompute_sizes_body_func: Callable[_P, _T] | None = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+
+        # Preserve manually-added fake dependencies (StarDep/WeakDep) that
+        # cannot be re-derived by extract_read_writes.  On the first call
+        # (from __init__) read_writes hasn't been set yet, so there is
+        # nothing to preserve.
+        fake_deps: OrderedSet[Dep] = OrderedSet()
+        if hasattr(self, "read_writes"):
+            fake_deps = OrderedSet(
+                dep
+                for dep in self.read_writes.reads
+                if isinstance(dep, (WeakDep, StarDep))
+            )
+
         self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
@@ -1563,15 +1576,15 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
         if isinstance(self.node, ir.TemplateBuffer):
-            self.set_read_writes(
-                self.node.extract_read_writes(normalize=should_normalize)
-            )
+            new_rw = self.node.extract_read_writes(normalize=should_normalize)
         else:
-            self.set_read_writes(
-                dependencies.extract_read_writes(
-                    self._body, *self._sizes, normalize=should_normalize
-                )
+            new_rw = dependencies.extract_read_writes(
+                self._body, *self._sizes, normalize=should_normalize
             )
+
+        if fake_deps:
+            new_rw = new_rw.with_read(fake_deps)
+        self.set_read_writes(new_rw)
 
     def recompute_size_and_body(
         self,
