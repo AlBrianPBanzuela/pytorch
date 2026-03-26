@@ -31,7 +31,6 @@ import inspect
 import logging
 import math
 import re
-from collections import OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
 from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
@@ -350,7 +349,9 @@ def _collect_tensors_with_sources(
                 out=plain,  # pyrefly: ignore[bad-argument-type]
             )
             assert all(
-                isinstance(t, torch._subclasses.fake_tensor.FakeTensor) for t in plain
+                isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
+                for t in plain
+                if isinstance(t, torch.Tensor)
             ), (
                 f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
             )
@@ -2309,11 +2310,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 from .lists import BaseListVariable
 
                 assert isinstance(result, BaseListVariable)
-                result_cls = (
-                    OrderedDict
-                    if issubclass(inputs_var.user_cls, OrderedDict)
-                    else dict
-                )
                 items: dict[VariableTracker, VariableTracker] = dict(
                     zip(
                         inputs_var.items.keys(),
@@ -2321,7 +2317,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
-                return ConstDictVariable(items, result_cls)
+                return ConstDictVariable(items, dict)
             return result
 
         return handlers
