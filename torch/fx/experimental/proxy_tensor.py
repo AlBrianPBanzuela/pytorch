@@ -486,6 +486,13 @@ def get_proxy_slot(
                 # pyrefly: ignore [no-matching-overload]
                 value = tracker.get(obj)
 
+    if value is None and isinstance(obj, FakeScriptObject):
+        # A new FakeScriptObject wrapping the same real_obj may have been
+        # created (e.g. output flattening in unwrap_tensor_subclasses calls
+        # maybe_to_fake_obj which always mints a fresh wrapper).  Fall back
+        # to the real-object dedup map that set_proxy_slot maintains.
+        value = tracer._opaque_real_obj_proxy.get(id(obj.real_obj))
+
     if value is None:
         # We don't know this value - return the default.
         if isinstance(default, _NoDefault):
