@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
-import contextvars
 import copy
 import dataclasses
 import functools
@@ -5414,9 +5413,8 @@ class CommonTemplate:
         threads = []
         compiled_m = torch.compile(model)
         for _ in range(1, numb_instance + 1):
-            ctx = contextvars.copy_context()
             thread = threading.Thread(
-                target=ctx.run, args=(run_weights_sharing_model, compiled_m, inp)
+                target=run_weights_sharing_model, args=(compiled_m, inp)
             )
             threads.append(thread)
             thread.start()
@@ -12711,6 +12709,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 if x.numel() == 100:
                     x_strided = x[::2].reshape(25, 2).transpose(0, 1)
                     yield x_strided, y_size, memory_format
+
+    def test_resize_overlapping_strides(self):
+        # Resize on a stride-0 view should read logical elements, not raw storage.
+        def fn(x):
+            view = torch.as_strided(x, (100,), (0,))
+            return torch.ops.aten.resize(view, (50,))
+
+        self.common(fn, (torch.ones(10),))
 
     def test_resize(self):
         def fn(x, size, memory_format):
