@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
+import os
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import cast, NamedTuple
@@ -42,8 +43,10 @@ Shape = tuple[int, ...]
 
 # When True, propagate_shape_and_sharding uses CuTe layout composition for
 # Phase 2 (output placement rewriting).  Falls back to the existing sequential
-# algorithm for unsupported cases (multi-mesh-same-dim, symbolic shapes).
-_USE_CUTE_VIEW_PROPAGATION = False
+# algorithm for unsupported cases (symbolic shapes).
+_USE_CUTE_VIEW_PROPAGATION = os.environ.get(
+    "USE_CUTE_VIEW_PROPAGATION", "0"
+) == "1"
 
 
 class ClaimedDim(NamedTuple):

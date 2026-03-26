@@ -226,10 +226,16 @@ def _add_strided_shard_to_dim(
     if outer_idx == -1:
         raise _UnsupportedCase("no local sub-mode for multi-mesh _StridedShard")
     outer_shape = shapes[outer_idx]
+    if sf > outer_shape or outer_shape % sf != 0:
+        raise _UnsupportedCase(
+            f"sf={sf} doesn't divide outer sub-mode shape {outer_shape}"
+        )
     group_size = outer_shape // sf
+    if group_size % M != 0:
+        raise _UnsupportedCase(
+            f"local {outer_shape}: group_size {group_size} not divisible by M={M}"
+        )
     lpg = group_size // M
-    if lpg == 0:
-        raise _UnsupportedCase(f"local {outer_shape} not divisible by sf*M={sf * M}")
     if lpg == 1:
         # (M, sf) replaces the outer sub-mode
         shapes[outer_idx] = M
@@ -300,11 +306,11 @@ def from_placements(
                     p.split_factor,
                 )
                 group_size = S // sf
-                lpg = group_size // M
-                if lpg == 0:
+                if group_size % M != 0:
                     raise _UnsupportedCase(
-                        f"dim {dim} size {S} not divisible by sf*M={sf * M}"
+                        f"dim {dim}: group_size {group_size} not divisible by M={M}"
                     )
+                lpg = group_size // M
                 if lpg == 1:
                     dim_modes[dim] = (
                         [M, sf],
@@ -339,7 +345,11 @@ def from_placements(
             modes.append(Layout(shape[d], bstrides[d]))
             flat_idx += 1
 
-    L = make_layout(*modes)
+    if modes:
+        L = make_layout(*modes)
+    else:
+        # Scalar (0-d) tensor
+        L = Layout(1, 0)
     return DistLayout(layout=L, num_dims=len(shape), gpu_modes=gpu_modes)
 
 
@@ -369,7 +379,11 @@ def compose_view(dist: DistLayout, rule: DimMap) -> DistLayout:
 
         flat_idx_out += len(out_shapes)
 
-    out_layout = make_layout(*output_modes)
+    if output_modes:
+        out_layout = make_layout(*output_modes)
+    else:
+        # Scalar output (e.g. squeeze of a 1-element tensor)
+        out_layout = Layout(1, 0)
     return DistLayout(layout=out_layout, num_dims=len(rule), gpu_modes=gpu_modes_out)
 
 
@@ -417,15 +431,45 @@ def _collect_submodes(
         piece_size = cmd.group_shape[cmd.split_id]
         piece_end_stride = piece_stride * piece_size
 
+        # Divide sub-modes that straddle the piece boundary before filtering.
+        # A sub-mode (s, st) with st < piece_stride but s * st > piece_stride
+        # spans across multiple Split pieces and must be split into an inner
+        # part (stays at lower strides) and an outer part (at piece_stride).
+        divided_shapes: list[int] = []
+        divided_strides: list[int] = []
+        divided_gpu: list[tuple[int, int]] = []
+        for i, (s, st) in enumerate(zip(inner_shapes, inner_strides)):
+            is_gpu = any(orig == i for _, orig in inner_gpu)
+            if st < piece_stride and s * st > piece_stride and not is_gpu:
+                divisor = piece_stride // st
+                if divisor > 0 and st * divisor == piece_stride and s % divisor == 0:
+                    # Inner part: (divisor, st) — below piece_stride
+                    divided_shapes.append(divisor)
+                    divided_strides.append(st)
+                    # Outer part: (s // divisor, piece_stride) — at piece_stride
+                    divided_shapes.append(s // divisor)
+                    divided_strides.append(piece_stride)
+                else:
+                    divided_shapes.append(s)
+                    divided_strides.append(st)
+            else:
+                gpu_sub_idx = len(divided_shapes)
+                divided_shapes.append(s)
+                divided_strides.append(st)
+                if is_gpu:
+                    for mesh_dim, orig in inner_gpu:
+                        if orig == i:
+                            divided_gpu.append((mesh_dim, gpu_sub_idx))
+
         out_shapes: list[int] = []
         out_strides: list[int] = []
         out_gpu: list[tuple[int, int]] = []
         sub_idx_out = 0
-        for i, (s, st) in enumerate(zip(inner_shapes, inner_strides)):
+        for i, (s, st) in enumerate(zip(divided_shapes, divided_strides)):
             if piece_stride <= st < piece_end_stride:
                 out_shapes.append(s)
                 out_strides.append(st)
-                for mesh_dim, orig_sub_idx in inner_gpu:
+                for mesh_dim, orig_sub_idx in divided_gpu:
                     if orig_sub_idx == i:
                         out_gpu.append((mesh_dim, sub_idx_out))
                 sub_idx_out += 1
@@ -434,12 +478,19 @@ def _collect_submodes(
             out_shapes = [piece_size]
             out_strides = [piece_stride]
         elif math.prod(out_shapes) != piece_size:
+            if out_gpu:
+                # A GPU mode falls inside this piece's stride range but the
+                # decomposition doesn't match the piece size — the sharding is
+                # incompatible with this Split and can't be represented.
+                raise _UnsupportedCase(
+                    f"GPU mode in piece but prod {math.prod(out_shapes)} != "
+                    f"piece_size {piece_size}"
+                )
             # Sub-modes straddle the split boundary — the input sharding is
             # incompatible with this view.  Drop GPU modes so this mesh dim
             # becomes Replicate in the output.
             out_shapes = [piece_size]
             out_strides = [piece_stride]
-            out_gpu = []
         return out_shapes, out_strides, out_gpu
 
     elif isinstance(cmd, Singleton):
@@ -544,6 +595,34 @@ def cute_rewrite_output_placements(
     for s in global_input_shape:
         if not isinstance(s, int):
             return None
+
+    # Reject uneven sharding on non-last flatten dims.
+    # Uneven sharding makes local shapes vary across ranks, breaking the
+    # uniform-stride assumption that _StridedShard relies on.
+    flatten_ranges: list[tuple[int, int]] = []
+    for cmd in rule:
+        if isinstance(cmd, Flatten):
+            dims = [d.input_dim for d in cmd.input_dims if isinstance(d, InputDim)]
+            if len(dims) >= 2:
+                flatten_ranges.append((min(dims), max(dims) + 1))
+    for start, end in flatten_ranges:
+        local_shapes = list(global_input_shape)
+        for mesh_dim, p in enumerate(input_tgt_placements):
+            if not isinstance(p, (Shard, _StridedShard)):
+                continue
+            if not (start <= p.dim < end):
+                continue
+            if local_shapes[p.dim] % mesh_sizes[mesh_dim] != 0:
+                # Check if a later mesh dim also shards within this range
+                has_later = any(
+                    isinstance(q, (Shard, _StridedShard))
+                    and start <= q.dim < end
+                    and q.dim >= p.dim
+                    for q in input_tgt_placements[mesh_dim + 1 :]
+                )
+                if has_later:
+                    return None
+            local_shapes[p.dim] //= mesh_sizes[mesh_dim]
 
     try:
         dist = from_placements(global_input_shape, input_tgt_placements, mesh_sizes)
