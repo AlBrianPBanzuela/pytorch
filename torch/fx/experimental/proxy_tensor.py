@@ -682,7 +682,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
     elif isinstance(val, Tensor):
         if not val.is_sparse:
             if torch._C._is_cpp_fake_tensor_mode_active():
-                return torch.empty_strided(  # revist
+                return torch.empty_strided(  # revist this
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
                 )
 
