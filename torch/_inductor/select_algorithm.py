@@ -1781,6 +1781,8 @@ class TritonTemplateKernel(TritonKernel):
                 buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
             )
 
+        partial_code = self._finalize_partial_render(partial_code)
+
         # Template hooks must be finalised after kernel.remove_kernel_local_buffers
         # is called (this is called when the kernel context is exited above), and when
         # the kernel handler is set (as below). This is because the hooks may add
@@ -1847,6 +1849,19 @@ class TritonTemplateKernel(TritonKernel):
                         )
                     self.cse.invalidate(OrderedSet())
 
+    def _finalize_partial_render(
+        self, partial_code: str | PartialRender
+    ) -> str | PartialRender:
+        """Hook to intercept or replace the PartialRender before hook finalization.
+
+        Called after Inductor has populated subgraph buffers (epilogue stores,
+        prologue loads) but before ``finalize_hook`` resolves placeholders.
+        Subclasses may return a replacement ``PartialRender`` — e.g. to capture
+        the rendered hook outputs and supply entirely new source code (as
+        ``ExternalTritonTemplateKernel`` does for fusion-aware autotuning).
+        """
+        return partial_code
+
 
 class ExternalTritonTemplateKernel(TritonTemplateKernel):
     """TritonTemplateKernel variant for external template backends (e.g. Helion).
@@ -1912,6 +1927,38 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Reference to the scheduler, set by _compute_fusion_metadata;
         # used in call_kernel() to codegen unfused epilogue nodes
         self._scheduling_ref: Any = None
+
+    def _finalize_partial_render(
+        self, partial_code: str | PartialRender
+    ) -> str | PartialRender:
+        # Capture hook outputs (kernel-internal operation).
+        hook_outputs: dict[str, str] = {}
+        with V.set_kernel_handler(self):
+            for key, hook in self.render_hooks.items():
+                hook_outputs[key] = hook()
+
+        # Delegate to template buffer.
+        result = self._template_buffer._finalize_codegen(hook_outputs)
+        if result is None:
+            return partial_code
+
+        # Apply structured result to kernel state.
+        self._kernel_imports = result.imports
+        self._call_preamble = result.call_preamble
+        self._call_args = result.call_args
+
+        # Freeze hooks and clear subgraph buffers.
+        if hook_outputs:
+            self.render_hooks = {
+                k: (lambda captured=v: captured) for k, v in hook_outputs.items()
+            }
+            for info in self.subgraph_bodies.values():
+                info.loads = IndentedBuffer()
+                info.compute = IndentedBuffer()
+                info.stores = IndentedBuffer()
+                info.indexing_code = IndentedBuffer()
+
+        return PartialRender(result.source, self.render_hooks)
 
     def get_unfused_epilogues(self) -> list[Any]:
         return self._unfused_epilogues
