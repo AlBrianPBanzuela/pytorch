@@ -311,16 +311,16 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan-x86_64.so)
     if [ "$LD_PRELOAD" = "libclang_rt.asan-x86_64.so" ]; then
         # clang returns the bare filename when it can't resolve the path,
-        # so fall back to the new naming convention.
+        # so fall back to the new naming convention (ARC runners).
         LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan.so)
+        # On ARC runners (RHEL 8 / AlmaLinux 8, glibc 2.28), preload libnss_dns
+        # to prevent ASAN SEGV. clang-18's ASAN runtime uses .preinit_array for
+        # init, but LD_PRELOAD only runs constructors. Combined with glibc 2.28's
+        # older dynamic linker, lazy dlopen of NSS libraries crashes with a null
+        # function pointer dereference. Resolved in glibc 2.34+ (AlmaLinux 9).
+        # See https://sourceware.org/bugzilla/show_bug.cgi?id=27653
+        LD_PRELOAD=${LD_PRELOAD}:/lib64/libnss_dns.so.2
     fi
-    # Preload libnss_dns to prevent ASAN SEGV on RHEL 8 / AlmaLinux 8 (glibc 2.28).
-    # clang-18's ASAN runtime uses .preinit_array for initialization, but LD_PRELOAD
-    # only runs constructor functions, not .preinit_array. Combined with glibc 2.28's
-    # older dynamic linker, lazy dlopen of NSS libraries crashes with a null function
-    # pointer dereference. This is resolved in glibc 2.34+ (AlmaLinux 9).
-    # See https://sourceware.org/bugzilla/show_bug.cgi?id=27653
-    LD_PRELOAD=${LD_PRELOAD}:/lib64/libnss_dns.so.2
     export LD_PRELOAD
     # Disable valgrind for asan
     export VALGRIND=OFF
@@ -1930,9 +1930,6 @@ test_attention_microbenchmark() {
 
 test_openreg() {
   git submodule update --init --depth 1 third_party/googletest
-  if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    sleep 7200
-  fi
   python test/run_test.py --openreg --verbose
   assert_git_not_dirty
 }
