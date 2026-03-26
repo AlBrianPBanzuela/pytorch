@@ -43,6 +43,8 @@ _inplace_random_ops = [
     aten.bernoulli_.float,
     aten.bernoulli.default,
     aten.log_normal_.default,
+    aten.exponential_.default,
+    aten.geometric_.default,
 ]
 
 for _op in _inplace_random_ops:
