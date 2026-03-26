@@ -283,7 +283,7 @@ def from_placements(
             else:
                 S, b = shape[dim], bstrides[dim]
                 local = S // M
-                if local == 0:
+                if S % M != 0:
                     raise _UnsupportedCase(
                         f"dim {dim} size {S} not divisible by mesh {M}"
                     )
@@ -579,6 +579,247 @@ def to_placements(dist: DistLayout, mesh_sizes: tuple[int, ...]) -> list[Placeme
 _USE_CUTE_VIEW_PROPAGATION = False
 
 
+def _find_input_dim(cmd) -> int | None:
+    """Return the input_dim if *cmd* is or wraps a single InputDim, else None."""
+    if isinstance(cmd, InputDim):
+        return cmd.input_dim
+    return None
+
+
+def _symbolic_rewrite_output_placements(
+    input_tgt_placements: Sequence[Placement],
+    rule: DimMap,
+    mesh_sizes: tuple[int, ...],
+) -> list[Placement] | None:
+    """Lightweight symbolic-shape path: trace DimMap rules without CuTe layouts.
+
+    Handles InputDim pass-through, first-dim-in-Flatten, and Split at split_id=0.
+    Returns None for anything more complex.
+    """
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    output: list[Placement] = [Replicate()] * len(mesh_sizes)
+    for mesh_dim, p in enumerate(input_tgt_placements):
+        if not isinstance(p, Shard) or isinstance(p, _StridedShard):
+            continue
+        shard_dim = p.dim
+        placed = False
+        for out_idx, cmd in enumerate(rule):
+            if isinstance(cmd, InputDim) and cmd.input_dim == shard_dim:
+                output[mesh_dim] = Shard(out_idx)
+                placed = True
+                break
+            elif isinstance(cmd, Flatten):
+                first = cmd.input_dims[0] if cmd.input_dims else None
+                if isinstance(first, InputDim) and first.input_dim == shard_dim:
+                    output[mesh_dim] = Shard(out_idx)
+                    placed = True
+                    break
+            elif isinstance(cmd, Split):
+                inner_dim = _find_input_dim(cmd.input_dim)
+                if inner_dim is not None and inner_dim == shard_dim:
+                    if cmd.split_id == 0:
+                        if guard_or_false(
+                            cmd.group_shape[0] % mesh_sizes[mesh_dim] == 0
+                        ):
+                            output[mesh_dim] = Shard(out_idx)
+                            placed = True
+                            break
+                # Check if inner is Flatten with first dim matching
+                if isinstance(cmd.input_dim, Flatten):
+                    first = (
+                        cmd.input_dim.input_dims[0]
+                        if cmd.input_dim.input_dims
+                        else None
+                    )
+                    if (
+                        isinstance(first, InputDim)
+                        and first.input_dim == shard_dim
+                        and cmd.split_id == 0
+                    ):
+                        if guard_or_false(
+                            cmd.group_shape[0] % mesh_sizes[mesh_dim] == 0
+                        ):
+                            output[mesh_dim] = Shard(out_idx)
+                            placed = True
+                            break
+        if not placed:
+            output[mesh_dim] = Replicate()
+
+    # Preserve Partial
+    for i, p in enumerate(input_tgt_placements):
+        if isinstance(p, Partial):
+            output[i] = p
+
+    return output
+
+
+def _expected_split_factor(
+    cmd: Split,
+    sharded_dim: int,
+    mesh_dim: int,
+    placements: Sequence[Placement],
+    mesh_sizes: tuple[int, ...],
+) -> int | None:
+    """Compute residual split factor for *cmd* after earlier mesh dims.
+
+    Mirrors ``_ViewShardingPropagator._expected_split_factor``.
+    """
+    sf = math.prod(cmd.group_shape[: cmd.split_id])
+    for m in range(mesh_dim):
+        other_p = placements[m]
+        if (
+            isinstance(other_p, (Shard, _StridedShard))
+            and other_p.dim == sharded_dim
+        ):
+            if sf % mesh_sizes[m] != 0:
+                return None
+            sf //= mesh_sizes[m]
+    return sf
+
+
+def _trace_multi_mesh_placement(
+    p: Placement,
+    mesh_dim: int,
+    placements: Sequence[Placement],
+    mesh_sizes: tuple[int, ...],
+    rule: DimMap,
+    global_shape: tuple[int, ...],
+) -> Placement:
+    """Trace a single placement through the rule for multi-mesh-same-dim.
+
+    For Split rules: match _StridedShard's split_factor against the expected
+    split_factor at each split_id.  For identity/Flatten: keep the placement
+    with adjusted dim index.
+    """
+    if not isinstance(p, (Shard, _StridedShard)):
+        return p
+
+    shard_dim = p.dim
+    is_strided = isinstance(p, _StridedShard)
+    sf = p.split_factor if is_strided else 1
+
+    # Phase 1: resolve to Shard (exact match)
+    for out_idx, cmd in enumerate(rule):
+        if isinstance(cmd, InputDim) and cmd.input_dim == shard_dim:
+            if is_strided:
+                return _StridedShard(out_idx, split_factor=sf)
+            return Shard(out_idx)
+
+        if isinstance(cmd, Split):
+            inner_dim = _find_input_dim(cmd.input_dim)
+            if inner_dim == shard_dim:
+                if is_strided:
+                    expected_sf = _expected_split_factor(
+                        cmd, shard_dim, mesh_dim, placements, mesh_sizes
+                    )
+                    if expected_sf is not None and expected_sf == sf:
+                        return Shard(out_idx)
+                elif cmd.split_id == 0:
+                    return Shard(out_idx)
+            # Split(Flatten(...)): check if shard_dim is in the Flatten
+            if isinstance(cmd.input_dim, Flatten):
+                flat_dims = [
+                    d.input_dim
+                    for d in cmd.input_dim.input_dims
+                    if isinstance(d, InputDim)
+                ]
+                if shard_dim in flat_dims:
+                    pos = flat_dims.index(shard_dim)
+                    if pos == 0 and not is_strided:
+                        # First dim in flatten: Shard maps to split_id=0
+                        if cmd.split_id == 0:
+                            return Shard(out_idx)
+                    elif not is_strided:
+                        # Non-first dim: compute split_factor from local sizes
+                        # of preceding dims, then match against split structure
+                        local_sizes = {d: global_shape[d] for d in flat_dims[:pos]}
+                        for m in range(mesh_dim):
+                            mp = placements[m]
+                            if (
+                                isinstance(mp, (Shard, _StridedShard))
+                                and mp.dim in local_sizes
+                            ):
+                                local_sizes[mp.dim] //= mesh_sizes[m]
+                        local_sf = math.prod(local_sizes.values()) if local_sizes else 1
+                        # The shard maps to the split_id where the stride
+                        # aligns: prod(group_shape[:k]) matches local_sf
+                        # times the local shard dim size
+                        expected_split_prefix = math.prod(
+                            cmd.group_shape[: cmd.split_id]
+                        )
+                        # Divide by earlier mesh dims on same dim
+                        for m in range(mesh_dim):
+                            mp = placements[m]
+                            if (
+                                isinstance(mp, (Shard, _StridedShard))
+                                and mp.dim == shard_dim
+                            ):
+                                if expected_split_prefix % mesh_sizes[m] == 0:
+                                    expected_split_prefix //= mesh_sizes[m]
+                        if expected_split_prefix == local_sf:
+                            return Shard(out_idx)
+
+        if isinstance(cmd, Flatten):
+            for i, inner in enumerate(cmd.input_dims):
+                if isinstance(inner, InputDim) and inner.input_dim == shard_dim:
+                    if i == 0:
+                        if is_strided:
+                            return _StridedShard(out_idx, split_factor=sf)
+                        return Shard(out_idx)
+                    else:
+                        preceding_dims = [
+                            d.input_dim
+                            for d in cmd.input_dims[:i]
+                            if isinstance(d, InputDim)
+                        ]
+                        local_sizes = {d: global_shape[d] for d in preceding_dims}
+                        for m in range(mesh_dim):
+                            mp = placements[m]
+                            if (
+                                isinstance(mp, (Shard, _StridedShard))
+                                and mp.dim in local_sizes
+                            ):
+                                local_sizes[mp.dim] //= mesh_sizes[m]
+                        split_factor = math.prod(local_sizes.values()) if local_sizes else 1
+                        return _StridedShard(out_idx, split_factor=split_factor)
+
+    # Phase 2: keep _StridedShard on a compatible Split output dim
+    if is_strided:
+        total_shard = mesh_sizes[mesh_dim] * sf
+        if global_shape[shard_dim] % total_shard == 0:
+            shard_size = global_shape[shard_dim] // total_shard
+            for out_idx, cmd in enumerate(rule):
+                if isinstance(cmd, Split):
+                    inner_dim = _find_input_dim(cmd.input_dim)
+                    if inner_dim == shard_dim:
+                        inner_size = math.prod(cmd.group_shape[cmd.split_id + 1 :])
+                        if shard_size >= inner_size and shard_size % inner_size == 0:
+                            return _StridedShard(out_idx, split_factor=sf)
+                    elif isinstance(cmd.input_dim, Flatten):
+                        flat_dims = [
+                            d.input_dim
+                            for d in cmd.input_dim.input_dims
+                            if isinstance(d, InputDim)
+                        ]
+                        if shard_dim in flat_dims:
+                            pos = flat_dims.index(shard_dim)
+                            inner_size = math.prod(
+                                cmd.group_shape[cmd.split_id + 1 :]
+                            )
+                            trailing_size = math.prod(
+                                global_shape[d] for d in flat_dims[pos + 1 :]
+                            )
+                            flattened_shard_size = shard_size * trailing_size
+                            if (
+                                flattened_shard_size >= inner_size
+                                and flattened_shard_size % inner_size == 0
+                            ):
+                                return _StridedShard(out_idx, split_factor=sf)
+
+    return Replicate()
+
+
 def cute_rewrite_output_placements(
     input_tgt_placements: Sequence[Placement],
     global_input_shape: tuple[int, ...],
@@ -591,10 +832,11 @@ def cute_rewrite_output_placements(
     unsupported sub-mode structures), signaling the caller to fall back
     to Phase 2.
     """
-    # Reject symbolic shapes
-    for s in global_input_shape:
-        if not isinstance(s, int):
-            return None
+    # Symbolic shapes: use lightweight rule-tracing path
+    if any(not isinstance(s, int) for s in global_input_shape):
+        return _symbolic_rewrite_output_placements(
+            input_tgt_placements, rule, mesh_sizes
+        )
 
     # Reject uneven sharding on non-last flatten dims.
     # Uneven sharding makes local shapes vary across ranks, breaking the
@@ -621,15 +863,57 @@ def cute_rewrite_output_placements(
                     for q in input_tgt_placements[mesh_dim + 1 :]
                 )
                 if has_later:
-                    return None
+                    raise RuntimeError(
+                        f"Cannot flatten unevenly sharded tensor: "
+                        f"dimension {p.dim} (size {local_shapes[p.dim]}) "
+                        f"is not evenly divisible by mesh dimension "
+                        f"{mesh_dim} (size {mesh_sizes[mesh_dim]}). "
+                        f"Please redistribute the tensor before this operation."
+                    )
             local_shapes[p.dim] //= mesh_sizes[mesh_dim]
 
+    # Check if any tensor dim is sharded by multiple mesh dims.
+    # If so, trace through the rule per mesh dim to find the right output dim.
+    # This mirrors Phase 2's _expected_split_factor / _rewrite_strided_shard
+    # logic: for Split rules, match the _StridedShard's split_factor against
+    # prod(group_shape[:split_id]) divided by earlier mesh sizes.
+    shard_dims: dict[int, list[int]] = {}
+    for mesh_dim, p in enumerate(input_tgt_placements):
+        if isinstance(p, (Shard, _StridedShard)):
+            shard_dims.setdefault(p.dim, []).append(mesh_dim)
+    multi_mesh_same_dim = any(len(v) > 1 for v in shard_dims.values())
+
     try:
-        dist = from_placements(global_input_shape, input_tgt_placements, mesh_sizes)
-        output_dist = compose_view(dist, rule)
-        output = to_placements(output_dist, mesh_sizes)
+        if multi_mesh_same_dim:
+            output: list[Placement] = [Replicate()] * len(mesh_sizes)
+            for mesh_dim, p in enumerate(input_tgt_placements):
+                if isinstance(p, (Shard, _StridedShard)):
+                    out_p = _trace_multi_mesh_placement(
+                        p, mesh_dim, input_tgt_placements, mesh_sizes, rule,
+                        global_input_shape,
+                    )
+                    output[mesh_dim] = out_p
+                elif isinstance(p, Partial):
+                    output[mesh_dim] = p
+        else:
+            dist = from_placements(
+                global_input_shape, input_tgt_placements, mesh_sizes
+            )
+            output_dist = compose_view(dist, rule)
+            output = to_placements(output_dist, mesh_sizes)
     except _UnsupportedCase:
-        return None
+        # CuTe layout construction failed (e.g. uneven sharding).
+        # Fall back to rule-tracing which doesn't build CuTe layouts.
+        output = [Replicate()] * len(mesh_sizes)
+        for mesh_dim, p in enumerate(input_tgt_placements):
+            if isinstance(p, (Shard, _StridedShard)):
+                out_p = _trace_multi_mesh_placement(
+                    p, mesh_dim, input_tgt_placements, mesh_sizes, rule,
+                    global_input_shape,
+                )
+                output[mesh_dim] = out_p
+            elif isinstance(p, Partial):
+                output[mesh_dim] = p
 
     # Preserve Partial placements from input (view ops don't change reduction)
     for i, p in enumerate(input_tgt_placements):

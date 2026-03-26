@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
-import os
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import cast, NamedTuple
@@ -40,13 +39,6 @@ from torch.distributed.tensor.placement_types import (
 aten = torch.ops.aten
 
 Shape = tuple[int, ...]
-
-# When True, propagate_shape_and_sharding uses CuTe layout composition for
-# Phase 2 (output placement rewriting).  Falls back to the existing sequential
-# algorithm for unsupported cases (symbolic shapes).
-_USE_CUTE_VIEW_PROPAGATION = os.environ.get(
-    "USE_CUTE_VIEW_PROPAGATION", "0"
-) == "1"
 
 
 class ClaimedDim(NamedTuple):
@@ -584,19 +576,18 @@ def propagate_shape_and_sharding(
     )
     input_tgt_placements, input_to_output_tensor_dims = propagator.analyze()
 
-    if _USE_CUTE_VIEW_PROPAGATION:
-        from ._cute_view_propagation import cute_rewrite_output_placements
+    from ._cute_view_propagation import cute_rewrite_output_placements
 
-        cute_output = cute_rewrite_output_placements(
-            input_tgt_placements, global_input_shape, rule, mesh_sizes
-        )
-        if cute_output is not None:
-            return input_tgt_placements, cute_output
-
-    output_placements = propagator.rewrite_output_placements(
-        input_tgt_placements, input_to_output_tensor_dims
+    cute_output = cute_rewrite_output_placements(
+        input_tgt_placements, global_input_shape, rule, mesh_sizes
     )
-    return input_tgt_placements, output_placements
+    if cute_output is None:
+        raise RuntimeError(
+            f"CuTe view propagation unsupported: "
+            f"shape={global_input_shape}, placements={input_tgt_placements}, "
+            f"mesh={mesh_sizes}"
+        )
+    return input_tgt_placements, cute_output
 
 
 class _ViewShardingPropagator:
