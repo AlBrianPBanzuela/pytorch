@@ -1087,7 +1087,6 @@ def mark_unbacked(
             tensor as having NO unbacked dims (different from not calling this function at all,
             which would not cause recompilation). For details on guard semantics and recompilation
             behavior, see [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
-        hint_override (Optional[int], default=None):
         hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
             This is only used by the inductor backend for size hint queries, such as during autotuning.
             NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
@@ -1161,8 +1160,11 @@ def mark_unbacked(
 
     assert isinstance(index, (list, tuple))
     if len(index) == 0:
-        # Empty list explicitly means "no unbacked dims"
-        # This is different from not calling mark_unbacked at all (unspecified)
+        # Empty list explicitly means "no unbacked dims".
+        # This is different from not calling mark_unbacked at all (unspecified).
+        # NOTE: This does NOT clear previously marked unbacked dims. Calls to
+        # mark_unbacked are additive, so mark_unbacked(x, 0) followed by
+        # mark_unbacked(x, []) will still have dim 0 marked as unbacked.
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
     else:
@@ -1268,15 +1270,17 @@ def mark_dynamic(
 
     assert isinstance(index, (list, tuple))
     if len(index) == 0:
-        # Empty list explicitly means "no dynamic dims"
-        # This is different from not calling mark_dynamic at all (unspecified)
+        # Empty list explicitly means "no dynamic dims".
+        # This is different from not calling mark_dynamic at all (unspecified).
+        # NOTE: This does NOT clear previously marked dynamic dims. Calls to
+        # mark_dynamic are additive, so mark_dynamic(x, 0) followed by
+        # mark_dynamic(x, []) will still have dim 0 marked as dynamic.
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
             t._dynamo_hint_overrides = {}  # type: ignore[assignment]
     else:
         for i in index:
-            mark_dynamic(t, i, min=min, max=max)
             mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 

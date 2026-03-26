@@ -5293,6 +5293,32 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_mark_unbacked_empty_list_does_not_clear(self):
+        """
+        Test that mark_unbacked calls are additive: calling mark_unbacked(x, [])
+        after mark_unbacked(x, 0) does NOT clear dim 0.
+        """
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+
+        # Empty list should not clear previously marked dims
+        torch._dynamo.decorators.mark_unbacked(x, [])
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+
+    def test_mark_dynamic_empty_list_does_not_clear(self):
+        """
+        Test that mark_dynamic calls are additive: calling mark_dynamic(x, [])
+        after mark_dynamic(x, 0) does NOT clear dim 0.
+        """
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_dynamic(x, 0)
+        self.assertIn(0, x._dynamo_dynamic_indices)
+
+        # Empty list should not clear previously marked dims
+        torch._dynamo.decorators.mark_dynamic(x, [])
+        self.assertIn(0, x._dynamo_dynamic_indices)
+
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_mark_unbacked_to_mark_static_recompilation(self):
         """
