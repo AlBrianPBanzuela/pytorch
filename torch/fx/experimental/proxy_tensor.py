@@ -53,9 +53,19 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
-    is_fake,
+    is_fake as _is_fake_python,
     unset_fake_temporarily,
 )
+
+
+def is_fake(x: object) -> bool:
+    if _is_fake_python(x):
+        return True
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return True
+    return False
+
+
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
@@ -632,6 +642,7 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     if isinstance(val, FakeTensor):
         return fast_detach(val.fake_mode, val, include_real)
     else:
+        # C++ fake tensors are plain Tensors — detach is sufficient
         return val.detach()
 
 
@@ -653,6 +664,8 @@ _ExtractValType: TypeAlias = (
 
 def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractValType:
     if is_fake(val):
+        # Handles both Python FakeTensors and C++ fake tensors.
+        # Python FakeTensors use fast_detach; C++ fake tensors use detach.
         return snapshot_fake(val, include_real=include_real)
     elif isinstance(val, py_sym_types):
         return val
@@ -668,6 +681,11 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
+            if torch._C._is_cpp_fake_tensor_mode_active():
+                return torch.empty_strided(  # revist this
+                    val.shape, val.stride(), device=val.device, dtype=val.dtype
+                )
+
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
             # TODO: This doesn't properly track storages.  A more robust
@@ -1443,7 +1461,7 @@ class PythonKeyTracer(Tracer):
             val = v.meta["val"]
             # other subclasses like FunctionalTensor error on `extract_val`
             # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
-            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor):
+            if isinstance(val, torch.Tensor) and not is_fake(val):
                 return None
             return extract_val(v.meta["val"])
 
