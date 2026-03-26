@@ -3020,15 +3020,11 @@ def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
 
 
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    if not (node1.is_template() and not node2.is_template()):
-        return False
-    return _is_epilogue_fusion_enabled(node1)
+    return node1.is_template() and not node2.is_template() and _is_epilogue_fusion_enabled(node1)
 
 
 def is_prologue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    if not (node2.is_template() and not node1.is_template()):
-        return False
-    return _is_prologue_fusion_enabled(node2)
+    return node2.is_template() and not node1.is_template() and _is_prologue_fusion_enabled(node2)
 
 
 def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
