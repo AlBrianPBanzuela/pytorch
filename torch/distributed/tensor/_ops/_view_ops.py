@@ -40,6 +40,11 @@ aten = torch.ops.aten
 
 Shape = tuple[int, ...]
 
+# When True, propagate_shape_and_sharding uses CuTe layout composition for
+# Phase 2 (output placement rewriting).  Falls back to the existing sequential
+# algorithm for unsupported cases (multi-mesh-same-dim, symbolic shapes).
+_USE_CUTE_VIEW_PROPAGATION = False
+
 
 class ClaimedDim(NamedTuple):
     """An (input_dim, output_dim) pair claimed by a mesh dim's _StridedShard rewrite."""
@@ -575,6 +580,16 @@ def propagate_shape_and_sharding(
         input_src_placements, global_input_shape, rule, mesh_sizes, strict_view
     )
     input_tgt_placements, input_to_output_tensor_dims = propagator.analyze()
+
+    if _USE_CUTE_VIEW_PROPAGATION:
+        from ._cute_view_propagation import cute_rewrite_output_placements
+
+        cute_output = cute_rewrite_output_placements(
+            input_tgt_placements, global_input_shape, rule, mesh_sizes
+        )
+        if cute_output is not None:
+            return input_tgt_placements, cute_output
+
     output_placements = propagator.rewrite_output_placements(
         input_tgt_placements, input_to_output_tensor_dims
     )
