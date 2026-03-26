@@ -25,11 +25,10 @@ Work::Work(
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
-  const char* title = profilingTitle;
-  if (!comm_profiling_name.empty()) {
-    title = comm_profiling_name.c_str();
-  }
-  if (title != nullptr) {
+  // comm_profiling_name is thread-local; take a local copy so the
+  // RecordFunction owns the string (the TLS can be mutated after we return).
+  const bool use_tls_name = !comm_profiling_name.empty();
+  if (use_tls_name || profilingTitle != nullptr) {
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     if (recordingFunction->isActive()) {
@@ -45,9 +44,18 @@ Work::Work(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(
-          title,
-          c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      if (use_tls_name) {
+        // std::string overload — RecordFunction takes ownership of the copy
+        recordingFunction->before(
+            std::string(comm_profiling_name),
+            c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      } else {
+        // const char* overload — pointer is a string literal with static
+        // lifetime
+        recordingFunction->before(
+            profilingTitle,
+            c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      }
       std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };
