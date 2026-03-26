@@ -379,13 +379,18 @@ def maybe_realign_inputs(
     for writeback.
     """
     if not ran_cudagraphs:
-        # Only wrap for mutated inputs — non-mutated are handled in codegen
-        mutated_check = [i for i in inputs_to_check if i in mutated_inputs_idxs]
-        if mutated_check:
+        check_idxs = inputs_to_check
+        if not config.cpp_wrapper:
+            # Non-mutated inputs are handled by deferred alignment copies
+            # in the generated Python code. Only mutated inputs need the wrapper
+            # for writeback. cpp_wrapper skips deferred copies (emits C++ code),
+            # so it needs the full wrapper.
+            check_idxs = [i for i in inputs_to_check if i in mutated_inputs_idxs]
+        if check_idxs:
             assert compiled_graph.current_callable is not None
             new_callable = align_inputs_from_check_idxs(
                 compiled_graph.current_callable,
-                mutated_check,
+                check_idxs,
                 mutated_inputs_idxs,
             )
             if new_callable is not compiled_graph.current_callable:
