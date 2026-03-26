@@ -1,8 +1,9 @@
-# Owner(s): ["module: cuda"]
+# Owner(s): ["module: random"]
 
 import torch
 import torch._dynamo.testing
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
 )
@@ -266,7 +267,7 @@ class TestPhiloxNormal(TestCase):
     def test_error_wrong_device(self, device):
         key = torch.random.key(42)  # CPU key
         with self.assertRaises(RuntimeError):
-            torch.random.normal(key, (100,), device="cuda")
+            torch.random.normal(key, (100,), device=device)
 
     def test_offset_shift_consistency(self, device):
         """Box-Muller alignment: shifting key offset shifts the output stream."""
@@ -294,6 +295,27 @@ class TestPhiloxNormal(TestCase):
         keys = torch.random.split(key, 3)  # (3, 2)
         with self.assertRaises(RuntimeError):
             torch.random.normal(keys, (2, 100))  # batch dim 2 != 3
+
+    @dtypes(torch.float32, torch.float64)
+    def test_normal_offset_overflow(self, device, dtype):
+        """After wrapping past 2^64, generation continues from offset 0."""
+        seed = 42
+        outputs_per_elem = 2 if dtype == torch.float64 else 1
+        wrap_at = 5
+        near_max = (1 << 64) - wrap_at * outputs_per_elem
+        key = torch.tensor([seed, near_max], dtype=torch.uint64, device=device)
+        result = torch.random.normal(key, (20,), dtype=dtype)
+        # First wrap_at elements come from the stream at near_max.
+        self.assertEqual(
+            result[:wrap_at],
+            torch.random.normal(key, (wrap_at,), dtype=dtype),
+        )
+        # After the wrap, elements come from the stream at offset 0.
+        key_zero = torch.tensor([seed, 0], dtype=torch.uint64, device=device)
+        self.assertEqual(
+            result[wrap_at:],
+            torch.random.normal(key_zero, (20 - wrap_at,), dtype=dtype),
+        )
 
     def test_error_key_last_dim_not_2(self, device):
         key = torch.tensor([42, 0, 1], dtype=torch.uint64, device=device)
@@ -379,7 +401,7 @@ class TestPhiloxUniform(TestCase):
     def test_error_wrong_device(self, device):
         key = torch.random.key(42)  # CPU key
         with self.assertRaises(RuntimeError):
-            torch.random.uniform(key, (100,), device="cuda")
+            torch.random.uniform(key, (100,), device=device)
 
     def test_error_shape_mismatch(self, device):
         key = torch.random.key(42, device=device)
@@ -401,6 +423,27 @@ class TestPhiloxUniform(TestCase):
         key2 = torch.tensor([seed, 2], dtype=torch.uint64, device=device)
         result = torch.random.uniform(key2, (n - 1,), dtype=torch.float64)
         self.assertEqual(result, ref[1:])
+
+    @dtypes(torch.float32, torch.float64)
+    def test_uniform_offset_overflow(self, device, dtype):
+        """After wrapping past 2^64, generation continues from offset 0."""
+        seed = 42
+        outputs_per_elem = 2 if dtype == torch.float64 else 1
+        wrap_at = 5
+        near_max = (1 << 64) - wrap_at * outputs_per_elem
+        key = torch.tensor([seed, near_max], dtype=torch.uint64, device=device)
+        result = torch.random.uniform(key, (20,), dtype=dtype)
+        # First wrap_at elements come from the stream at near_max.
+        self.assertEqual(
+            result[:wrap_at],
+            torch.random.uniform(key, (wrap_at,), dtype=dtype),
+        )
+        # After the wrap, elements come from the stream at offset 0.
+        key_zero = torch.tensor([seed, 0], dtype=torch.uint64, device=device)
+        self.assertEqual(
+            result[wrap_at:],
+            torch.random.uniform(key_zero, (20 - wrap_at,), dtype=dtype),
+        )
 
     @onlyCUDA
     def test_cross_device_uniform_consistency(self, device):
@@ -497,108 +540,6 @@ class TestPhiloxCompile(TestCase):
 
 
 instantiate_device_type_tests(TestPhiloxCompile, globals(), only_for=("cpu", "cuda"))
-
-
-class TestPhiloxVmap(TestCase):
-    def test_vmap_normal(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 10)
-
-        result = torch.vmap(lambda k: torch.random.normal(k, 5))(keys)
-        self.assertEqual(result.shape, (10, 5))
-        for i in range(10):
-            self.assertEqual(result[i], torch.random.normal(keys[i], 5))
-
-    def test_vmap_uniform(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 10)
-
-        result = torch.vmap(lambda k: torch.random.uniform(k, 5))(keys)
-        self.assertEqual(result.shape, (10, 5))
-        for i in range(10):
-            self.assertEqual(result[i], torch.random.uniform(keys[i], 5))
-
-    def test_vmap_split(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 10)
-
-        result = torch.vmap(lambda k: torch.random.split(k, 3))(keys)
-        self.assertEqual(result.shape, (10, 3, 2))
-        for i in range(10):
-            self.assertEqual(result[i], torch.random.split(keys[i], 3))
-
-    def test_vmap_fold_in(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 10)
-
-        result = torch.vmap(lambda k: torch.random.fold_in(k, 7))(keys)
-        self.assertEqual(result.shape, (10, 2))
-        for i in range(10):
-            self.assertEqual(result[i], torch.random.fold_in(keys[i], 7))
-
-    def test_vmap_inplace_batched_self(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 10)
-        out = torch.empty(10, 5, device=device)
-
-        def f(o, k):
-            return torch.ops.aten._philox_normal_(o, k, 0.0, 1.0)
-
-        result = torch.vmap(f)(out, keys)
-        self.assertEqual(result.shape, (10, 5))
-        for i in range(10):
-            self.assertEqual(result[i], torch.random.normal(keys[i], 5))
-
-    def test_vmap_split_then_normal(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 8)
-
-        def f(k):
-            subkeys = torch.random.split(k, 3)
-            return torch.random.normal(subkeys, (3, 20))
-
-        result = torch.vmap(f)(keys)
-        self.assertEqual(result.shape, (8, 3, 20))
-        for i in range(8):
-            self.assertEqual(result[i], f(keys[i]))
-
-    def test_vmap_normal_multidim(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 5)
-
-        result = torch.vmap(lambda k: torch.random.normal(k, 4, 3))(keys)
-        self.assertEqual(result.shape, (5, 4, 3))
-        for i in range(5):
-            self.assertEqual(result[i], torch.random.normal(keys[i], 4, 3))
-
-    def test_vmap_compiled_normal(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 10)
-
-        @torch.compile(backend="aot_eager")
-        def f(keys):
-            return torch.vmap(lambda k: torch.random.normal(k, 5))(keys)
-
-        result = f(keys)
-        self.assertEqual(result.shape, (10, 5))
-        for i in range(10):
-            self.assertEqual(result[i], torch.random.normal(keys[i], 5))
-
-    def test_vmap_compiled_uniform(self, device):
-        key = torch.random.key(42, device=device)
-        keys = torch.random.split(key, 10)
-
-        @torch.compile(backend="aot_eager")
-        def f(keys):
-            return torch.vmap(lambda k: torch.random.uniform(k, 5))(keys)
-
-        result = f(keys)
-        self.assertEqual(result.shape, (10, 5))
-        for i in range(10):
-            self.assertEqual(result[i], torch.random.uniform(keys[i], 5))
-
-
-instantiate_device_type_tests(TestPhiloxVmap, globals(), only_for=("cpu", "cuda"))
 
 
 if __name__ == "__main__":

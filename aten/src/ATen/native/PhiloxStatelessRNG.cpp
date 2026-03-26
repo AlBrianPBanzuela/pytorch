@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/PhiloxStatelessRNG.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -20,195 +21,22 @@
 
 namespace at::native {
 
-namespace {
+DEFINE_DISPATCH(philox_uniform_fill_stub);
+DEFINE_DISPATCH(philox_normal_fill_stub);
 
-// Constants matching curand's conversion formulas.
-constexpr float CURAND_2POW32_INV = 2.3283064e-10f;
-constexpr double CURAND_2POW32_INV_DOUBLE = 2.3283064365386963e-10;
-constexpr float CURAND_2POW32_INV_2PI = 2.3283064e-10f * 6.2831855f;
-constexpr double CURAND_2POW53_INV_DOUBLE = 1.1102230246251565e-16;
-constexpr double CURAND_PI_DOUBLE = 3.1415926535897932;
+namespace {
 
 // curand's offset counts individual uint32 outputs; philox_engine's
 // constructor offset counts 128-bit blocks (groups of 4 uint32).
+// We restrict to subsequence=0 and let the 64-bit offset wrap naturally,
+// so grid_split's modular offset arithmetic stays consistent.
 inline philox_engine make_philox(uint64_t seed, uint64_t offset) {
-  philox_engine engine(seed, /*subsequence=*/0, /*offset=*/offset / 4);
+  uint64_t block = offset / 4;
+  philox_engine engine(seed, /*subsequence=*/0, /*offset=*/block);
   for (uint64_t i = 0; i < offset % 4; i++) {
     engine();
   }
   return engine;
-}
-
-// Matches curand's _curand_uniform: uint32 -> float in (0, 1].
-inline float philox_uniform_float(uint32_t x) {
-  return x * CURAND_2POW32_INV + (CURAND_2POW32_INV / 2.0f);
-}
-
-// Matches curand_uniform2_double: 2 uint32 -> 1 double in (0, 1] with 53-bit precision.
-inline double philox_uniform_double(uint32_t x0, uint32_t x1) {
-  auto z = static_cast<unsigned long long>(x0) ^
-      (static_cast<unsigned long long>(x1) << (53 - 32));
-  return z * CURAND_2POW53_INV_DOUBLE + (CURAND_2POW53_INV_DOUBLE / 2.0);
-}
-
-// Matches curand's _curand_box_muller: 2 uint32 -> 2 standard normal floats.
-// Uses sinf/cosf matching curand's host-side code path.
-inline std::pair<float, float> box_muller_float(uint32_t x, uint32_t y) {
-  float u = x * CURAND_2POW32_INV + (CURAND_2POW32_INV / 2.0f);
-  float v = y * CURAND_2POW32_INV_2PI + (CURAND_2POW32_INV_2PI / 2.0f);
-  float s = std::sqrt(-2.0f * std::log(u));
-  return {s * std::sin(v), s * std::cos(v)};
-}
-
-// Matches curand's _curand_box_muller_double: 4 uint32 -> 2 standard normal doubles.
-inline std::pair<double, double> box_muller_double(
-    uint32_t x0, uint32_t x1, uint32_t y0, uint32_t y1) {
-  auto zx = static_cast<unsigned long long>(x0) ^
-      (static_cast<unsigned long long>(x1) << (53 - 32));
-  double u = zx * CURAND_2POW53_INV_DOUBLE + (CURAND_2POW53_INV_DOUBLE / 2.0);
-  auto zy = static_cast<unsigned long long>(y0) ^
-      (static_cast<unsigned long long>(y1) << (53 - 32));
-  double v = zy * (CURAND_2POW53_INV_DOUBLE * 2.0) + CURAND_2POW53_INV_DOUBLE;
-  double s = std::sqrt(-2.0 * std::log(u));
-  return {s * std::sin(v * CURAND_PI_DOUBLE), s * std::cos(v * CURAND_PI_DOUBLE)};
-}
-
-// Match CUDA's elems_per_thread for cross-device consistency.
-constexpr int64_t ELEMS_PER_CHUNK = 16;
-
-// --------------- Uniform generation ---------------
-
-template <typename scalar_t>
-void uniform_fill(
-    scalar_t* output, int64_t base, int64_t numel,
-    uint64_t seed, uint64_t key_offset, double low, double high) {
-  float flow = static_cast<float>(low);
-  float frange = static_cast<float>(high - low);
-  // outputs_per_value = 1 for float-sized types: no gaps between chunks.
-  auto engine = make_philox(seed, key_offset);
-  for (int64_t i = 0; i < numel; i++) {
-    float u = philox_uniform_float(engine());
-    output[base + i] = static_cast<scalar_t>(flow + frange * u);
-  }
-}
-
-template <>
-void uniform_fill<double>(
-    double* output, int64_t base, int64_t numel,
-    uint64_t seed, uint64_t key_offset, double low, double high) {
-  double range = high - low;
-  // 2 uint32 per double, matching curand_uniform2_double (53-bit precision).
-  auto engine = make_philox(seed, key_offset);
-  for (int64_t i = 0; i < numel; i++) {
-    uint32_t r0 = engine(), r1 = engine();
-    double u = philox_uniform_double(r0, r1);
-    output[base + i] = low + range * u;
-  }
-}
-
-// --------------- Normal generation ---------------
-
-template <typename scalar_t>
-void normal_fill(
-    scalar_t* output, int64_t base, int64_t numel,
-    uint64_t seed, uint64_t key_offset, double mean, double stddev) {
-  float fmean = static_cast<float>(mean);
-  float fstd = static_cast<float>(stddev);
-  // outputs_per_normal = 1 for float-sized types: no gaps between chunks,
-  // but need alignment for Box-Muller consistency.
-  for (int64_t chunk_start = 0; chunk_start < numel; chunk_start += ELEMS_PER_CHUNK) {
-    int64_t chunk_end = std::min(chunk_start + ELEMS_PER_CHUNK, numel);
-    uint64_t philox_offset = key_offset +
-        static_cast<uint64_t>(chunk_start);
-    int misalign = static_cast<int>(philox_offset & 3);
-    int skip = 0;
-    if (misalign > 0) {
-      skip = misalign;
-      philox_offset -= misalign;
-    }
-    auto engine = make_philox(seed, philox_offset);
-    int64_t elem = chunk_start;
-
-    // First partial group (skip leading values).
-    if (skip > 0 && elem < chunk_end) {
-      uint32_t r0 = engine(), r1 = engine(), r2 = engine(), r3 = engine();
-      auto [n0, n1] = box_muller_float(r0, r1);
-      auto [n2, n3] = box_muller_float(r2, r3);
-      float normals[4] = {n0, n1, n2, n3};
-      for (int j = skip; j < 4 && elem < chunk_end; j++, elem++) {
-        output[base + elem] = static_cast<scalar_t>(fmean + fstd * normals[j]);
-      }
-    }
-
-    // Full groups of 4.
-    for (; elem + 4 <= chunk_end; elem += 4) {
-      uint32_t r0 = engine(), r1 = engine(), r2 = engine(), r3 = engine();
-      auto [n0, n1] = box_muller_float(r0, r1);
-      auto [n2, n3] = box_muller_float(r2, r3);
-      output[base + elem + 0] = static_cast<scalar_t>(fmean + fstd * n0);
-      output[base + elem + 1] = static_cast<scalar_t>(fmean + fstd * n1);
-      output[base + elem + 2] = static_cast<scalar_t>(fmean + fstd * n2);
-      output[base + elem + 3] = static_cast<scalar_t>(fmean + fstd * n3);
-    }
-
-    // Remaining elements.
-    if (elem < chunk_end) {
-      uint32_t r0 = engine(), r1 = engine(), r2 = engine(), r3 = engine();
-      auto [n0, n1] = box_muller_float(r0, r1);
-      auto [n2, n3] = box_muller_float(r2, r3);
-      float normals[4] = {n0, n1, n2, n3};
-      for (int j = 0; elem < chunk_end; j++, elem++) {
-        output[base + elem] = static_cast<scalar_t>(fmean + fstd * normals[j]);
-      }
-    }
-  }
-}
-
-template <>
-void normal_fill<double>(
-    double* output, int64_t base, int64_t numel,
-    uint64_t seed, uint64_t key_offset, double mean, double stddev) {
-  // outputs_per_normal = 2 for double.
-  for (int64_t chunk_start = 0; chunk_start < numel; chunk_start += ELEMS_PER_CHUNK) {
-    int64_t chunk_end = std::min(chunk_start + ELEMS_PER_CHUNK, numel);
-    uint64_t philox_offset = key_offset +
-        static_cast<uint64_t>(chunk_start) * 2;
-    int misalign = static_cast<int>(philox_offset & 3);
-    int skip = 0;
-    if (misalign > 0 && (misalign % 2) == 0) {
-      skip = misalign / 2;
-      philox_offset -= misalign;
-    }
-    auto engine = make_philox(seed, philox_offset);
-    int64_t elem = chunk_start;
-
-    // First partial group (skip leading doubles).
-    if (skip > 0 && elem < chunk_end) {
-      uint32_t r0 = engine(), r1 = engine(), r2 = engine(), r3 = engine();
-      auto [n0, n1] = box_muller_double(r0, r1, r2, r3);
-      // skip == 1: discard n0, use n1.
-      if (elem < chunk_end) {
-        output[base + elem] = mean + stddev * n1;
-        elem++;
-      }
-    }
-
-    // Full groups: 4 uint32 -> 2 doubles.
-    for (; elem + 2 <= chunk_end; elem += 2) {
-      uint32_t r0 = engine(), r1 = engine(), r2 = engine(), r3 = engine();
-      auto [n0, n1] = box_muller_double(r0, r1, r2, r3);
-      output[base + elem + 0] = mean + stddev * n0;
-      output[base + elem + 1] = mean + stddev * n1;
-    }
-
-    // Remaining element.
-    if (elem < chunk_end) {
-      uint32_t r0 = engine(), r1 = engine(), r2 = engine(), r3 = engine();
-      auto [n0, n1] = box_muller_double(r0, r1, r2, r3);
-      output[base + elem] = mean + stddev * n0;
-      elem++;
-    }
-  }
 }
 
 } // anonymous namespace
@@ -344,16 +172,16 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
   }
 
   const uint64_t* keys_ptr = key_expanded.const_data_ptr<uint64_t>();
+  void* out_ptr = self.data_ptr();
+  auto dtype = self.scalar_type();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_cpu", [&] {
-    scalar_t* out_ptr = self.data_ptr<scalar_t>();
-    for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
-      uint64_t seed = keys_ptr[key_idx * 2];
-      uint64_t key_offset = keys_ptr[key_idx * 2 + 1];
-      int64_t base = key_idx * event_numel;
-      uniform_fill<scalar_t>(out_ptr, base, event_numel, seed, key_offset, low, high);
-    }
-  });
+  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+    uint64_t seed = keys_ptr[key_idx * 2];
+    uint64_t key_offset = keys_ptr[key_idx * 2 + 1];
+    int64_t base = key_idx * event_numel;
+    philox_uniform_fill_stub(kCPU, out_ptr, base, event_numel,
+                             seed, key_offset, low, high, dtype);
+  }
 
   return self;
 }
@@ -399,16 +227,16 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
   }
 
   const uint64_t* keys_ptr = key_expanded.const_data_ptr<uint64_t>();
+  void* out_ptr = self.data_ptr();
+  auto dtype = self.scalar_type();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "_philox_normal_cpu", [&] {
-    scalar_t* out_ptr = self.data_ptr<scalar_t>();
-    for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
-      uint64_t seed = keys_ptr[key_idx * 2];
-      uint64_t key_offset = keys_ptr[key_idx * 2 + 1];
-      int64_t base = key_idx * event_numel;
-      normal_fill<scalar_t>(out_ptr, base, event_numel, seed, key_offset, mean, stddev);
-    }
-  });
+  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+    uint64_t seed = keys_ptr[key_idx * 2];
+    uint64_t key_offset = keys_ptr[key_idx * 2 + 1];
+    int64_t base = key_idx * event_numel;
+    philox_normal_fill_stub(kCPU, out_ptr, base, event_numel,
+                            seed, key_offset, mean, stddev, dtype);
+  }
 
   return self;
 }
