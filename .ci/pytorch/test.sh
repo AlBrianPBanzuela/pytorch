@@ -1934,7 +1934,7 @@ elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   echo "===== test_python_legacy_jit uses lumen_cli ====="
   (cd .ci/lumen_cli && python -m pip install -e .)
-  python -m cli.run test pytorch-core  --build-env "$BUILD_ENVIRONMENT" --group-id pytorch_jit_legacy
+  python -m cli.run test pytorch-core --group-id pytorch_jit_legacy --build-env "$BUILD_ENVIRONMENT"
   assert_git_not_dirty
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
   test_quantization
