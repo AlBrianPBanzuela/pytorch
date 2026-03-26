@@ -278,20 +278,36 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
+        from ..source import is_constant_source
         from .builder import wrap_fx_proxy_cls
 
         op_fn = richcmp_op.get(op)
         if op_fn is None or op_fn not in supported_tensor_comparison_op_values:
             return ConstantVariable.create(NotImplemented)
 
+        # Constant-source tensors (e.g. from @assume_constant_result) have
+        # known values at compile time.  Evaluate the comparison eagerly so
+        # that the result can be used in control flow without triggering
+        # data-dependent branching errors.
+        if (
+            self.source is not None
+            and is_constant_source(self.source)
+            and other.is_python_constant()
+        ):
+            result = op_fn(self.get_real_value(), other.as_python_constant())
+            if isinstance(result, torch.Tensor):
+                result = result.item()
+            return VariableTracker.build(tx, result)
+
         # Check broadcastability for tensor-tensor comparisons
         if (
             isinstance(other, TensorVariable)
-            and (self.size and other.size) is not None
-            and self.size != other.size
+            and self._size is not None
+            and other._size is not None
+            and self._size != other._size
         ):
             try:
-                torch.broadcast_shapes(self.size, other.size)
+                torch.broadcast_shapes(self._size, other._size)
             except RuntimeError:
                 return ConstantVariable.create(NotImplemented)
 
