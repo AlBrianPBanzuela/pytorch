@@ -112,6 +112,14 @@ class AutogradGradRestartAnalysis(RestartAnalysis):
     """
 
 
+class RequiresGradRestartAnalysis(RestartAnalysis):
+    """Raised when a source-less requires_grad_() intermediate leaks as output.
+
+    On restart, requires_grad_() will graph break instead of being traced,
+    preserving partial acceleration for code before the call.
+    """
+
+
 class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 
@@ -775,13 +783,13 @@ def filter_stack(stack: StackSummary) -> StackSummary:
     return user_stack
 
 
-def remove_resume_prefix(name: str) -> str | None:
+def remove_resume_prefix(name: str) -> str:
     from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 
     match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
     if match:
         return match.group(1)
-    return None
+    return name
 
 
 def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSummary:
@@ -813,6 +821,7 @@ def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSum
             new_stack[-1] = frame
             frame.name = name
         else:
+            frame.name = name
             new_stack.append(frame)
 
     return new_stack
