@@ -1624,6 +1624,8 @@ class PythonWrapperCodegen(CodeGen):
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
         Called from the scheduler after mutated_input_idxs is computed."""
+        if V.graph.cpp_wrapper:
+            return
         inputs_to_check = V.graph.inputs_to_check
         if not inputs_to_check:
             return
@@ -1636,6 +1638,8 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
         """Emit alignment check + clone just before the first kernel
         that reads each input, hiding the cost behind GPU execution."""
+        if V.graph.cpp_wrapper:
+            return
         for name in input_names:
             if name in self._pending_alignment_copies:
                 self._pending_alignment_copies.discard(name)
