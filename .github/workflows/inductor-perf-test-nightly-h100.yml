@@ -139,6 +139,8 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test-weekly:
@@ -156,6 +158,8 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test:
@@ -175,4 +179,6 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
