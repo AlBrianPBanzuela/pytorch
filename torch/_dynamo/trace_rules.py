@@ -34,11 +34,12 @@ import random
 import re
 import sys
 import types
+import typing
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch._inductor.test_operators
@@ -1592,6 +1593,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functionalize_replace",
         "torch._functionalize_sync",
         "torch._functionalize_was_storage_changed",
+        "torch._fused_adagrad_",
         "torch._fused_adam_",
         "torch._fused_adamw_",
         "torch._fused_dropout",
@@ -2624,6 +2626,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.get_device_properties",
         "torch.cuda.get_gencode_flags",
         "torch.cuda.get_sync_debug_mode",
+        "torch.cuda.synchronize",
         "torch.cuda.graphs.graph_pool_handle",
         "torch.cuda.graphs.is_current_stream_capturing",
         "torch.cuda.graphs.make_graphed_callables",
@@ -3177,11 +3180,6 @@ def _builtin_function_ids() -> dict[int, str]:
             id(v): f"operator.{k}"
             for k, v in operator.__dict__.items()
             if not k.startswith("_") and callable(v)
-        }
-    )
-    rv.update(
-        {
-            id(cast): "typing.cast",
         }
     )
     return rv
@@ -3903,6 +3901,12 @@ def check_verbose(
         filename = getfile(obj)
         assert filename is not None
         fi = FunctionInfo(obj, None, filename, None)
+
+    # typing.cast is a polyfilled no-op, but unlike C builtins it has a code
+    # object that PEP 523 can intercept as a standalone frame after a graph
+    # break. Skip it at the top level to avoid installing unnecessary guards.
+    if fi.code is not None and fi.code is typing.cast.__code__:
+        return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
