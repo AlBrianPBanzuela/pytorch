@@ -1033,6 +1033,92 @@ def forward(self, x_1, cfg_1):
     """,  # noqa: B950
         )
 
+    def test_subclass_opaque_output_reuses_input_proxy(self):
+        # Regression test: when a tensor subclass's __torch_dispatch__ wraps
+        # the output with the real OpaqueBase (not the FakeScriptObject proxy),
+        # the AOTAutograd forward graph should still reference the opaque via
+        # its input placeholder — not create a duplicate get_attr constant.
+        #
+        # This mirrors DTensor where C++ dispatch creates new DTensors storing
+        # the real DeviceMesh, so output flattening calls maybe_to_fake_obj
+        # and mints a fresh FakeScriptObject for the same underlying object.
+
+        class TensorWithRealCounter(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, counter):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    device=data.device,
+                    dtype=data.dtype,
+                    layout=data.layout,
+                    requires_grad=data.requires_grad,
+                )
+
+            def __init__(self, data, counter):
+                self._data = data
+                self._counter = counter
+
+            def __repr__(self):
+                return "TensorWithRealCounter(...)"
+
+            def __tensor_flatten__(self):
+                return ["_data", "_counter"], ()
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return TensorWithRealCounter(
+                    inner_tensors["_data"], inner_tensors["_counter"]
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                counter = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, TensorWithRealCounter):
+                        counter = arg._counter
+                        break
+
+                def unwrap(x):
+                    return x._data if isinstance(x, TensorWithRealCounter) else x
+
+                out = func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs),
+                )
+
+                # Unwrap FakeScriptObject to real OpaqueBase, simulating what
+                # happens in DTensor's C++ dispatch path.
+                real_counter = counter
+                if isinstance(counter, FakeScriptObject):
+                    real_counter = counter.real_obj
+
+                return torch.utils._pytree.tree_map(
+                    lambda x: TensorWithRealCounter(x, real_counter)
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out,
+                )
+
+        counter = Counter(start=0, end=10)
+        x = TensorWithRealCounter(torch.randn(4), counter)
+
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(lambda x: x + 1, fullgraph=True, backend=backend)(x)
+
+        fw = backend.fw_graphs[0]
+        get_attr_nodes = [n for n in fw.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(
+            get_attr_nodes,
+            [],
+            "Opaque output should reuse the input placeholder, not create a get_attr constant",
+        )
+
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_bad_fake(self, make_fx_tracing_mode):
         torch.library.define(
