@@ -2236,6 +2236,16 @@
       ]
     }
   ],
+  "GB7154": [
+    {
+      "Gb_type": "GetAttrVariable comparison",
+      "Context": "GetAttrVariable({self.obj}.{self.name}).{op}({type(other).__name__})",
+      "Explanation": "Cannot resolve GetAttrVariable to a concrete value for comparison.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0183": [
     {
       "Gb_type": "failed to call dict.fromkeys()",
@@ -3487,6 +3497,14 @@
       "Hints": [
         "Use two-argument super(type, object_or_type)."
       ]
+    }
+  ],
+  "GB3383": [
+    {
+      "Gb_type": "Pydantic dataclass constructor",
+      "Context": "{self.value}",
+      "Explanation": "Dynamo graph breaks on pydantic dataclass constructors because validation mutates the instance outside traced bytecode.",
+      "Hints": []
     }
   ],
   "GB0281": [

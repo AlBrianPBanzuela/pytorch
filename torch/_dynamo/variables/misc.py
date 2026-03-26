@@ -1368,15 +1368,40 @@ class GetAttrVariable(VariableTracker):
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
-        from .object_protocol import generic_richcompare
+        from .constant import ConstantVariable
+        from .object_protocol import generic_richcompare, vt_identity_compare
 
         # GetAttrVariable is not a real type — it's an unresolved obj.attr.
-        # Resolve it to a concrete VT and delegate to generic_richcompare.
+        # Case 1: Both are GetAttrVariable accessing the same attr on the
+        # same object — the values must be identical.
+        if isinstance(other, GetAttrVariable) and self.name == other.name:
+            identity = vt_identity_compare(self.obj, other.obj)
+            if identity is not None and identity.as_python_constant():
+                if op in ("__eq__", "__le__", "__ge__"):
+                    return ConstantVariable.create(True)
+                if op in ("__ne__", "__lt__", "__gt__"):
+                    return ConstantVariable.create(False)
+
+        # Case 2: Try resolving both sides to Python constants.
         try:
-            resolved = VariableTracker.build(tx, self.as_python_constant())
+            self_resolved = VariableTracker.build(tx, self.as_python_constant())
         except NotImplementedError:
-            resolved = self.obj.var_getattr(tx, self.name)
-        return generic_richcompare(tx, resolved, other, op)
+            self_resolved = None
+
+        if self_resolved is not None:
+            try:
+                other_resolved = VariableTracker.build(tx, other.as_python_constant())
+            except NotImplementedError:
+                return ConstantVariable.create(NotImplemented)
+            return generic_richcompare(tx, self_resolved, other_resolved, op)
+
+        # Case 3: Cannot resolve — graph break.
+        unimplemented(
+            gb_type="GetAttrVariable comparison",
+            context=f"GetAttrVariable({self.obj}.{self.name}).{op}({type(other).__name__})",
+            explanation="Cannot resolve GetAttrVariable to a concrete value for comparison.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_method(
         self,

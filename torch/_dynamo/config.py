@@ -462,7 +462,7 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 skip_tensor_guards_with_matching_dict_tags = True
 
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
-skip_guards_on_constant_func_defaults = True
+skip_guards_on_constant_func_defaults = False
 
 
 # The recursive-dict-tag guard relies on the class/function identity staying
@@ -570,7 +570,7 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 
 # Resume tracing in nested frames if a nested graph break occurs
 # Old behavior is to bubble up the graph break to the top level frame.
-nested_graph_breaks = False
+nested_graph_breaks: bool = False
 
 # If True, error if Dynamo attempts to trace more code while running compiled code in fullgraph=True.
 # If Dynamo determines that it should skip tracing the code (either at the C/C++ or Python level),
