@@ -4056,6 +4056,14 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention_backward"
 
+    @staticmethod
+    def _uses_pretraced_graphs(
+        fw_graph: VariableTracker, joint_graph: VariableTracker
+    ) -> bool:
+        return not joint_graph.is_constant_none() or isinstance(
+            fw_graph, UnspecializedNNModuleVariable
+        )
+
     def proxy_submod(
         self, tx: "InstructionTranslator", arg: UnspecializedNNModuleVariable
     ) -> Proxy:
@@ -4200,7 +4208,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
         ):
             return self._call_function_fallback(tx, args, kwargs)
 
-        if isinstance(fw_graph, UnspecializedNNModuleVariable):
+        if self._uses_pretraced_graphs(fw_graph, joint_graph):
             return self._call_function_fallback(tx, args, kwargs)
 
         fw_graph_node, fw_graph_lifted_args, fw_graph_gm = self.create_wrapped_node(
