@@ -72,7 +72,6 @@ from ..utils import (
 from .base import raise_type_error_exc, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
-from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -615,11 +614,9 @@ class NNModuleVariable(VariableTracker):
                     context=f"getitem_impl: {self} {key}",
                     explanation="Dynamo does not support calling "
                     f"method `__getitem__` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
-                    hints=[
-                        "Use constant arguments of type str or int for __getitem__"
-                    ],
+                    hints=["Use constant arguments of type str or int for __getitem__"],
                 )
-            fn = getattr(module, "__getitem__").__func__
+            fn = module.__getitem__.__func__  # pyrefly: ignore[missing-attribute]
 
             assert isinstance(fn, types.FunctionType)
 

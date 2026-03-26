@@ -775,18 +775,17 @@ class TensorVariable(VariableTracker):
 
         if self.is_strict_mode(tx) and "__getitem__" in self._strict_mode_banned_ops():
             unimplemented(
-                gb_type="Illegal method invocation in strict mode",
+                gb_type="Illegal __getitem__ invocation in strict mode",
                 context=f"getitem_impl {self} {key}",
                 explanation="Dynamo currently does not support __getitem__ "
                 "invocation in strict mode.",
                 hints=[],
             )
 
-        args = (key,)
-        kwargs: dict[str, VariableTracker] = {}
+        empty_kwargs: dict[str, VariableTracker] = {}
         static_attr = all_tensor_attrs.get("__getitem__", None)
         if static_attr is not None and can_dispatch_torch_function(
-            tx, (self, key), kwargs
+            tx, (self, key), empty_kwargs
         ):
             if self.source:
                 func_var = VariableBuilder(
@@ -794,12 +793,8 @@ class TensorVariable(VariableTracker):
                     AttrSource(AttrSource(self.source, "__class__"), "__getitem__"),
                 )(static_attr)
             else:
-                func_var = SourcelessBuilder.create(
-                    tx, getattr(torch.Tensor, "__getitem__")
-                )
-            return dispatch_torch_function(
-                tx, func_var, (self, key), kwargs
-            )
+                func_var = SourcelessBuilder.create(tx, torch.Tensor.__getitem__)
+            return dispatch_torch_function(tx, func_var, (self, key), empty_kwargs)
 
         return self.method___getitem__(tx, key)
 

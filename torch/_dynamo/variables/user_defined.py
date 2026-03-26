@@ -2778,10 +2778,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             try:
                 return self._dict_vt.getitem_impl(tx, key)
             except ObservedKeyError:
-                if (
-                    issubclass(self.python_type(), dict)
-                    and self._maybe_get_baseclass_method("__missing__")
-                ):
+                if issubclass(
+                    self.python_type(), dict
+                ) and self._maybe_get_baseclass_method("__missing__"):
                     return self.call_method(tx, "__missing__", [key], {})
                 else:
                     raise
