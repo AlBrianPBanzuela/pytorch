@@ -3842,6 +3842,9 @@ Tensor& linalg_solve_triangular_out(
   // -X := X._neg_view().
   // -X* := X.conj()._neg_view() <=> X._neg_view().conj().
   //
+  // We assume that X, A, B are just storages, i.e.
+  // tensors devoid of conj/neg flags.
+  //
   // Note the following properties:
   // X = -(-X) = --X.
   // X = (X*)* = X**.
@@ -3869,7 +3872,7 @@ Tensor& linalg_solve_triangular_out(
   // FIXME: batch overlaps are permissible, but the kernel loops over the batch dims,
   // so the batch dims are being materialized.
   // This behavior is inhereted from the previous imlementations.
-  const auto pA = [&unitriangular](const auto& A) -> c10::MaybeOwned<Tensor> {
+  const auto pA = [&out, &unitriangular, out_fully_owned](const auto& A) -> c10::MaybeOwned<Tensor> {
     if (can_flatten_batch_dims(A) && (A.stride(-2) == 1 || A.stride(-1) == 1)) {
       return c10::MaybeOwned<Tensor>::borrowed(A);
     } else {
@@ -3878,7 +3881,16 @@ Tensor& linalg_solve_triangular_out(
       if (A.is_neg() && unitriangular) {
         unitriangular = false;
       }
-      return c10::MaybeOwned<Tensor>::owned(cloneMatrix(A));
+      const bool is_out_col_major = out_fully_owned
+        ? (A.stride(-2) == 1)
+        : (out.stride(-2) == 1);
+      return c10::MaybeOwned<Tensor>::owned(cloneMatrix(
+        A,
+        // NOTE: if out is provided and A is cloned, then
+        // making the clone match the layout of out will
+        // guarantee no futher memory allocations down the road
+        /*make_col_major_like=*/is_out_col_major
+      ));
     }
   }(A_);
 
@@ -4023,29 +4035,27 @@ Tensor& linalg_solve_triangular_out(
   // [Main logic]
   if (out_fully_owned) {
     solve_with_owned_out(*pA, B_, out);
+  } else if (out.is_same(B)) {
+    solve_by_trying_to_match_layouts(*pA, out);
   } else {
-    if (out.is_same(B)) {
-      solve_by_trying_to_match_layouts(*pA, out);
-    } else {
-      const bool is_A_col_major = pA->stride(-2) == 1;
-      const bool is_out_col_major = out.stride(-2) == 1;
+    const bool is_A_col_major = pA->stride(-2) == 1;
+    const bool is_out_col_major = out.stride(-2) == 1;
 
-      if (is_A_col_major && !is_out_col_major) {
-        // The case when layout matching is not possible
-        // Solve into external memory and then copy
-        auto out_extern = at::empty({0}, A.options());
-        solve_with_owned_out(*pA, B_, out_extern);
-        out_extern._set_neg(out.is_neg() ^ out_extern.is_neg());
-        out_extern._set_conj(out.is_conj() ^ out_extern.is_conj());
-        strip_flags(out).copy_(out_extern);
-      } else {
-        // Layouts can be matched, so we can avoid external memory allocations
-        auto B_data = B_;
-        if (out.is_neg()) { B_data = B_data._neg_view(); }
-        if (out.is_conj()) { B_data = B_data.conj(); }
-        strip_flags(out).copy_(B_data);
-        solve_by_trying_to_match_layouts(*pA, out);
-      }
+    if (is_A_col_major && !is_out_col_major) {
+      // The case when layout matching is not possible
+      // Solve into external memory and then copy
+      auto out_extern = at::empty({0}, A.options());
+      solve_with_owned_out(*pA, B_, out_extern);
+      out_extern._set_neg(out.is_neg() ^ out_extern.is_neg());
+      out_extern._set_conj(out.is_conj() ^ out_extern.is_conj());
+      strip_flags(out).copy_(out_extern);
+    } else {
+      // Layouts can be matched, so we can avoid external memory allocations
+      auto B_data = B_;
+      if (out.is_neg()) { B_data = B_data._neg_view(); }
+      if (out.is_conj()) { B_data = B_data.conj(); }
+      strip_flags(out).copy_(B_data);
+      solve_by_trying_to_match_layouts(*pA, out);
     }
   }
   
