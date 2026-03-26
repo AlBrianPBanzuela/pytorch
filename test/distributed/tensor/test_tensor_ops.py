@@ -20,8 +20,8 @@ from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
-    MI200_ARCH,
     instantiate_parametrized_tests,
+    MI200_ARCH,
     parametrize,
     run_tests,
     serialTest,
@@ -973,6 +973,44 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         else:
             ref = op(global_input, 1, idx, global_source)
             output_dt = op(input_dt, 1, idx_dt, source_dt)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_fill(self):
+        """Test index_fill with sharded input."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        fill_value = 5.0
+
+        ref = global_input.index_fill(1, idx, fill_value)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+
+        output_dt = input_dt.index_fill(1, idx_dt, fill_value)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    @parametrize("reduce_op", ["mean", "amax", "amin", "prod"])
+    def test_index_reduce(self, reduce_op):
+        """Test index_reduce with sharded input."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        global_source = torch.randn(4, 2, device=self.device_type)
+
+        ref = global_input.index_reduce(1, idx, global_source, reduce_op)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        source_dt = distribute_tensor(global_source, device_mesh, [Shard(0)])
+
+        output_dt = input_dt.index_reduce(1, idx_dt, source_dt, reduce_op)
 
         self.assertIsInstance(output_dt, DTensor)
         self.assertEqual(output_dt.full_tensor(), ref)
