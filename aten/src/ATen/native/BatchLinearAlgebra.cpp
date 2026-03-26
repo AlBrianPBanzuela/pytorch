@@ -3847,6 +3847,9 @@ Tensor& linalg_solve_triangular_out(
   // X = (X*)* = X**.
   // -X = -(A, B) = (-A, B) = (A, -B).
   // X* = (A, B)* = (A*, B*).
+  //
+  // We recommend looking at [Main logic] first,
+  // and at the methods therein afterwards.
 
   bool out_fully_owned = false;
   if (out.numel() == 0) {
@@ -3978,7 +3981,7 @@ Tensor& linalg_solve_triangular_out(
     if (conj_physical) { B_data.conj_physical_(); }
 
     // Compute (A, [-1]B[*]*)
-    solve(A, B_data);
+    solve(A, B_data, trans);
 
     // Compute (A, [-1]B[*]*)[*]*
     if (conj_physical) { B_data.conj_physical_(); }
@@ -3986,33 +3989,63 @@ Tensor& linalg_solve_triangular_out(
     // B contains -(A, [-1]B[*]*)([*]*)*, if -/* are present in B
   };
 
-  // Main logic
+  // Solve (A, B) by trying to match layouts of A and B.
+  // It is the highest level function, and a composition of all other functions.
+  // NOTE: B is modified in-place.
+  // NOTE: NO COPY of A is done.
+  const auto solve_by_trying_to_match_layouts = [&](
+    const Tensor& A,
+    const Tensor& B
+  ) {
+    const bool is_A_col_major = A.stride(-2) == 1;
+    const bool is_B_col_major = B.stride(-2) == 1;
+
+    if (is_A_col_major == is_B_col_major) {
+      // Direct match
+      solve_with_matching_layout(A, B);
+    } else if (!is_A_col_major) {
+      // Here A is row-major and B is col-major
+      // Match layouts by transposing just A
+      upper = !upper;
+      solve_with_matching_layout(A.mT(), B, TransposeType::Transpose);
+    } else {
+      // Here A is col-major and B is row-major
+      // We cannot transpose B to match the layout of A,
+      // so we solve into external memory using
+      // (A, -B*) = -(A, B*) = -(A*, B)*
+      // for flag resolutions in B
+      auto B_extern = at::empty({0}, A.options());
+      solve_with_owned_out(B.is_conj() ? A.conj() : A, strip_flags(B), B_extern);
+      strip_flags(B).copy_(B_extern);
+    }
+  };
+
+  // [Main logic]
   if (out_fully_owned) {
     solve_with_owned_out(*pA, B_, out);
   } else {
     if (out.is_same(B)) {
+      solve_by_trying_to_match_layouts(*pA, out);
+    } else {
       const bool is_A_col_major = pA->stride(-2) == 1;
       const bool is_out_col_major = out.stride(-2) == 1;
-      if (is_A_col_major == is_out_col_major) {
-        solve_with_matching_layout(*pA, B);
-        return out;
+
+      if (is_A_col_major && !is_out_col_major) {
+        // The case when layout matching is not possible
+        // Solve into external memory and then copy
+        auto out_extern = at::empty({0}, A.options());
+        solve_with_owned_out(*pA, B_, out_extern);
+        out_extern._set_neg(out.is_neg() ^ out_extern.is_neg());
+        out_extern._set_conj(out.is_conj() ^ out_extern.is_conj());
+        strip_flags(out).copy_(out_extern);
+      } else {
+        // Layouts can be matched, so we can avoid external memory allocations
+        auto B_data = B_;
+        if (out.is_neg()) { B_data = B_data._neg_view(); }
+        if (out.is_conj()) { B_data = B_data.conj(); }
+        strip_flags(out).copy_(B_data);
+        solve_by_trying_to_match_layouts(*pA, out);
       }
-      // NOTE: A will not be copied
-      // TODO: optimize for less B copies when possible
-      // Now solve into external memory using
-      // (A, -B*) = -(A, B*) = -(A*, B)*
-      // to resolve for flags in out
-      auto out_extern = at::empty({0}, A.options());
-      solve_with_owned_out(out.is_conj() ? pA->conj() : *pA, strip_flags(B_), out_extern);
-      strip_flags(out).copy_(out_extern);
-    } else {
-      // NOTE: A will not be copied
-      // TODO: optimize for less B copies when possible
-      auto out_extern = at::empty({0}, A.options());
-      solve_with_owned_out(*pA, B_, out_extern);
-      out_extern._set_neg(out.is_neg() ^ out_extern.is_neg());
-      out_extern._set_conj(out.is_conj() ^ out_extern.is_conj());
-      strip_flags(out).copy_(out_extern);
     }
   }
   
