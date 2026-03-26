@@ -148,6 +148,10 @@ runs:
         CLANG_VERSION=$(echo "${COMPILER}" | perl -n -e'/^clang(\d+)$/ && print $1')
         GCC_VERSION=$(echo "${COMPILER}" | perl -n -e'/^gcc(\d+)$/ && print $1')
 
+        # Strip any gcc-toolset paths that might linger from the base image
+        CLEAN_PATH=$(echo "${PATH}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
+        CLEAN_LD_PATH=$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
+
         if [ -z "${CLANG_VERSION}" ] && [ -z "${GCC_VERSION}" ]; then
           echo "ERROR: unrecognized compiler '${COMPILER}', expected gcc<N> or clang<N>"
           exit 1
@@ -158,7 +162,8 @@ runs:
             echo "ERROR: clang ${CLANG_VERSION} not found at ${INSTALL_DIR}"
             exit 1
           fi
-          echo "PATH=${INSTALL_DIR}/bin:${PATH}" >> "${GITHUB_ENV}"
+          echo "PATH=${INSTALL_DIR}/bin:${CLEAN_PATH}" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${CLEAN_LD_PATH}" >> "${GITHUB_ENV}"
           echo "CC=${INSTALL_DIR}/bin/clang" >> "${GITHUB_ENV}"
           echo "CXX=${INSTALL_DIR}/bin/clang++" >> "${GITHUB_ENV}"
           echo "CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH:-}" >> "${GITHUB_ENV}"
@@ -173,10 +178,8 @@ runs:
             echo "ERROR: gcc-toolset-${GCC_VERSION} not found at ${TOOLSET_ROOT}"
             exit 1
           fi
-          # Strip any other gcc-toolset paths, then prepend the requested one
-          CLEAN_PATH=$(echo "${PATH}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
           echo "PATH=${TOOLSET_ROOT}/bin:${CLEAN_PATH}" >> "${GITHUB_ENV}"
-          echo "LD_LIBRARY_PATH=${TOOLSET_ROOT}/lib64:${TOOLSET_ROOT}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${TOOLSET_ROOT}/lib64:${TOOLSET_ROOT}/lib:${CLEAN_LD_PATH}" >> "${GITHUB_ENV}"
         fi
 
     - name: Switch CUDA version
