@@ -1208,7 +1208,7 @@ def _index_dim_strategy(
 
 
 @register_single_dim_strategy(
-    aten.index_fill.int_Scalar,
+    [aten.index_fill.int_Scalar, aten.index_fill_.int_Scalar],
     schema_info=RuntimeSchemaInfo(1),
 )
 def index_fill_scalar_single_dim_strategy(
@@ -1223,7 +1223,7 @@ def index_fill_scalar_single_dim_strategy(
 
 
 @register_single_dim_strategy(
-    aten.index_fill.int_Tensor,
+    [aten.index_fill.int_Tensor, aten.index_fill_.int_Tensor],
     schema_info=RuntimeSchemaInfo(1),
 )
 def index_fill_tensor_single_dim_strategy(

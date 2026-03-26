@@ -977,7 +977,6 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertIsInstance(output_dt, DTensor)
         self.assertEqual(output_dt.full_tensor(), ref)
 
-    @with_comms
     def test_index_fill(self):
         """Test index_fill with sharded input."""
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -995,7 +994,6 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertIsInstance(output_dt, DTensor)
         self.assertEqual(output_dt.full_tensor(), ref)
 
-    @with_comms
     @parametrize("reduce_op", ["mean", "amax", "amin", "prod"])
     def test_index_reduce(self, reduce_op):
         """Test index_reduce with sharded input."""
