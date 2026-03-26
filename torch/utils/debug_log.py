@@ -1,12 +1,12 @@
-"""Example logging utilities using leaf_function's register_hook.
+"""Example logging utilities using leaf_function's register_multi_grad_hook.
 
 ``debug_log`` and ``debug_log_rank`` log tensor norms during forward and
 gradients during backward. Both are leaf functions, so they are opaque to
 the compiler and work with eager, torch.compile with aot_eager backend, and make_fx.
 
-Backward logging is implemented via ``register_hook`` on the leaf function,
-which collects gradients from all requires_grad tensor inputs and fires
-exactly once when all gradients are available.
+Backward logging is implemented via ``register_multi_grad_hook`` on the leaf
+function, which fires exactly once when all requires_grad tensor inputs have
+their gradients computed.
 
 Works with eager, torch.compile's aot_eager backend, and make_fx tracing.
 
@@ -20,7 +20,7 @@ pattern:
    tensor and any extra arguments, performs the logging, and returns ``None``.
 2. Register a fake implementation with ``@fn.register_fake`` that returns
    ``None`` (no tensor output to trace).
-3. Register a backward hook with ``@fn.register_hook``. The hook has the
+3. Register a backward hook with ``@fn.register_multi_grad_hook``. The hook has the
    same signature, but each tensor argument receives the gradient instead
    of the original value. The hook must return ``None``.
 
@@ -40,7 +40,7 @@ Example::
         return None
 
 
-    @my_log.register_hook
+    @my_log.register_multi_grad_hook
     def my_log_hook(t_grad, label):
         print(f"[{label}][bwd] mean={t_grad.mean().item():.4f}")
 
@@ -98,7 +98,7 @@ def debug_log_fake(t, tag):
     return None
 
 
-@debug_log.register_hook  # pyrefly: ignore[missing-attribute]
+@debug_log.register_multi_grad_hook  # pyrefly: ignore[missing-attribute]
 def debug_log_hook(t_grad, tag):
     torch._higher_order_ops.print("[{}][bwd] norm={}", tag, t_grad.norm())
 
@@ -155,7 +155,7 @@ def debug_log_rank_fake(t, tag, ranks=None):
     return None
 
 
-@debug_log_rank.register_hook  # pyrefly: ignore[missing-attribute]
+@debug_log_rank.register_multi_grad_hook  # pyrefly: ignore[missing-attribute]
 def debug_log_rank_hook(t_grad, tag, ranks=None):
     if _should_log(ranks):
         log.info("[rank %d][%s][bwd] norm=%s", _get_rank(), tag, t_grad.norm().item())

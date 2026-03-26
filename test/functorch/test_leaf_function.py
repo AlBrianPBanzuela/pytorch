@@ -2477,7 +2477,7 @@ instantiate_parametrized_tests(TestLeafFunctionDynamo)
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionRegisterHook(TestCase):
-    """Tests for @leaf_function's register_hook API."""
+    """Tests for @leaf_function's register_multi_grad_hook API."""
 
     def test_hook_fires_on_backward(self):
         """Hook fires when gradient is computed during backward."""
@@ -2491,7 +2491,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad):
             hook_grads.append(x_grad.clone())
 
@@ -2515,7 +2515,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad):
             hook_grads.append(x_grad.clone())
 
@@ -2542,7 +2542,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x, tag, scale):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad, tag, scale):
             captured["tag"] = tag
             captured["scale"] = scale
@@ -2568,7 +2568,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x, y):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad, y_grad):
             hook_calls.append((x_grad.clone(), y_grad.clone()))
 
@@ -2595,7 +2595,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x, y):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_or_grad, y_val):
             hook_calls.append((x_or_grad.clone(), y_val.clone()))
 
@@ -2621,7 +2621,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad):
             hook_count[0] += 1
 
@@ -2644,7 +2644,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def log_fn_fake(x, tag):
             return None
 
-        @log_fn.register_hook
+        @log_fn.register_multi_grad_hook
         def log_fn_hook(x_grad, tag):
             hook_grads.append((x_grad.clone(), tag))
 
@@ -2669,7 +2669,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def log_fn_fake(x, tag):
             return None
 
-        @log_fn.register_hook
+        @log_fn.register_multi_grad_hook
         def log_fn_hook(x_grad, tag):
             hook_grads.append(tag)
 
@@ -2697,7 +2697,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad):
             hook_grads.append(x_grad.clone())
 
@@ -2722,7 +2722,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad):
             hook_grads.append(x_grad.clone())
 
@@ -2742,7 +2742,7 @@ class TestLeafFunctionRegisterHook(TestCase):
 
         Note: retain_graph on the outer graph works, but the leaf function's
         internal autograd graph is consumed on first backward. The hook itself
-        fires via tensor.register_hook on the outer graph, so it fires each time.
+        fires via per-tensor hooks on the outer graph, so it fires each time.
         """
         hook_count = [0]
 
@@ -2754,7 +2754,7 @@ class TestLeafFunctionRegisterHook(TestCase):
         def my_fn_fake(x):
             return (torch.empty_like(x),)
 
-        @my_fn.register_hook
+        @my_fn.register_multi_grad_hook
         def my_fn_hook(x_grad):
             hook_count[0] += 1
 
