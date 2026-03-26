@@ -40,9 +40,26 @@ class TestNativeDSLOps(TestCase):
     def setUp(self):
         """Clear all caches before each test to ensure test isolation."""
         self._cache_functions_to_clear = [
-            ("torch._native.common_utils", ["check_native_jit_disabled", "check_native_version_skip"]),
-            ("torch._native.triton_utils", ["_version_is_sufficient", "check_native_jit_disabled", "check_native_version_skip"]),
-            ("torch._native.cutedsl_utils", ["_version_is_ok", "check_native_jit_disabled", "check_native_version_skip"]),
+            (
+                "torch._native.common_utils",
+                ["check_native_jit_disabled", "check_native_version_skip"],
+            ),
+            (
+                "torch._native.triton_utils",
+                [
+                    "_version_is_sufficient",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
+            (
+                "torch._native.cutedsl_utils",
+                [
+                    "_version_is_ok",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
         ]
         self._clear_function_caches()
 
@@ -59,10 +76,17 @@ class TestNativeDSLOps(TestCase):
                 pass
 
     def test_consistent_helper_interface(self):
-        """Test triton_utils and cutedsl_utils expose consistent public APIs."""
+        """Test all registered DSL utils expose consistent public APIs."""
+        from torch.testing._internal.common_utils import get_all_dsls
+
+        # Automatically discover all registered DSLs
+        dsl_names = get_all_dsls()
+        if not dsl_names:
+            # Fallback to hardcoded list if registry not available
+            dsl_names = ["triton", "cutedsl"]
+
         modules_info = [
-            ("triton_utils.py", "torch._native.triton_utils"),
-            ("cutedsl_utils.py", "torch._native.cutedsl_utils"),
+            (f"{dsl}_utils.py", f"torch._native.{dsl}_utils") for dsl in dsl_names
         ]
 
         # Import modules directly to avoid dependency issues
@@ -95,7 +119,9 @@ class TestNativeDSLOps(TestCase):
 
         # Test modules expose identical public APIs
         api_sets = list(public_apis.values())
-        self.assertEqual(api_sets[0], api_sets[1], "Modules should have identical public APIs")
+        self.assertEqual(
+            api_sets[0], api_sets[1], "Modules should have identical public APIs"
+        )
 
         # Test runtime functions return expected types
         for module_name, mod in modules.items():
@@ -107,6 +133,7 @@ class TestNativeDSLOps(TestCase):
                 ver = mod.runtime_version()
                 if ver is not None:
                     from packaging.version import Version
+
                     self.assertIsInstance(ver, Version)
 
     def test_no_dsl_imports_after_import_torch(self):
@@ -187,8 +214,11 @@ class TestNativeDSLOps(TestCase):
                         self.assertIsNone(result)
                     else:
                         # Valid versions should parse correctly
-                        self.assertEqual(result, Version(version_str),
-                                       f"_available_version({version_str!r}) = {result}")
+                        self.assertEqual(
+                            result,
+                            Version(version_str),
+                            f"_available_version({version_str!r}) = {result}",
+                        )
 
     def test_registry_mechanics(self):
         """_get_or_create_library caches Library instances per (lib, dispatch_key)."""
@@ -233,7 +263,9 @@ class TestNativeDSLOps(TestCase):
                 try:
                     mod.deregister_op_overrides()
                 except Exception as e:
-                    self.fail(f"deregister_op_overrides on {module_name} raised exception: {e}")
+                    self.fail(
+                        f"deregister_op_overrides on {module_name} raised exception: {e}"
+                    )
 
     def test_register_op_skips_when_jit_disabled(self):
         """register_op_override does not call through when TORCH_DISABLE_NATIVE_JIT=1."""
@@ -283,8 +315,24 @@ class TestNativeDSLOps(TestCase):
             check_native_version_skip.cache_clear()
 
             # Clear module-specific caches with error handling
-            for module, cache_names in [(triton_utils, ["_version_is_sufficient", "check_native_jit_disabled", "check_native_version_skip"]),
-                                        (cutedsl_utils, ["_version_is_ok", "check_native_jit_disabled", "check_native_version_skip"])]:
+            for module, cache_names in [
+                (
+                    triton_utils,
+                    [
+                        "_version_is_sufficient",
+                        "check_native_jit_disabled",
+                        "check_native_version_skip",
+                    ],
+                ),
+                (
+                    cutedsl_utils,
+                    [
+                        "_version_is_ok",
+                        "check_native_jit_disabled",
+                        "check_native_version_skip",
+                    ],
+                ),
+            ]:
                 for cache_name in cache_names:
                     if hasattr(module, cache_name):
                         getattr(module, cache_name).cache_clear()
@@ -311,8 +359,11 @@ class TestNativeDSLOps(TestCase):
                 cutedsl_utils.register_op_override("aten", op_name, "CPU", lambda: None)
 
                 # Verify both implementation functions were called
-                self.assertEqual(triton_mock.call_count + cute_mock.call_count, 2,
-                               f"Expected 2 calls but got triton: {triton_mock.call_count}, cutedsl: {cute_mock.call_count}")
+                self.assertEqual(
+                    triton_mock.call_count + cute_mock.call_count,
+                    2,
+                    f"Expected 2 calls but got triton: {triton_mock.call_count}, cutedsl: {cute_mock.call_count}",
+                )
 
     def test_check_native_version_skip_environment_variable(self):
         """Test TORCH_NATIVE_SKIP_VERSION_CHECK environment variable behavior."""
@@ -333,6 +384,57 @@ class TestNativeDSLOps(TestCase):
                     check_native_version_skip.cache_clear()
                     self.assertEqual(check_native_version_skip(), expected_result)
 
+    def test_dsl_registry_functionality(self):
+        """Test that DSL registry works correctly"""
+        from torch.testing._internal.common_utils import (
+            get_all_dsls,
+            get_available_dsls,
+            is_dsl_available,
+        )
+
+        # Test registry returns expected DSLs
+        all_dsls = get_all_dsls()
+        self.assertIsInstance(all_dsls, list)
+        self.assertIn("triton", all_dsls)
+        self.assertIn("cutedsl", all_dsls)
+
+        # Test available DSLs are subset of all DSLs
+        available_dsls = get_available_dsls()
+        self.assertIsInstance(available_dsls, list)
+        for dsl in available_dsls:
+            self.assertIn(dsl, all_dsls)
+
+        # Test availability check function
+        for dsl in all_dsls:
+            availability = is_dsl_available(dsl)
+            self.assertIsInstance(availability, bool)
+            # If DSL is in available list, it should return True
+            if dsl in available_dsls:
+                self.assertTrue(availability)
+
+    def test_dsl_test_helpers(self):
+        """Test that DSL test helper decorators work"""
+        from torch.testing._internal.common_utils import (
+            skipIfDSLUnavailable,
+            skipIfNoCuteDSL,
+            skipIfNoTritonDSL,
+            skipUnlessDSLAvailable,
+        )
+
+        # Test that decorators are callable
+        self.assertTrue(callable(skipIfNoTritonDSL))
+        self.assertTrue(callable(skipIfNoCuteDSL))
+        self.assertTrue(callable(skipIfDSLUnavailable))
+        self.assertTrue(callable(skipUnlessDSLAvailable))
+
+        # Test dynamic decorators can be called
+        try:
+            decorator1 = skipIfDSLUnavailable("nonexistent_dsl")
+            decorator2 = skipUnlessDSLAvailable("triton")
+            self.assertTrue(callable(decorator1))
+            self.assertTrue(callable(decorator2))
+        except Exception as e:
+            self.fail(f"Dynamic DSL decorators failed: {e}")
 
 
 if __name__ == "__main__":
