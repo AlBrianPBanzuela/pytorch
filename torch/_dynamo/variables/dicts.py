@@ -2001,7 +2001,10 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         else:
             value = vt.get_real_python_backed_value()
             if value is not NO_SUCH_SUBOBJ:
-                return object.__getattribute__(value, "__dict__")
+                if isinstance(vt, variables.UserDefinedObjectVariable):
+                    return vt._getattr_static("__dict__")  # type: ignore[bad-return]
+                else:
+                    return object.__getattribute__(value, "__dict__")
             else:
                 unimplemented(
                     gb_type="unsupported variable type for __dict__ access",
