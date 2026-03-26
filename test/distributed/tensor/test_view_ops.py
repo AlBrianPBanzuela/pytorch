@@ -2146,6 +2146,7 @@ TestViewOpsWithLocalTensor = create_local_tensor_test_class(
         # Too many test cases for LocalTensorMode dispatch overhead
         "test_dtensor_flatten_1d",
         "test_dtensor_flatten_2d",
+        "test_dtensor_flatten_multi_mesh",
     ],
     base_class=LocalDTensorContinuousTestBase,
 )
