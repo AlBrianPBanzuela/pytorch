@@ -2782,10 +2782,18 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
-                # With boxed_grads_call, PyNode::apply passes a single mutable
-                # list as the argument. Otherwise, grads come as *flat_args.
+                # With boxed_grads_call, grads arrive as a single mutable
+                # list (not *args) so backward can free them individually
+                # to reduce peak memory.
                 if CompiledFunction.boxed_grads_call:
-                    assert len(flat_args) == 1 and isinstance(flat_args[0], list)
+                    if len(flat_args) != 1 or not isinstance(flat_args[0], list):
+                        raise AssertionError(
+                            "boxed_grads_call is set but backward received "
+                            f"{len(flat_args)} args instead of a single mutable "
+                            "list. When boxed_grads_call=True, grads must be "
+                            "passed as a single list argument [grad0, grad1, ...] "
+                            "to allow freeing individual grads mid-backward."
+                        )
                     grad_args = flat_args[0]
                 else:
                     grad_args = list(flat_args)
