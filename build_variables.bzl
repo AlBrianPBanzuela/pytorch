@@ -112,6 +112,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
     "torch/csrc/profiler/standalone/privateuse1_observer.cpp",
+    "torch/csrc/profiler/standalone/privateuse1_profiler.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/profiler/orchestration/vulkan.cpp",
     "torch/csrc/profiler/perf.cpp",
@@ -690,7 +691,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_nativert_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
@@ -1158,6 +1159,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/LegacyVmapMode.cpp",
     "aten/src/ATen/LegacyVmapTransforms.cpp",
     "aten/src/ATen/core/BackendSelectFallbackKernel.cpp",
+    "aten/src/ATen/core/CachingHostAllocator.cpp",
     "aten/src/ATen/core/DeprecatedTypeProperties.cpp",
     "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
     "aten/src/ATen/core/Dict.cpp",
@@ -1171,7 +1173,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Tensor.cpp",
     "aten/src/ATen/core/VariableFallbackKernel.cpp",
     "aten/src/ATen/core/VariableHooksInterface.cpp",
-    "aten/src/ATen/core/Vitals.cpp",
     "aten/src/ATen/core/boxing/KernelFunction.cpp",
     "aten/src/ATen/core/custom_class.cpp",
     "aten/src/ATen/core/dispatch/DispatchKeyExtractor.cpp",
@@ -1502,6 +1503,7 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/UpSampleBicubic2d.cpp",
     "aten/src/ATen/native/UpSampleBilinear2d.cpp",
+    "aten/src/ATen/native/UpSampleLanczos2d.cpp",
     "aten/src/ATen/native/UpSampleLinear1d.cpp",
     "aten/src/ATen/native/UpSampleNearest1d.cpp",
     "aten/src/ATen/native/UpSampleNearest2d.cpp",
