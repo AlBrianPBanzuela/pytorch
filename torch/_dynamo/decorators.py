@@ -1686,8 +1686,9 @@ def override_optimization_hint(x: Any, val: int) -> None:
         **all** unbacked symbols in the program to guide optimizations.
 
     Args:
-        x: A ``torch.SymInt`` (e.g. from ``.item()``) or a plain ``int``.
-            If *x* is a plain ``int`` the call is a no-op.
+        x: A ``torch.SymInt`` wrapping an unbacked symbol (e.g. from
+            ``.item()``), or a plain ``int``.  If *x* is a plain ``int``
+            the call is a no-op.
         val: The integer hint value to record.
     """
     if not isinstance(val, int):
