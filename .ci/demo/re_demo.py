@@ -20,32 +20,17 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 
-def _ensure_deps():
-    try:
-        import re_cli  # noqa: F401
-        import yaml  # noqa: F401
-    except ImportError:
-        print("Installing dependencies...")
-        subprocess.check_call(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-q",
-                "blast-cli",
-                "pyyaml",
-            ]
-        )
+try:
+    import yaml
+    import re_cli  # noqa: F401
+except ImportError:
+    print("Missing dependencies. Install with:blast-cli pyyaml")
+    sys.exit(1)
 
-
-_ensure_deps()
-
-import yaml  # noqa: E402
-from re_cli.core.core_types import StepConfig  # noqa: E402
-from re_cli.core.job_runner import JobRunner  # noqa: E402
-from re_cli.core.k8s_client import K8sClient, K8sConfig  # noqa: E402
-from re_cli.core.script_builder import RunnerScriptBuilder  # noqa: E402
+from re_cli.core.core_types import StepConfig
+from re_cli.core.job_runner import JobRunner
+from re_cli.core.k8s_client import K8sClient, K8sConfig
+from re_cli.core.script_builder import RunnerScriptBuilder
 
 
 # ---------------------------------------------------------------------------
@@ -66,10 +51,8 @@ ACTION_MAP = {
 
 
 # ---------------------------------------------------------------------------
-# Script builder
+# Script builder：customize the script builder to add customized steps
 # ---------------------------------------------------------------------------
-
-
 class PyTorchScriptBuilder(RunnerScriptBuilder):
     DEFAULT_MODULES = [
         "header",
@@ -80,7 +63,7 @@ class PyTorchScriptBuilder(RunnerScriptBuilder):
         "upload_outputs",
     ]
 
-    # just example to override the script builder fro origincal cli tool
+    # just example to override the script builder from origincal cli tool
     def add_git_clone(self) -> "PyTorchScriptBuilder":
         self._modules.append(
             f"\n# {'=' * 44}\n# MODULE: git_clone\n# {'=' * 44}\n"
