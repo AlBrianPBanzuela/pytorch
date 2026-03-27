@@ -62,8 +62,15 @@ def _pr_info(pr: int) -> dict:
 
 def _detect_pr() -> int:
     """Detect PR number from the current branch."""
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
     out = subprocess.run(
-        ["gh", "pr", "view", "--repo", "pytorch/pytorch", "--json", "number"],
+        ["gh", "pr", "list", "--repo", "pytorch/pytorch",
+         "--head", branch, "--json", "number"],
         capture_output=True,
         text=True,
     )
@@ -72,7 +79,13 @@ def _detect_pr() -> int:
             "No PR found for current branch. "
             "Push your branch and open a PR first, or pass --pr explicitly."
         )
-    return json.loads(out.stdout)["number"]
+    prs = json.loads(out.stdout)
+    if not prs:
+        raise RuntimeError(
+            f"No open PR found for branch '{branch}'. "
+            "Push your branch and open a PR first, or pass --pr explicitly."
+        )
+    return prs[0]["number"]
 
 
 def _local_head() -> str:
@@ -86,9 +99,26 @@ def _local_head() -> str:
     return out.stdout.strip()
 
 
+def _check_clean_workdir() -> None:
+    """Ensure no uncommitted changes exist."""
+    out = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if out.stdout.strip():
+        raise RuntimeError(
+            "You have uncommitted local changes. "
+            "Commit or stash them before running RE."
+        )
+
+
 def _resolve_commit(pr: int | None, commit: str | None) -> dict:
     if commit:
         return {"sha": commit, "repo": REPO}
+
+    _check_clean_workdir()
 
     if pr is None:
         pr = _detect_pr()
