@@ -7020,16 +7020,14 @@
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: norm_dtype_out
-    MPS: norm_dtype_out_mps
+    CPU, CUDA, MPS: norm_dtype_out
   tags: reduction
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: norm_out
-    MPS: norm_out_mps
+    CPU, CUDA, MPS: norm_out
   tags: reduction
 
 # These four redispatch in their implementation, so OK to be CompositeImplicitAutograd
@@ -10014,8 +10012,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lerp_Tensor
-    MPS: lerp_Tensor_mps
+    CPU, CUDA, MPS: lerp_Tensor
   tags: pointwise
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
@@ -11799,6 +11796,14 @@
     CompositeExplicitAutograd: foreach_tensor_zero_slow_
     CUDA: foreach_tensor_zero_cuda_
   autogen: _foreach_zero, _foreach_zero.out
+
+- func: _foreach_clone(Tensor[] self, *, MemoryFormat? memory_format=None) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_clone_slow
+    CUDA: foreach_tensor_clone_cuda
+  autogen: _foreach_clone.out
 
 - func: _foreach_copy_(Tensor(a!)[] self, Tensor[] src, bool non_blocking=False) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -14525,8 +14530,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_vector_norm_out
-    MPS: linalg_vector_norm_out_mps
+    CPU, CUDA, MPS: linalg_vector_norm_out
   tags: reduction
 
 # Computes sum(|x|^ord) - the "power sum" without the final root.
