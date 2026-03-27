@@ -51,7 +51,7 @@ _HAS_PYZES = False
 
 
 try:
-    import pyzes
+    import pyzes  # type: ignore[import]
 
     _HAS_PYZES = True
 except ImportError:

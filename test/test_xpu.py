@@ -247,6 +247,37 @@ if __name__ == "__main__":
         rc = check_output(test_script).splitlines()[-1]
         self.assertEqual(rc, str(torch.xpu.device_count()))
 
+    def test_device_count_respects_affinity_mask(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        def _run(mask: str) -> str:
+            script = f"""\
+import torch
+import os
+os.environ['ZE_AFFINITY_MASK'] = {mask!r}
+r1 = torch.xpu._device_count_zes()
+r2 = torch._C._xpu_getDeviceCount()
+print(f"{{r1}}, {{r2}}")
+"""
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        # Index 128 is out of range → both return 0
+        self.assertEqual(_run("128"), "0, 0")
+        # COMPOSITE-style mask → _device_count_zes returns -1, driver count unchanged
+        self.assertEqual(_run("0.0"), "-1, 1")
+        # Valid mask selecting device 0 on a single-GPU system → both return 0
+        self.assertEqual(_run("0"), "0, 0")
+        if TEST_MULTIXPU:
+            # Valid mask selecting device 0 on a multi-GPU system → both return 1
+            self.assertEqual(_run("0"), "1, 1")
+
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     def test_device_count_not_cached_pre_init(self):
         try:
