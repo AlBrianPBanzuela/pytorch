@@ -104,7 +104,7 @@ def register_to_dispatcher():
     # NOTE: This doesn't actually work..
     #       Want to use a custom op (unsupported right now)
     tu.register_op_override(
-        "mxfp8_quant",
+        "aten",
         "triton_to_mxfp8_dim0",
         "CUDA",
         triton_to_mxfp8_dim0,
