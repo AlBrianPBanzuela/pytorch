@@ -27,7 +27,8 @@ def _load_script_module(name: str) -> str:
         raise RuntimeError(f"script module '{name}' not found at {path}")
     template = path.read_text()
     return "\n".join(
-        line for line in template.splitlines()
+        line
+        for line in template.splitlines()
         if not line.startswith("#") and not line.startswith("set -")
     ).strip()
 
@@ -36,9 +37,14 @@ def _pr_info(pr: int) -> dict:
     """Get commit SHA and repo URL from a PR number."""
     out = subprocess.run(
         [
-            "gh", "pr", "view", str(pr),
-            "--repo", "pytorch/pytorch",
-            "--json", "headRefOid,headRefName,headRepository,headRepositoryOwner",
+            "gh",
+            "pr",
+            "view",
+            str(pr),
+            "--repo",
+            "pytorch/pytorch",
+            "--json",
+            "headRefOid,headRefName,headRepository,headRepositoryOwner",
         ],
         capture_output=True,
         text=True,
@@ -100,7 +106,7 @@ class LumenScriptBuilder(RunnerScriptBuilder):
     def add_install_lumen(self) -> LumenScriptBuilder:
         self._modules.append(
             f"\n# {'=' * 44}\n# MODULE: install_lumen\n# {'=' * 44}\n"
-            "cd .ci/lumen_cli"
+            "(cd .ci/lumen_cli && python -m pip install -e .)"
         )
         return self
 
