@@ -57,7 +57,7 @@ class PRNGKey(torch.Tensor):
     def __repr__(self):
         return f"{type(self).__name__}({self._data})"
 
-    def _grid_split(
+    def _unbind(
         self, shape: tuple, splits: tuple, outputs_per_elem: int
     ) -> "PRNGKey":
         raise NotImplementedError
@@ -86,9 +86,9 @@ class Philox4x32_10Key(PRNGKey):
     def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
         return cls(inner_tensors["_data"])
 
-    def _grid_split(self, shape, splits, outputs_per_elem):
+    def _unbind(self, shape, splits, outputs_per_elem):
         return Philox4x32_10Key(
-            _philox_grid_split(self._data, shape, splits, outputs_per_elem)
+            _philox_unbind(self._data, shape, splits, outputs_per_elem)
         )
 
     def _split(self, num):
@@ -173,40 +173,50 @@ def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
     return torch.ops.aten._philox_key_split(key, num)
 
 
-def grid_split(
+def unbind(
     key: torch.Tensor,
     shape: tuple,
     splits: tuple,
     dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    r"""Split a key into a grid of keys for tiled generation.
+    r"""Unbind a key into a grid of sub-keys for tiled generation.
 
-    For 1D, each returned key covers a contiguous block of the stream::
+    Each returned sub-key generates a contiguous tile of the output that the
+    original key would produce. Unlike :func:`split`, which derives
+    statistically independent keys, ``unbind`` preserves the relationship
+    between sub-keys and the parent key: generating with all sub-keys and
+    reassembling the tiles exactly reconstructs the full output::
 
-        keys = grid_split(key, (100,), (10,))
+        keys = unbind(key, (100,), (10,))
         full = uniform(key, (100,))
         tile_size = 100 // 10  # = 10
         tiled = torch.cat([uniform(keys[i], (tile_size,)) for i in range(10)])
         assert torch.equal(full, tiled)
 
-    For N-D, each tile key is a batched key with per-row offsets into the flat
-    stream. The tile shape is ``shape[i] // splits[i]`` along each dimension,
-    and ``uniform(keys[t0, ..., t_{n-1}], tile_shape)`` reproduces the
+    For N-D, each tile key is a batched key with per-row sub-keys. The tile
+    shape is ``shape[i] // splits[i]`` along each dimension, and
+    ``uniform(keys[t0, ..., t_{n-1}], tile_shape)`` reproduces the
     corresponding sub-block of the full generation.
 
     Args:
         key (Tensor): A PRNG key of shape ``(..., 2)`` with dtype ``torch.uint64``.
         shape (tuple): Shape of the full tensor to be generated.
-        splits (tuple): Number of keys (tiles) along each dimension. Must evenly
+        splits (tuple): Number of tiles along each dimension. Must evenly
             divide the corresponding element of ``shape``.
         dtype (:class:`torch.dtype`, optional): The dtype that will be generated.
             Needed because float64 consumes 2 Philox outputs per element vs 1
             for other types.
 
     Returns:
-        Tensor: Batched key tensor. For 1D: shape ``(*splits, 1, 2)``.
-        For N-D: shape ``(*splits, *tile_shape[:-1], 1, 2)``, where each tile key
-        carries one sub-key per row of the tile.
+        Tensor: Batched key tensor. For 1D: shape ``(*splits, 2)``.
+        For N-D: shape ``(*splits, *tile_shape[:-1], 2)``, where each tile
+        key carries one sub-key per row of the tile.
+
+    .. note::
+
+        For the Philox algorithm, ``unbind`` works by shifting the offset
+        component of the key so that each sub-key points to the start of
+        its tile within the same PRNG stream.
     """
     if len(shape) != len(splits):
         raise ValueError(
@@ -217,11 +227,11 @@ def grid_split(
             raise ValueError(f"splits[{i}]={sp} does not evenly divide shape[{i}]={s}")
     outputs_per_elem = 2 if dtype is not None and dtype == torch.float64 else 1
     if isinstance(key, PRNGKey):
-        return key._grid_split(shape, splits, outputs_per_elem)
-    return _philox_grid_split(key, shape, splits, outputs_per_elem)
+        return key._unbind(shape, splits, outputs_per_elem)
+    return _philox_unbind(key, shape, splits, outputs_per_elem)
 
 
-def _philox_grid_split(
+def _philox_unbind(
     key: torch.Tensor, shape: tuple, splits: tuple, outputs_per_elem: int
 ) -> torch.Tensor:
     ndim = len(shape)
@@ -234,8 +244,7 @@ def _philox_grid_split(
         flat_indices = torch.arange(splits[0], dtype=torch.int64, device=key.device)
         offsets = base_offset + flat_indices * (tile_shape[0] * outputs_per_elem)
         seeds = seed.expand_as(offsets)
-        # Unsqueeze so key.dim() == output.dim() + 1 (generation axis is size-1).
-        return torch.stack([seeds, offsets], dim=-1).view(torch.uint64).unsqueeze(-2)
+        return torch.stack([seeds, offsets], dim=-1).view(torch.uint64)
 
     # N-D: tiles are not contiguous in the flat stream. Each "row" (innermost
     # slice of size tile_shape[-1]) IS contiguous, so we emit one key per row
@@ -289,8 +298,7 @@ def _philox_grid_split(
     offset = offset.permute(tile_perm + inner_perm).contiguous()
 
     seeds = seed.expand_as(offset)
-    # Unsqueeze so key.dim() == output.dim() + 1 (generation axis is size-1).
-    return torch.stack([seeds, offset], dim=-1).view(torch.uint64).unsqueeze(-2)
+    return torch.stack([seeds, offset], dim=-1).view(torch.uint64)
 
 
 def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
