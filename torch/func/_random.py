@@ -176,4 +176,4 @@ def normal(
     if dtype is None:
         dtype = torch.float32
     result = torch.empty(shape, dtype=dtype, device=key.device)
-    return normal_(result, key, mean, std)
+    return normal_(key, result, mean=mean, std=std)
