@@ -238,7 +238,7 @@ class TestPhiloxNormal(TestCase):
     @dtypes(*all_floating_dtypes)
     def test_batched_keys(self, device, dtype):
         key = random.key(42, device=device)
-        keys = random.split(key, 4)  # (4, 2)
+        keys = random.split(key, 4).unsqueeze(-2)  # (4, 1, 2)
         result = random.normal(keys, (4, 100), dtype=dtype)
         for i in range(4):
             individual = random.normal(keys[i], (100,), dtype=dtype)
@@ -247,7 +247,7 @@ class TestPhiloxNormal(TestCase):
     @dtypes(*all_floating_dtypes)
     def test_multi_batch(self, device, dtype):
         key = random.key(42, device=device)
-        keys = random.split(key, 6).reshape(2, 3, 2)  # (2, 3, 2)
+        keys = random.split(key, 6).reshape(2, 3, 1, 2)  # (2, 3, 1, 2)
         result = random.normal(keys, (2, 3, 50), dtype=dtype)
         for i in range(2):
             for j in range(3):
@@ -255,11 +255,39 @@ class TestPhiloxNormal(TestCase):
                 self.assertEqual(result[i][j], individual)
 
     @dtypes(*all_floating_dtypes)
-    def test_broadcasting(self, device, dtype):
-        key = random.key(42, device=device).unsqueeze(0)  # (1, 2)
-        result = random.normal(key, (4, 100), dtype=dtype)
+    def test_key_broadcasting_semantics(self, device, dtype):
+        key = random.key(42, device=device)
+
+        # Broadcast key dim: size-1 dims replicate, real dims index keys.
+        keys = random.split(key, 3).unsqueeze(0).unsqueeze(-2)  # (1, 3, 1, 2)
+        result = random.normal(keys, (4, 3, 100), dtype=dtype)
         for i in range(1, 4):
             self.assertEqual(result[0], result[i])
+        for j in range(1, 3):
+            self.assertNotEqual(result[0][0], result[0][j])
+
+        # All-broadcast key matches unbatched (all dims are generation).
+        batched = random.normal(key.reshape(1, 1, 2), (4, 100), dtype=dtype)
+        unbatched = random.normal(key, (400,), dtype=dtype)
+        self.assertEqual(batched.flatten(), unbatched)
+
+        # Multiple trailing size-1 dims form the generation axis.
+        keys = random.split(key, 4).reshape(4, 1, 1, 2)  # (4, 1, 1, 2)
+        result = random.normal(keys, (4, 10, 100), dtype=dtype)
+        for i in range(4):
+            individual = random.normal(keys[i], (10, 100), dtype=dtype)
+            self.assertEqual(result[i], individual)
+        keys_flat = random.split(key, 4).unsqueeze(-2)  # (4, 1, 2)
+        flat = random.normal(keys_flat, (4, 1000), dtype=dtype)
+        self.assertEqual(result.reshape(4, 1000), flat)
+
+        # No generation dims: every element gets its own key.
+        keys = random.split(key, 12).reshape(4, 3, 2)  # (4, 3, 2)
+        result = random.normal(keys, (4, 3), dtype=dtype)
+        for i in range(4):
+            for j in range(3):
+                individual = random.normal(keys[i][j], (1,), dtype=dtype)
+                self.assertEqual(result[i][j], individual.squeeze())
 
     def test_error_wrong_key_dtype(self, device):
         key = torch.tensor([42, 0], dtype=torch.float32, device=device)
@@ -282,7 +310,7 @@ class TestPhiloxNormal(TestCase):
 
     def test_error_shape_mismatch(self, device):
         key = random.key(42, device=device)
-        keys = random.split(key, 3)  # (3, 2)
+        keys = random.split(key, 3).unsqueeze(-2)  # (3, 1, 2)
         with self.assertRaises(RuntimeError):
             random.normal(keys, (2, 100))  # batch dim 2 != 3
 
@@ -371,7 +399,7 @@ class TestPhiloxUniform(TestCase):
     @dtypes(*all_floating_dtypes)
     def test_batched_keys(self, device, dtype):
         key = random.key(42, device=device)
-        keys = random.split(key, 4)  # (4, 2)
+        keys = random.split(key, 4).unsqueeze(-2)  # (4, 1, 2)
         result = random.uniform(keys, (4, 100), dtype=dtype)
         for i in range(4):
             individual = random.uniform(keys[i], (100,), dtype=dtype)
@@ -380,7 +408,7 @@ class TestPhiloxUniform(TestCase):
     @dtypes(*all_floating_dtypes)
     def test_multi_batch(self, device, dtype):
         key = random.key(42, device=device)
-        keys = random.split(key, 6).reshape(2, 3, 2)  # (2, 3, 2)
+        keys = random.split(key, 6).reshape(2, 3, 1, 2)  # (2, 3, 1, 2)
         result = random.uniform(keys, (2, 3, 50), dtype=dtype)
         for i in range(2):
             for j in range(3):
@@ -388,11 +416,29 @@ class TestPhiloxUniform(TestCase):
                 self.assertEqual(result[i][j], individual)
 
     @dtypes(*all_floating_dtypes)
-    def test_broadcasting(self, device, dtype):
-        key = random.key(42, device=device).unsqueeze(0)  # (1, 2)
-        result = random.uniform(key, (4, 100), dtype=dtype)
+    def test_key_broadcasting_semantics(self, device, dtype):
+        key = random.key(42, device=device)
+
+        # Broadcast key dim: size-1 dims replicate, real dims index keys.
+        keys = random.split(key, 3).unsqueeze(0).unsqueeze(-2)  # (1, 3, 1, 2)
+        result = random.uniform(keys, (4, 3, 100), dtype=dtype)
         for i in range(1, 4):
             self.assertEqual(result[0], result[i])
+        for j in range(1, 3):
+            self.assertNotEqual(result[0][0], result[0][j])
+
+        # All-broadcast key matches unbatched.
+        batched = random.uniform(key.reshape(1, 1, 2), (4, 100), dtype=dtype)
+        unbatched = random.uniform(key, (400,), dtype=dtype)
+        self.assertEqual(batched.flatten(), unbatched)
+
+        # No generation dims: every element gets its own key.
+        keys = random.split(key, 12).reshape(4, 3, 2)  # (4, 3, 2)
+        result = random.uniform(keys, (4, 3), dtype=dtype)
+        for i in range(4):
+            for j in range(3):
+                individual = random.uniform(keys[i][j], (1,), dtype=dtype)
+                self.assertEqual(result[i][j], individual.squeeze())
 
     def test_error_wrong_key_dtype(self, device):
         key = torch.tensor([42, 0], dtype=torch.float32, device=device)
@@ -401,7 +447,7 @@ class TestPhiloxUniform(TestCase):
 
     def test_error_shape_mismatch(self, device):
         key = random.key(42, device=device)
-        keys = random.split(key, 3)  # (3, 2)
+        keys = random.split(key, 3).unsqueeze(-2)  # (3, 1, 2)
         with self.assertRaises(RuntimeError):
             random.uniform(keys, (2, 100))  # batch dim 2 != 3
 
@@ -519,7 +565,7 @@ class TestPhiloxCompile(TestCase):
 
     def test_batched_normal_aot_eager(self, device):
         key = random.key(42, device=device)
-        keys = random.split(key, 4)
+        keys = random.split(key, 4).unsqueeze(-2)  # (4, 1, 2)
 
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(keys):
@@ -532,10 +578,12 @@ class TestPhiloxCompile(TestCase):
 
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(key):
-            keys = random.split(key, 4)
+            keys = random.split(key, 4).unsqueeze(-2)
             return random.normal(keys, (4, 100))
 
-        self.assertEqual(f(key), random.normal(random.split(key, 4), (4, 100)))
+        self.assertEqual(
+            f(key), random.normal(random.split(key, 4).unsqueeze(-2), (4, 100))
+        )
 
     def test_fold_in_then_uniform_aot_eager(self, device):
         key = random.key(42, device=device)
@@ -555,19 +603,19 @@ class TestGridSplit(TestCase):
     def test_1d_shape(self, device):
         k = random.key(42, device=device)
         keys = random.grid_split(k, (100,), (10,))
-        # 10 tiles, each of size 10
-        self.assertEqual(keys.shape, (10, 2))
+        # 10 tiles, each of size 10; trailing size-1 dim for generation axis
+        self.assertEqual(keys.shape, (10, 1, 2))
         self.assertEqual(keys.dtype, torch.uint64)
 
     def test_1d_uniform_reconstruction(self, device):
         k = random.key(42, device=device)
         num_tiles = 10
         keys = random.grid_split(k, (100,), (num_tiles,))
-        full = random.uniform(k, (100,), device=device)
+        full = random.uniform(k, (100,))
         tile_size = 100 // num_tiles
         tiled = torch.cat(
             [
-                random.uniform(keys[i], (tile_size,), device=device)
+                random.uniform(keys[i], (tile_size,))
                 for i in range(num_tiles)
             ]
         )
@@ -577,11 +625,11 @@ class TestGridSplit(TestCase):
         k = random.key(42, device=device)
         num_tiles = 10
         keys = random.grid_split(k, (100,), (num_tiles,))
-        full = random.normal(k, (100,), device=device)
+        full = random.normal(k, (100,))
         tile_size = 100 // num_tiles
         tiled = torch.cat(
             [
-                random.normal(keys[i], (tile_size,), device=device)
+                random.normal(keys[i], (tile_size,))
                 for i in range(num_tiles)
             ]
         )
@@ -598,8 +646,8 @@ class TestGridSplit(TestCase):
         splits = (10, 10)
         keys = random.grid_split(k, (100, 200), splits)
         # splits=(10,10), tile_shape=(10,20), per-tile rows=10
-        # -> shape (*splits, tile_shape[0], 2) = (10, 10, 10, 2)
-        self.assertEqual(keys.shape, (10, 10, 10, 2))
+        # -> shape (*splits, tile_shape[0], 1, 2) = (10, 10, 10, 1, 2)
+        self.assertEqual(keys.shape, (10, 10, 10, 1, 2))
 
     def test_2d_uniform_tile(self, device):
         k = random.key(42, device=device)
@@ -607,8 +655,8 @@ class TestGridSplit(TestCase):
         splits = (10, 10)
         tile_shape = (10, 20)
         keys = random.grid_split(k, shape, splits)
-        full = random.uniform(k, shape, device=device)
-        tile = random.uniform(keys[0, 0], tile_shape, device=device)
+        full = random.uniform(k, shape)
+        tile = random.uniform(keys[0, 0], tile_shape)
         self.assertEqual(tile, full[0:10, 0:20])
 
     def test_2d_uniform_reconstruction(self, device):
@@ -617,12 +665,12 @@ class TestGridSplit(TestCase):
         splits = (6, 4)
         tile_shape = (10, 20)
         keys = random.grid_split(k, shape, splits)
-        full = random.uniform(k, shape, device=device)
+        full = random.uniform(k, shape)
         tiles = []
         for r in range(splits[0]):
             row = []
             for c in range(splits[1]):
-                row.append(random.uniform(keys[r, c], tile_shape, device=device))
+                row.append(random.uniform(keys[r, c], tile_shape))
             tiles.append(torch.cat(row, dim=1))
         tiled = torch.cat(tiles, dim=0)
         self.assertEqual(full, tiled)
@@ -633,12 +681,12 @@ class TestGridSplit(TestCase):
         splits = (6, 4)
         tile_shape = (10, 20)
         keys = random.grid_split(k, shape, splits)
-        full = random.normal(k, shape, device=device)
+        full = random.normal(k, shape)
         tiles = []
         for r in range(splits[0]):
             row = []
             for c in range(splits[1]):
-                row.append(random.normal(keys[r, c], tile_shape, device=device))
+                row.append(random.normal(keys[r, c], tile_shape))
             tiles.append(torch.cat(row, dim=1))
         tiled = torch.cat(tiles, dim=0)
         self.assertEqual(full, tiled)
@@ -650,9 +698,9 @@ class TestGridSplit(TestCase):
         splits = (10, 10)
         tile_shape = (10, 20)
         keys = random.grid_split(k, shape, splits)
-        full = random.uniform(k, shape, device=device)
+        full = random.uniform(k, shape)
         for tr, tc in [(3, 7), (9, 9), (0, 5)]:
-            tile = random.uniform(keys[tr, tc], tile_shape, device=device)
+            tile = random.uniform(keys[tr, tc], tile_shape)
             expected = full[
                 tr * tile_shape[0] : (tr + 1) * tile_shape[0],
                 tc * tile_shape[1] : (tc + 1) * tile_shape[1],
@@ -664,8 +712,8 @@ class TestGridSplit(TestCase):
         splits = (3, 4, 3)
         keys = random.grid_split(k, (12, 20, 30), splits)
         # tile_shape = (4, 5, 10), per-tile rows = (4, 5)
-        # -> shape (*splits, 4, 5, 2) = (3, 4, 3, 4, 5, 2)
-        self.assertEqual(keys.shape, (3, 4, 3, 4, 5, 2))
+        # -> shape (*splits, 4, 5, 1, 2) = (3, 4, 3, 4, 5, 1, 2)
+        self.assertEqual(keys.shape, (3, 4, 3, 4, 5, 1, 2))
 
     def test_3d_uniform_reconstruction(self, device):
         k = random.key(77, device=device)
@@ -673,12 +721,12 @@ class TestGridSplit(TestCase):
         splits = (3, 4, 3)
         tile_shape = tuple(s // sp for s, sp in zip(shape, splits))
         keys = random.grid_split(k, shape, splits)
-        full = random.uniform(k, shape, device=device)
+        full = random.uniform(k, shape)
         reconstructed = torch.empty_like(full)
         for t0 in range(splits[0]):
             for t1 in range(splits[1]):
                 for t2 in range(splits[2]):
-                    tile = random.uniform(keys[t0, t1, t2], tile_shape, device=device)
+                    tile = random.uniform(keys[t0, t1, t2], tile_shape)
                     reconstructed[
                         t0 * tile_shape[0] : (t0 + 1) * tile_shape[0],
                         t1 * tile_shape[1] : (t1 + 1) * tile_shape[1],
@@ -692,11 +740,11 @@ class TestGridSplit(TestCase):
         splits = (10, 1)
         keys = random.grid_split(k, (100, 200), splits)
         tile_shape = (10, 200)
-        # shape: (*splits, tile_shape[0], 2) = (10, 1, 10, 2)
-        self.assertEqual(keys.shape, (10, 1, 10, 2))
-        full = random.uniform(k, (100, 200), device=device)
+        # shape: (*splits, tile_shape[0], 1, 2) = (10, 1, 10, 1, 2)
+        self.assertEqual(keys.shape, (10, 1, 10, 1, 2))
+        full = random.uniform(k, (100, 200))
         tiles = [
-            random.uniform(keys[i, 0], tile_shape, device=device) for i in range(10)
+            random.uniform(keys[i, 0], tile_shape) for i in range(10)
         ]
         tiled = torch.cat(tiles, dim=0)
         self.assertEqual(full, tiled)
@@ -711,18 +759,18 @@ class TestGridSplit(TestCase):
         num_tiles = 10
         tile_size = shape[0] // num_tiles
         keys = random.grid_split(k, shape, (num_tiles,), dtype=dtype)
-        full_uniform = random.uniform(k, shape, dtype=dtype, device=device)
+        full_uniform = random.uniform(k, shape, dtype=dtype)
         tiled_uniform = torch.cat(
             [
-                random.uniform(keys[i], (tile_size,), dtype=dtype, device=device)
+                random.uniform(keys[i], (tile_size,), dtype=dtype)
                 for i in range(num_tiles)
             ]
         )
         self.assertEqual(full_uniform, tiled_uniform)
-        full_normal = random.normal(k, shape, dtype=dtype, device=device)
+        full_normal = random.normal(k, shape, dtype=dtype)
         tiled_normal = torch.cat(
             [
-                random.normal(keys[i], (tile_size,), dtype=dtype, device=device)
+                random.normal(keys[i], (tile_size,), dtype=dtype)
                 for i in range(num_tiles)
             ]
         )
@@ -758,7 +806,7 @@ class TestGridSplit(TestCase):
         keys_cpu = random.grid_split(k_cpu, shape, splits)
         keys_cuda = random.grid_split(k_cuda, shape, splits)
         tile_cpu = random.uniform(keys_cpu[2, 1], tile_shape)
-        tile_cuda = random.uniform(keys_cuda[2, 1], tile_shape, device=device)
+        tile_cuda = random.uniform(keys_cuda[2, 1], tile_shape)
         self.assertEqual(tile_cpu, tile_cuda.cpu())
 
 
@@ -820,7 +868,7 @@ class TestPhiloxVmap(TestCase):
         keys = random.split(key, 8)
 
         def f(k):
-            subkeys = random.split(k, 3)
+            subkeys = random.split(k, 3).unsqueeze(-2)
             return random.normal(subkeys, (3, 20))
 
         result = torch.vmap(f)(keys)
