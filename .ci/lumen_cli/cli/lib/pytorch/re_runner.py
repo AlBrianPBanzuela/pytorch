@@ -60,14 +60,51 @@ def _pr_info(pr: int) -> dict:
     }
 
 
+def _detect_pr() -> int:
+    """Detect PR number from the current branch."""
+    out = subprocess.run(
+        ["gh", "pr", "view", "--repo", "pytorch/pytorch", "--json", "number"],
+        capture_output=True,
+        text=True,
+    )
+    if out.returncode != 0:
+        raise RuntimeError(
+            "No PR found for current branch. "
+            "Push your branch and open a PR first, or pass --pr explicitly."
+        )
+    return json.loads(out.stdout)["number"]
+
+
+def _local_head() -> str:
+    """Get local HEAD commit SHA."""
+    out = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout.strip()
+
+
 def _resolve_commit(pr: int | None, commit: str | None) -> dict:
-    if pr:
-        info = _pr_info(pr)
-        logger.info("PR #%d -> %s (%s)", pr, info["sha"][:12], info["repo"])
-        return {"sha": info["sha"], "repo": info["repo"]}
     if commit:
         return {"sha": commit, "repo": REPO}
-    raise RuntimeError("--pr or --commit is required for remote execution")
+
+    if pr is None:
+        pr = _detect_pr()
+        logger.info("Auto-detected PR #%d from current branch", pr)
+
+    info = _pr_info(pr)
+    local_sha = _local_head()
+    if local_sha != info["sha"]:
+        raise RuntimeError(
+            f"Local HEAD ({local_sha[:12]}) does not match "
+            f"PR #{pr} HEAD ({info['sha'][:12]}). "
+            "Push your changes before running RE."
+        )
+
+    logger.info("PR #%d -> %s (%s)", pr, info["sha"][:12], info["repo"])
+    return {"sha": info["sha"], "repo": info["repo"]}
 
 
 def build_run_command(*commands: str) -> str:
@@ -99,6 +136,14 @@ class LumenScriptBuilder(RunnerScriptBuilder):
 
     def add_setup_uv(self) -> LumenScriptBuilder:
         return self._add_script("setup_uv", "setup_uv")
+
+    def add_check_python(self) -> LumenScriptBuilder:
+        self._modules.append(
+            f"\n# {'=' * 44}\n# MODULE: check_python\n# {'=' * 44}\n"
+            "python --version\n"
+            "which python"
+        )
+        return self
 
     def add_install_lumen(self) -> LumenScriptBuilder:
         self._modules.append(

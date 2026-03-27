@@ -18,7 +18,7 @@ class TestStep:
     env_vars: dict[str, str] = field(default_factory=dict)
 
 
-DEFAULT_BOOTSTRAP = ["git_clone", "setup_uv", "install_lumen"]
+DEFAULT_BOOTSTRAP = ["git_clone", "setup_uv", "check_python", "install_lumen"]
 DEFAULT_INPUTS: dict[str, str] = {"python_version": "3.12"}
 
 
