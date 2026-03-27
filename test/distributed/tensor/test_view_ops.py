@@ -789,11 +789,14 @@ class TestViewOps(DTensorContinuousTestBase):
                                         )
 
     def test_reshape_flatten_multi_mesh(self):
-        """Test reshape (non-strict flatten) across 1D and 2D meshes.
+        """Test reshape across 1D and 2D meshes.
 
         Mirrors test_dtensor_flatten_multi_mesh but uses reshape instead of view.
-        Cases that raise RuntimeError in strict mode should redistribute instead.
-        Replicate patterns are skipped (identical to view).
+        For contiguous tensors, .reshape() dispatches as aten.view.default
+        (strict_view=True), so error/success behavior matches view. The test
+        validates that reshape produces identical results to view for all
+        shard/mesh/shape combinations. Replicate patterns are skipped
+        (identical to view).
         """
         cases = [
             ((6,), [("S",)]),
@@ -931,41 +934,46 @@ class TestViewOps(DTensorContinuousTestBase):
         flatten_start,
         flatten_end,
     ):
+        # For contiguous tensors, .reshape() dispatches as aten.view.default
+        # (strict_view=True), so non-divisible non-last dims raise RuntimeError
+        # just like view. Only non-contiguous tensors go through
+        # aten.reshape.default (strict_view=False) which would redistribute.
         even_val = 2 * mesh.size(shard_mesh_dim)
         dim_vals = [even_val - 1, even_val, even_val + 1]
         all_dims = list(itertools.product(dim_vals, repeat=tensor_ndim))
         for shard_dim in range(flatten_start, flatten_end):
             for tensor_dims in all_dims:
-                needs_redist = tensor_dims[shard_dim] % mesh.size(
+                strict_error = tensor_dims[shard_dim] % mesh.size(
                     shard_mesh_dim
                 ) != 0 and shard_dim != (flatten_end - 1)
-                with self.subTest(
-                    dims=tensor_dims,
-                    shard=shard_dim,
-                    mesh_dim=shard_mesh_dim,
-                    flat=(flatten_start, flatten_end),
+                ctx = contextlib.nullcontext()
+                if strict_error:
+                    ctx = self.assertRaisesRegex(
+                        RuntimeError,
+                        "is not evenly divisible by mesh dimension",
+                    )
+                with (
+                    self.subTest(
+                        dims=tensor_dims,
+                        shard=shard_dim,
+                        mesh_dim=shard_mesh_dim,
+                        flat=(flatten_start, flatten_end),
+                    ),
+                    ctx,
                 ):
-                    if needs_redist:
-                        self._test_reshape_flatten_with_redist(
-                            tensor_dims,
-                            flatten_start,
-                            flatten_end,
-                            mesh,
-                            shard_dim,
-                            shard_mesh_dim,
-                        )
-                    else:
-                        self._test_dtensor_flatten_single_shard(
-                            tensor_dims,
-                            flatten_start,
-                            flatten_end,
-                            mesh,
-                            shard_dim,
-                            shard_mesh_dim,
-                            use_reshape=True,
-                        )
+                    self._test_dtensor_flatten_single_shard(
+                        tensor_dims,
+                        flatten_start,
+                        flatten_end,
+                        mesh,
+                        shard_dim,
+                        shard_mesh_dim,
+                        use_reshape=True,
+                    )
 
     def _run_reshape_ss(self, mesh, tensor_ndim, flatten_start, flatten_end):
+        # See _run_reshape_single_shard comment: contiguous tensors dispatch
+        # reshape as aten.view.default (strict_view=True).
         for shard_dim0 in range(flatten_start, flatten_end):
             for shard_dim1 in range(shard_dim0, flatten_end):
                 dim0_values = [
@@ -988,41 +996,38 @@ class TestViewOps(DTensorContinuousTestBase):
                         tensor_dims = tuple(tensor_dims)
                         local_tensor_dims = list(tensor_dims)
                         placements = (Shard(shard_dim0), Shard(shard_dim1))
-                        redist0 = local_tensor_dims[shard_dim0] % mesh.size(0) != 0
-                        local_tensor_dims[shard_dim0] = (
-                            local_tensor_dims[shard_dim0] // mesh.size(0)
-                            if not redist0
-                            else local_tensor_dims[shard_dim0]
-                        )
-                        redist1 = local_tensor_dims[shard_dim1] % mesh.size(
+                        ctx = contextlib.nullcontext()
+                        if local_tensor_dims[shard_dim0] % mesh.size(0) != 0:
+                            ctx = self.assertRaisesRegex(
+                                RuntimeError,
+                                "is not evenly divisible by mesh dimension",
+                            )
+                        local_tensor_dims[shard_dim0] = local_tensor_dims[
+                            shard_dim0
+                        ] // mesh.size(0)
+                        if local_tensor_dims[shard_dim1] % mesh.size(
                             1
-                        ) != 0 and shard_dim1 != (flatten_end - 1)
-                        expected_allgather_count = (1 if redist0 else 0) + (
-                            1 if redist1 else 0
-                        )
-                        with self.subTest(
-                            dims=tensor_dims,
-                            shard0=shard_dim0,
-                            shard1=shard_dim1,
+                        ) != 0 and shard_dim1 != (flatten_end - 1):
+                            ctx = self.assertRaisesRegex(
+                                RuntimeError,
+                                "is not evenly divisible by mesh dimension",
+                            )
+                        with (
+                            self.subTest(
+                                dims=tensor_dims,
+                                shard0=shard_dim0,
+                                shard1=shard_dim1,
+                            ),
+                            ctx,
                         ):
-                            if expected_allgather_count > 0:
-                                self._test_reshape_flatten_2d_ss_with_redist(
-                                    tensor_dims,
-                                    flatten_start,
-                                    flatten_end,
-                                    mesh,
-                                    placements,
-                                    expected_allgather_count,
-                                )
-                            else:
-                                self._test_dtensor_flatten_2d_ss(
-                                    tensor_dims,
-                                    flatten_start,
-                                    flatten_end,
-                                    mesh,
-                                    placements,
-                                    use_reshape=True,
-                                )
+                            self._test_dtensor_flatten_2d_ss(
+                                tensor_dims,
+                                flatten_start,
+                                flatten_end,
+                                mesh,
+                                placements,
+                                use_reshape=True,
+                            )
 
     def _test_dtensor_flatten_single_shard(
         self,
@@ -1182,64 +1187,6 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    def _test_reshape_flatten_with_redist(
-        self,
-        tensor_dims,
-        flatten_start,
-        flatten_end,
-        mesh,
-        shard_dim,
-        shard_mesh_dim,
-    ):
-        funcol = torch.ops.c10d_functional
-        mesh_ndim = mesh.ndim
-        placements = tuple(
-            Shard(shard_dim) if i == shard_mesh_dim else Replicate()
-            for i in range(mesh_ndim)
-        )
-        nelem = math.prod(tensor_dims)
-        global_inps: Tensor = torch.arange(nelem).view(tensor_dims)
-        inps = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
-        viewed_tensor_dims = self._get_viewed_tensor_dims(
-            tensor_dims, flatten_start, flatten_end
-        )
-        comm_mode = CommDebugMode()
-        with comm_mode:
-            inps_viewed = inps.reshape(viewed_tensor_dims)
-        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1)
-        self.assertEqual(
-            inps_viewed.full_tensor(),
-            global_inps.view(viewed_tensor_dims),
-        )
-
-    def _test_reshape_flatten_2d_ss_with_redist(
-        self,
-        tensor_dims,
-        flatten_start,
-        flatten_end,
-        mesh,
-        placements,
-        expected_allgather_count,
-    ):
-        funcol = torch.ops.c10d_functional
-        nelem = math.prod(tensor_dims)
-        global_inps: Tensor = torch.arange(nelem).view(tensor_dims)
-        inps = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
-        viewed_tensor_dims = self._get_viewed_tensor_dims(
-            tensor_dims, flatten_start, flatten_end
-        )
-        comm_mode = CommDebugMode()
-        with comm_mode:
-            inps_viewed = inps.reshape(viewed_tensor_dims)
-        self.assertEqual(
-            comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
-            expected_allgather_count,
-        )
-        self.assertEqual(
-            inps_viewed.full_tensor(),
-            global_inps.view(viewed_tensor_dims),
-        )
 
     def test_dtensor_flatten_shard_outside_range(self):
         """Test that Shard on a dim outside the flatten range passes through correctly.
