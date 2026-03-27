@@ -929,13 +929,8 @@ class BaseSchedulerNode:
                                 and unode is not self
                                 and unode.get_name() in inconsequential_nodes
                             ):
-                                user_stream = self.scheduler.node_to_stream.get(
-                                    unode
-                                )
-                                if (
-                                    user_stream is not None
-                                    and user_stream != my_stream
-                                ):
+                                user_stream = self.scheduler.node_to_stream.get(unode)
+                                if user_stream is not None and user_stream != my_stream:
                                     has_cross_stream_hazard = True
                                     break
 
