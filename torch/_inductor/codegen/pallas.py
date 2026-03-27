@@ -4092,31 +4092,69 @@ from torch._inductor.runtime.runtime_utils import (
         return reshape_target_shape, reshape_target_numel
 
     def _make_broadcasted_iteration_var_expr(
-        self, broadcast_vars: list[_BroadcastedIterVar], broadcast_idx: int
+        self,
+        broadcast_vars: list[_BroadcastedIterVar],
+        broadcast_idx: int,
+        reshape_target_shape: tuple[int, ...] | None,
     ) -> str:
         bv = broadcast_vars[broadcast_idx]
+
         length = bv.entry.length
         renamed_length = self.rename_indexing(length)
         length_str = self.kexpr(renamed_length)
+        expr = f"jnp.arange({length_str})"
 
-        num_broadcast_dims = len(broadcast_vars)
-        axis_idx = self._broadcast_axis_idx(
-            broadcast_vars, broadcast_idx, num_broadcast_dims
-        )
-        shape_parts = ["1"] * num_broadcast_dims
-        shape_parts[axis_idx] = length_str
-        shape_str = ", ".join(shape_parts)
-        arange = f"jnp.arange({length_str})"
-        reshaped = f"{arange}.reshape({shape_str})"
-        return reshaped
+        if reshape_target_shape is None:
+            num_broadcast_dims = len(broadcast_vars)
+            axis_idx = self._broadcast_axis_idx(
+                broadcast_vars, broadcast_idx, num_broadcast_dims
+            )
+            shape_parts = ["1"] * num_broadcast_dims
+            shape_parts[axis_idx] = length_str
+            shape_str = ", ".join(shape_parts)
+            expr = f"{expr}.reshape({shape_str})"
+            return expr
+        else:
+            # when we have a `reshape_target_shape`, we match the indexing vars to this shape.
+            # e.g., if the indexing is a `arange(2)` and `reshape_target_shape` is `32, 32, 2`,
+            # then we generate something like
+            # `jnp.broadcast_to(jnp.expand_dims(jnp.arange(2), axis=(0, 1)), (32, 32, 2))`
+            #
+            # Sometimes the iteration var covers multiple axis of the reshape_target_shape
+            # e.g. if the indexing is a `arange(1024)` and `reshape_target_shape` is `32, 32, 2`,
+            # then we need an additional reshape:
+            # `jnp.broadcast_to(jnp.expand_dims(jnp.arange(1024).reshape(32, 32), axis=(2)), (32, 32, 2))`
+            num_broadcast_dims = len(reshape_target_shape)
+            last_axis_idx = self._broadcast_axis_idx(
+                broadcast_vars, broadcast_idx, num_broadcast_dims
+            )
+            first_axis_idx = next(
+                i
+                for i in range(num_broadcast_dims)
+                if math.prod(reshape_target_shape[i : last_axis_idx + 1]) == length
+            )
+            if first_axis_idx != last_axis_idx:
+                inner_reshape_str = ", ".join(
+                    map(str, reshape_target_shape[first_axis_idx : last_axis_idx + 1])
+                )
+                expr = f"{expr}.reshape({inner_reshape_str})"
+            expand_dim_axis = [
+                i
+                for i in range(num_broadcast_dims)
+                if not first_axis_idx <= i <= last_axis_idx
+            ]
+            expand_dim_axis_str = ", ".join(map(str, expand_dim_axis))
+            reshape_str = ", ".join(map(str, reshape_target_shape))
+            result = f"jnp.broadcast_to(jnp.expand_dims({expr}, axis=({expand_dim_axis_str})), ({reshape_str}))"
+            return result
 
     def _codegen_iteration_vars(
         self, kernel_body: IndentedBuffer, ctx: _CodegenContext
     ) -> None:
         # Generate iteration variables as jnp.arange arrays
         # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-        if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
-            return
+        # if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
+        #     return
 
         kernel_body.writeline("# Define iteration variables as JAX arrays")
 
@@ -4137,7 +4175,7 @@ from torch._inductor.runtime.runtime_utils import (
                     _BroadcastedIterVar(idx, var_sym, entry, length_val)
                 )
 
-        num_broadcast_dims = len(broadcast_vars)
+        num_broadcast_vars = len(broadcast_vars)
 
         for idx, (var_sym, entry) in enumerate(var_items):
             if var_sym not in self.used_iter_vars:
@@ -4151,7 +4189,7 @@ from torch._inductor.runtime.runtime_utils import (
             if length_val is None:
                 if (
                     reshape_target_shape
-                    and num_broadcast_dims > 1
+                    and num_broadcast_vars > 1
                     and idx != total_var_idx
                 ):
                     broadcast_idx = next(
@@ -4160,7 +4198,7 @@ from torch._inductor.runtime.runtime_utils import (
                     )
                     if broadcast_idx is not None:
                         expr = self._make_broadcasted_iteration_var_expr(
-                            broadcast_vars, broadcast_idx
+                            broadcast_vars, broadcast_idx, reshape_target_shape
                         )
                         kernel_body.writeline(f"{var_name} = {expr}")
                         continue
@@ -4175,12 +4213,12 @@ from torch._inductor.runtime.runtime_utils import (
                 shape_str = ", ".join(str(s) for s in reshape_target_shape)
                 arange = f"jnp.arange({length_str})"
                 kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
-            elif num_broadcast_dims > 1 and idx != total_var_idx:
+            elif num_broadcast_vars > 1 and idx != total_var_idx:
                 broadcast_idx = next(
                     i for i, v in enumerate(broadcast_vars) if v.idx == idx
                 )
                 expr = self._make_broadcasted_iteration_var_expr(
-                    broadcast_vars, broadcast_idx
+                    broadcast_vars, broadcast_idx, reshape_target_shape
                 )
                 kernel_body.writeline(f"{var_name} = {expr}")
             else:
