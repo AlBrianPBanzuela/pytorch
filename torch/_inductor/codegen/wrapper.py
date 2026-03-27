@@ -892,6 +892,10 @@ class AllocateLine(MemoryPlanningLine):
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
             return True
+        if free_line.scheduler_node_index >= self.scheduler_node_index:
+            # Buffer is freed at or after this allocation's scheduler node,
+            # so it may still be live — reuse is unsafe.
+            return False
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
