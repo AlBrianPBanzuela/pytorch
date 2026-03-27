@@ -608,9 +608,7 @@ static PyTypeObject TraceContextType = {
 #if IS_PYTHON_3_14_PLUS
 extern "C" void _PyEval_StopTheWorld(PyInterpreterState*);
 extern "C" void _PyEval_StartTheWorld(PyInterpreterState*);
-#endif
 
-#if IS_PYTHON_3_14_PLUS
 class StopTheWorldGuard {
  public:
   explicit StopTheWorldGuard(PyInterpreterState* interp) : interp_(interp) {
