@@ -7,6 +7,7 @@
 #include <memory>
 #include <queue>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -720,7 +721,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyObject* arg,
       bool start_frame = false);
 
-  ThreadLocalResults* findThreadLocalResults(PyThreadState* tstate);
+  ThreadLocalResults* findThreadLocalResults(PyThreadState* tstate) const;
 
   const std::vector<PyThreadState*> interpreterThreads() const;
   void setprofileAllThreads(Py_tracefunc func, PyObject* arg) const;
@@ -737,6 +738,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
 
   std::vector<StartFrame> start_frames_;
   std::deque<ThreadLocalResults> thread_local_results_;
+  std::unordered_map<PyThreadState*, ThreadLocalResults*>
+      thread_local_results_map_;
 
 #if IS_PYTHON_3_12
   friend PyObject* c_call_callback(
@@ -958,13 +961,9 @@ static void unregisterMonitoringCallback() {
 #endif
 
 ThreadLocalResults* PythonTracer::findThreadLocalResults(
-    PyThreadState* tstate) {
-  for (auto& tls : thread_local_results_) {
-    if (tls.thread_state_ == tstate) {
-      return &tls;
-    }
-  }
-  return nullptr;
+    PyThreadState* tstate) const {
+  auto it = thread_local_results_map_.find(tstate);
+  return it != thread_local_results_map_.end() ? it->second : nullptr;
 }
 
 const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
@@ -1051,6 +1050,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     for (const auto thread_state : interpreterThreads()) {
       thread_local_results_.emplace_back(thread_state, this);
       auto& tls = thread_local_results_.back();
+      thread_local_results_map_[thread_state] = &tls;
 
       // When we begin profiling there are already frames on the Python
       // interpreter stack. To ensure a complete trace, we must push calls
