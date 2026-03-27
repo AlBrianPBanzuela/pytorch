@@ -42,9 +42,7 @@ def key(
         >>> key = torch.func._random.key(42)
     """
     if impl != "philox4x32-10":
-        raise NotImplementedError(
-            f"key() does not support PRNG impl '{impl}'"
-        )
+        raise NotImplementedError(f"key() does not support PRNG impl '{impl}'")
 
     # (seed, offset)
     return torch.tensor([seed, 0], dtype=torch.uint64, device=device)
@@ -116,9 +114,7 @@ def grid_split(
         )
     for i, (s, sp) in enumerate(zip(shape, splits)):
         if s % sp != 0:
-            raise ValueError(
-                f"splits[{i}]={sp} does not evenly divide shape[{i}]={s}"
-            )
+            raise ValueError(f"splits[{i}]={sp} does not evenly divide shape[{i}]={s}")
     outputs_per_elem = 2 if dtype is not None and dtype == torch.float64 else 1
     return _philox_grid_split(key, shape, splits, outputs_per_elem)
 
@@ -133,9 +129,7 @@ def _philox_grid_split(
     base_offset = data[..., 1]
 
     if ndim == 1:
-        flat_indices = torch.arange(
-            splits[0], dtype=torch.int64, device=key.device
-        )
+        flat_indices = torch.arange(splits[0], dtype=torch.int64, device=key.device)
         offsets = base_offset + flat_indices * (tile_shape[0] * outputs_per_elem)
         seeds = seed.expand_as(offsets)
         return torch.stack([seeds, offsets], dim=-1).view(torch.uint64)
@@ -161,8 +155,7 @@ def _philox_grid_split(
         ranges.append(global_j)
     # Last dim: just tile index * tile_shape[-1]
     t_last = (
-        torch.arange(splits[-1], dtype=torch.int64, device=key.device)
-        * tile_shape[-1]
+        torch.arange(splits[-1], dtype=torch.int64, device=key.device) * tile_shape[-1]
     )
     ranges.append(t_last.unsqueeze(1))
 
