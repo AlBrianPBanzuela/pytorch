@@ -86,16 +86,3 @@ PyObject* get_backend(PyObject* callback) {
   return handle.ptr();
 }
 
-int64_t get_region_id(PyObject* callback) {
-  py::handle handle = py::handle(callback);
-  while (py::hasattr(handle, "_torchdynamo_orig_backend")) {
-    if (py::hasattr(handle, "_region_id")) {
-      return handle.attr("_region_id").cast<int64_t>();
-    }
-    handle = handle.attr("_torchdynamo_orig_backend");
-  }
-  if (py::hasattr(handle, "_region_id")) {
-    return handle.attr("_region_id").cast<int64_t>();
-  }
-  return -1;
-}

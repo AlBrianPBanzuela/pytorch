@@ -438,7 +438,7 @@ class RecompileLimitKwargTests(torch._dynamo.test_case.TestCase):
 
 class IsolatedRegionTests(torch._dynamo.test_case.TestCase):
     """Tests for isolated_region=True on torch.compile(). Each compile region
-    gets its own isolated cache via C++ region_id filtering."""
+    gets its own isolated cache via the per-region cache map."""
 
     @staticmethod
     def _num_cache_entries(code):

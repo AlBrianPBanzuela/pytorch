@@ -191,9 +191,6 @@ CacheEntry* create_cache_entry(
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
 
-// Extracts the region_id from the callback chain (-1 = no region).
-int64_t get_region_id(PyObject* callback);
-
 #ifdef __cplusplus
 
 } // extern "C"
