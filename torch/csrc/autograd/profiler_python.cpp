@@ -604,10 +604,6 @@ static PyTypeObject TraceContextType = {
     nullptr /* tp_free */
 };
 
-#if IS_PYTHON_3_13_PLUS
-extern "C" int _PyEval_SetProfile(PyThreadState*, Py_tracefunc, PyObject*);
-#endif
-
 #if IS_PYTHON_3_14_PLUS
 extern "C" void _PyEval_StopTheWorld(PyInterpreterState*);
 extern "C" void _PyEval_StartTheWorld(PyInterpreterState*);
