@@ -1,0 +1,20 @@
+#!/bin/bash
+# RE equivalent of pytorch/test-infra/.github/actions/setup-uv
+# Set PYTHON_VERSION, ACTIVATE_ENV, UV_VERSION before sourcing.
+set -eu
+
+: "${PYTHON_VERSION:=3.12}"
+: "${ACTIVATE_ENV:=false}"
+: "${UV_VERSION:=0.9.21}"
+
+if ! command -v uv &>/dev/null; then
+    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+uv python install "$PYTHON_VERSION"
+
+if [[ "$ACTIVATE_ENV" == "true" ]]; then
+    uv venv --python "$PYTHON_VERSION"
+    source .venv/bin/activate
+fi
