@@ -5,19 +5,6 @@ Rerun PyTorch CI jobs via blast Remote Execution.
 Usage:
   # Dry run to see the generated script:
   python re_demo.py run .github/workflows/lint-osdc.yml -j lintrunner-noclang --dry-run
-
-  # Run with a specific PR:
-  python re_demo.py run .github/workflows/lint-osdc.yml -j quick-checks --pr 178000
-
-  # Override the script (when it has GHA expressions):
-  python re_demo.py run .github/workflows/lint-osdc.yml -j lintrunner-noclang --pr 178000 \\
-    --cmd 'ADDITIONAL_LINTRUNNER_ARGS="--all-files" .github/scripts/lintrunner.sh'
-
-  # Quick run without workflow parsing:
-  python re_demo.py run --cmd 'echo hello' --pr 178000
-
-  # List jobs in a workflow:
-  python re_demo.py list .github/workflows/lint-osdc.yml
 """
 
 import argparse
@@ -27,9 +14,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
+
 
 def _ensure_deps():
     try:
@@ -37,10 +26,18 @@ def _ensure_deps():
         import yaml  # noqa: F401
     except ImportError:
         print("Installing dependencies...")
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", "-q",
-            "blast-cli", "pyyaml",
-        ])
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                "blast-cli",
+                "pyyaml",
+            ]
+        )
+
 
 _ensure_deps()
 
@@ -50,34 +47,49 @@ from re_cli.core.job_runner import JobRunner  # noqa: E402
 from re_cli.core.k8s_client import K8sClient, K8sConfig  # noqa: E402
 from re_cli.core.script_builder import RunnerScriptBuilder  # noqa: E402
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 REPO = "https://github.com/pytorch/pytorch.git"
-REPO_LOCAL = str(Path(__file__).resolve().parent.parent.parent)
 IMAGE = "ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930"
 GHA_EXPR = re.compile(r"\$\{\{.*?\}\}")
+# action_key → this mimic some customize action script which is critical step to run
+ACTION_SCRIPTS = {
+    "pytorch/test-infra/.github/actions/setup-uv": "setup_uv.sh",
+}
+ACTION_MAP = {
+    key: lambda inputs, s=script: inline_action(s, inputs)
+    for key, script in ACTION_SCRIPTS.items()
+}
+
 
 # ---------------------------------------------------------------------------
 # Script builder
 # ---------------------------------------------------------------------------
 
+
 class PyTorchScriptBuilder(RunnerScriptBuilder):
     DEFAULT_MODULES = [
-        "header", "find_script", "git_clone",
-        "git_checkout", "run_script", "upload_outputs",
+        "header",
+        "find_script",
+        "git_clone",
+        "git_checkout",
+        "run_script",
+        "upload_outputs",
     ]
 
+    # just example to override the script builder fro origincal cli tool
     def add_git_clone(self) -> "PyTorchScriptBuilder":
         self._modules.append(
             f"\n# {'=' * 44}\n# MODULE: git_clone\n# {'=' * 44}\n"
             'if [[ -n "$GIT_REPO" ]]; then\n'
             '    echo "[Runner] Cloning $GIT_REPO..."\n'
             '    git clone --depth=1 "$GIT_REPO" repo\n'
-            '    cd repo\n'
+            "    cd repo\n"
             '    REPO_DIR="$(pwd)"\n'
-            '    export REPO_DIR\n'
+            "    export REPO_DIR\n"
             '    echo "[Runner] REPO_DIR=$REPO_DIR"\n'
             "else\n"
             '    echo "[Runner] No git repo specified, skipping clone"\n'
@@ -85,39 +97,31 @@ class PyTorchScriptBuilder(RunnerScriptBuilder):
         )
         return self
 
+
 # ---------------------------------------------------------------------------
 # Action → bash mapping
 # ---------------------------------------------------------------------------
-
 ACTIONS_DIR = Path(__file__).resolve().parent / "actions"
 
 
-def _action_setup_uv(inputs: dict) -> str:
-    """Inline setup_uv.sh with inputs passed as env vars."""
-    template = (ACTIONS_DIR / "setup_uv.sh").read_text()
-    # Strip shebang/comments/set lines — outer script handles those
+def inline_action(script_name: str, inputs: dict) -> str:
+    """Inline a bash script from actions/ with all with: inputs auto-exported."""
+    template = (ACTIONS_DIR / script_name).read_text()
     body = "\n".join(
-        line for line in template.splitlines()
-        if not line.startswith("#") and line.strip() != "set -eu"
+        line
+        for line in template.splitlines()
+        if not line.startswith("#") and not line.startswith("set -")
     ).strip()
-    # Set env vars from action inputs before the script body
-    env = {
-        "PYTHON_VERSION": str(inputs.get("python-version", "3.12")),
-        "ACTIVATE_ENV": str(inputs.get("activate-environment", "false")).lower(),
-        "UV_VERSION": str(inputs.get("uv-version", "0.9.21")),
-    }
-    exports = "\n".join(f'export {k}="{v}"' for k, v in env.items())
-    return f"{exports}\n{body}"
+    exports = "\n".join(
+        f'export {k.replace("-", "_").upper()}="{str(v).lower() if isinstance(v, bool) else v}"'
+        for k, v in inputs.items()
+    )
+    return f"{exports}\n{body}" if exports else body
 
-
-ACTION_MAP = {
-    "pytorch/test-infra/.github/actions/setup-uv": _action_setup_uv,
-}
 
 # ---------------------------------------------------------------------------
 # Workflow parsing
 # ---------------------------------------------------------------------------
-
 def _find_repo_root(from_path: str) -> Path:
     p = Path(from_path).resolve().parent
     while p != p.parent:
@@ -155,6 +159,10 @@ def extract_setup_steps(uses: str, caller_path: str) -> list[dict]:
             if action_key in ACTION_MAP:
                 bash = ACTION_MAP[action_key](step.get("with", {}))
                 substeps.append({"name": name, "bash": bash})
+            elif action_key:
+                print(
+                    f"  Warning: skipping unmapped action '{action_key}' (step: {name})"
+                )
 
     return substeps
 
@@ -191,14 +199,23 @@ def build_command(setup_steps: list[dict], cmd: str) -> str:
     parts.append("")
     return "\n".join(parts)
 
-# ---------------------------------------------------------------------------
-# PR / commit resolution
-# ---------------------------------------------------------------------------
+
+# extract commit and repo info from PR
 def pr_info(pr: int) -> dict:
     out = subprocess.run(
-        ["gh", "pr", "view", str(pr), "--repo", "pytorch/pytorch",
-         "--json", "headRefOid,headRefName,headRepository,headRepositoryOwner"],
-        capture_output=True, text=True, check=True,
+        [
+            "gh",
+            "pr",
+            "view",
+            str(pr),
+            "--repo",
+            "pytorch/pytorch",
+            "--json",
+            "headRefOid,headRefName,headRepository,headRepositoryOwner",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     data = json.loads(out.stdout)
     owner = data["headRepositoryOwner"]["login"]
@@ -220,15 +237,17 @@ def resolve(args) -> dict:
     print("Provide --pr or --commit")
     sys.exit(1)
 
+
 # ---------------------------------------------------------------------------
 # Submit
 # ---------------------------------------------------------------------------
-
 def submit(steps: list[StepConfig], name: str, args):
     client = K8sClient(K8sConfig(namespace="remote-execution-system", timeout=60))
     resolved = resolve(args)
     runner = JobRunner(
-        client=client, name=name, step_configs=steps,
+        client=client,
+        name=name,
+        step_configs=steps,
         script_builder_class=PyTorchScriptBuilder,
     )
     runner.run(
@@ -240,6 +259,7 @@ def submit(steps: list[StepConfig], name: str, args):
     if runner.run_id:
         print(f"\nRun ID: {runner.run_id}")
         print(f"Stream:  blast stream {runner.run_id}")
+
 
 # ---------------------------------------------------------------------------
 # Commands
@@ -299,9 +319,11 @@ def cmd_list(args):
         dynamic = " (has ${{}})" if info["has_gha_expr"] else ""
         print(f"  {name:<35} {tag}{dynamic}")
 
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def main():
     p = argparse.ArgumentParser(
