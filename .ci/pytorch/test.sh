@@ -1348,7 +1348,9 @@ test_custom_backend() {
   echo "Testing custom backends"
   CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
   pushd test/custom_backend
-  cp -a "$CUSTOM_BACKEND_BUILD" build
+  # Use cp -r instead of cp -a to avoid calling flistxattr, which triggers
+  # infinite recursion in clang's ASAN interceptor on AlmaLinux 8.
+  cp -r "$CUSTOM_BACKEND_BUILD" build
   # Run tests Python-side and export a lowered module.
   python test_custom_backend.py -v
   python backend.py --export-module-to=model.pt
@@ -1369,7 +1371,9 @@ test_custom_script_ops() {
 
   CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
   pushd test/custom_operator
-  cp -a "$CUSTOM_OP_BUILD" build
+  # Use cp -r instead of cp -a to avoid calling flistxattr, which triggers
+  # infinite recursion in clang's ASAN interceptor on AlmaLinux 8.
+  cp -r "$CUSTOM_OP_BUILD" build
   # Run tests Python-side and export a script module.
   python test_custom_ops.py -v
   python model.py --export-script-module=model.pt
@@ -1474,7 +1478,9 @@ test_jit_hooks() {
   echo "Testing jit hooks in cpp"
   HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
   pushd test/jit_hooks
-  cp -a "$HOOK_BUILD" build
+  # Use cp -r instead of cp -a to avoid calling flistxattr, which triggers
+  # infinite recursion in clang's ASAN interceptor on AlmaLinux 8.
+  cp -r "$HOOK_BUILD" build
   # Run tests Python-side and export the script modules with hooks
   python model.py --export-script-module=model
   # Run tests C++-side and load the exported script modules
