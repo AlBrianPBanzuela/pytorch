@@ -1138,8 +1138,7 @@ def index_put_single_dim_strategy(
     #     values shape = (*broadcast_shape, *non_indexed_dim_sizes)
     indexed_dims_sorted = sorted(indexed_dims)
     contiguous_indexed = len(indexed_dims_sorted) <= 1 or (
-        indexed_dims_sorted[-1] - indexed_dims_sorted[0] + 1
-        == len(indexed_dims_sorted)
+        indexed_dims_sorted[-1] - indexed_dims_sorted[0] + 1 == len(indexed_dims_sorted)
     )
 
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
