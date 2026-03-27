@@ -44,6 +44,7 @@ Stats stats() {
 #include <pthread.h>
 #include <algorithm>
 #include <climits>
+#include <cstring>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -55,7 +56,10 @@ Stats stats() {
 #include <shared_mutex>
 
 #if defined(__aarch64__)
-extern "C" void unwind_c(std::vector<void*>* result, int64_t fp, int64_t lr);
+extern "C" void unwind_c(
+    std::vector<void*>* result,
+    uintptr_t fp,
+    uintptr_t lr);
 #else
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
 #endif
@@ -541,8 +545,8 @@ static bool get_stack_bounds(uintptr_t& lo, uintptr_t& hi) {
 
 extern "C" C10_USED void unwind_c(
     std::vector<void*>* result,
-    int64_t fp,
-    int64_t lr) {
+    uintptr_t fp,
+    uintptr_t lr) {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   result->push_back((void*)lr);
 
@@ -554,19 +558,19 @@ extern "C" C10_USED void unwind_c(
   constexpr int kMaxFrames = 4096;
   int depth = 0;
   while (fp != 0 && (fp & 0xF) == 0 && depth++ < kMaxFrames) {
-    auto ufp = static_cast<uintptr_t>(fp);
-    if (ufp < stack_lo || ufp + 16 > stack_hi) {
+    if (fp < stack_lo || fp + 16 > stack_hi) {
       break;
     }
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    int64_t saved_lr = *(int64_t*)(fp + 8);
+    uintptr_t saved_lr;
+    std::memcpy(
+        &saved_lr, reinterpret_cast<const void*>(fp + 8), sizeof(saved_lr));
     if (saved_lr == 0) {
       break;
     }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     result->push_back((void*)saved_lr);
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    int64_t next_fp = *(int64_t*)fp;
+    uintptr_t next_fp;
+    std::memcpy(&next_fp, reinterpret_cast<const void*>(fp), sizeof(next_fp));
     if (next_fp <= fp) {
       break;
     }
