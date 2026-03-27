@@ -3,10 +3,7 @@
 import torch
 import torch._dynamo.testing
 import torch.func._random as random
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -100,9 +97,7 @@ class TestPhiloxKeySplit(TestCase):
             random.split(key, -1)
 
     def test_error_batched_last_dim_not_2(self, device):
-        key = torch.tensor(
-            [[42, 0, 1], [43, 0, 1]], dtype=torch.uint64, device=device
-        )
+        key = torch.tensor([[42, 0, 1], [43, 0, 1]], dtype=torch.uint64, device=device)
         with self.assertRaises(RuntimeError):
             random.split(key, 4)
 
@@ -179,9 +174,7 @@ class TestPhiloxKeyFoldIn(TestCase):
             random.fold_in(key, 0)
 
     def test_error_batched_last_dim_not_2(self, device):
-        key = torch.tensor(
-            [[42, 0, 1], [43, 0, 1]], dtype=torch.uint64, device=device
-        )
+        key = torch.tensor([[42, 0, 1], [43, 0, 1]], dtype=torch.uint64, device=device)
         with self.assertRaises(RuntimeError):
             random.fold_in(key, 0)
 
