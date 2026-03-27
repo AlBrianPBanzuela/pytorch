@@ -50,6 +50,7 @@ from ..runtime.hints import DeviceProperties
 from ..stream_constants import DEFAULT_STREAM, STREAM_NAME_TEMPLATE
 from ..stream_utils import get_stream_name
 from ..utils import (
+    ALIGNMENT,
     cache_on_self,
     DelayReplaceLine,
     get_benchmark_name,
@@ -1629,6 +1630,8 @@ class PythonWrapperCodegen(CodeGen):
         inputs_to_check = V.graph.inputs_to_check
         if not inputs_to_check:
             return
+        # Mutated inputs are handled separately by the runtime wrapper,
+        # which needs to copy back the mutation after the call.
         mutated_idxs = OrderedSet(V.graph.mutated_input_idxs)
         for idx in inputs_to_check:
             if idx not in mutated_idxs:
@@ -1643,7 +1646,7 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_alignment_copies:
                 self._pending_alignment_copies.discard(name)
-                self.writeline(f"if {name}.data_ptr() % 16 != 0:")
+                self.writeline(f"if {name}.data_ptr() % {ALIGNMENT} != 0:")
                 self.writeline(f"    {name} = clone_preserve_strides({name})")
 
     # this function (and below) takes the graph name as input so
