@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from cli.lib.pytorch.lint_test.lint_plans import LINT_PLANS, TestPlan
+from cli.lib.pytorch.re_runner import submit_command
 
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,11 @@ class PytorchTestRunner:
         self.group_id: str = args.group_id
         raw_inputs = getattr(args, "input", []) or []
         self.input_overrides = dict(i.split("=", 1) for i in raw_inputs)
+        self.re = getattr(args, "re", False)
+        self.pr = getattr(args, "pr", None)
+        self.commit = getattr(args, "commit", None)
+        self.dry_run = getattr(args, "dry_run", False)
+        self.no_follow = getattr(args, "no_follow", False)
 
     def run(self) -> None:
         if self.group_id not in LINT_PLANS:
@@ -66,4 +72,19 @@ class PytorchTestRunner:
                 f"Available: {sorted(LINT_PLANS)}"
             )
         plan = LINT_PLANS[self.group_id]
-        run_plan(self.group_id, plan, self.input_overrides)
+
+        if self.re:
+            cmd = f"lumen test lint --group-id {self.group_id}"
+            for k, v in self.input_overrides.items():
+                cmd += f" --input {k}={v}"
+            submit_command(
+                command=cmd,
+                name=f"lint-{self.group_id}",
+                pr=self.pr,
+                commit=self.commit,
+                dry_run=self.dry_run,
+                no_follow=self.no_follow,
+                image=plan.image,
+            )
+        else:
+            run_plan(self.group_id, plan, self.input_overrides)
