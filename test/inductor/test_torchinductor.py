@@ -83,7 +83,11 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     largeTensorTest,
 )
-from torch.testing._internal.common_dtype import all_types, get_all_dtypes
+from torch.testing._internal.common_dtype import (
+    all_types,
+    get_all_dtypes,
+    highest_precision_float,
+)
 from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
     _group_quantize_tensor_symmetric,
@@ -3336,7 +3340,7 @@ class CommonTemplate:
         def fn(a):
             return torch.round(a)
 
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         self.common(
             fn,
             [torch.arange(-10, 10, 0.1, dtype=dtype)],
@@ -4650,7 +4654,7 @@ class CommonTemplate:
 
         x1 = torch.randn(30, device=self.device)
         x2 = torch.randn(36, device=self.device)
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         y = torch.ones(1, dtype=dtype, device=self.device)
 
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
@@ -6445,7 +6449,7 @@ class CommonTemplate:
             reference_in_float=False,
         )
 
-    @skipCUDAIf(
+    @unittest.skipIf(
         TEST_WITH_ROCM and not torch.cuda.has_magma,
         "ROCm hipsolver backend does not currently support eig",
     )
@@ -6535,7 +6539,7 @@ class CommonTemplate:
         def fn(dist, angle):
             return torch.polar(dist, angle)
 
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         inp = (
             torch.tensor([1, 2], dtype=dtype),
             torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=dtype),
@@ -10491,7 +10495,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Correctness is validated by self.common() above.
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
-    @expectedFailureXPU
     def test_max_pool2d_with_indices_backward5(self):
         # Large window size - decomposition handles via scatter_add
         def fn(a, b, c):
@@ -10931,7 +10934,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -10943,7 +10945,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([144, 144]),))
 
-    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin_with_duplicates(self):
         def fn(x):
             return (
@@ -10965,7 +10966,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1 = torch.randint(8, size=(1028, 1028))
         self.common(fn, (t1,))
 
-    @skipIfXpu(msg="# Incorrect XPU reference ")
     @xfail_if_mps  # eager nan is wrong, see https://github.com/pytorch/pytorch/issues/130295
     @skip_if_halide  # nan behavior
     def test_argmax_argmin_with_nan(self):
@@ -11090,7 +11090,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 [rank4_inps, rank3_inps, rank5_inps],
             )
 
-    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin3(self):
         def fn(x):
             return (
@@ -12711,6 +12710,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     x_strided = x[::2].reshape(25, 2).transpose(0, 1)
                     yield x_strided, y_size, memory_format
 
+    def test_resize_overlapping_strides(self):
+        # Resize on a stride-0 view should read logical elements, not raw storage.
+        def fn(x):
+            view = torch.as_strided(x, (100,), (0,))
+            return torch.ops.aten.resize(view, (50,))
+
+        self.common(fn, (torch.ones(10),))
+
     def test_resize(self):
         def fn(x, size, memory_format):
             # NOTE: Tensor.resize() =/= aten::resize()
@@ -12829,7 +12836,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @xfail_if_mps_unimplemented
-    @expectedFailureXPU
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
     )
@@ -13338,9 +13344,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skip_if_not_triton
     @unittest.skipIf(
         config.cpp_wrapper,
-        "Inductor does not generate size/stride asserts for cpp_wrapper",
+        "Deferred alignment copies are not generated for cpp_wrapper",
     )
-    def test_input_asserts_deferred_to_first_use(self):
+    def test_alignment_copy_deferred_to_first_use(self):
         def fn(x, y, z):
             a = torch.mm(x, y)
             b = torch.mm(a, z)
@@ -13351,11 +13357,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         z = torch.randn(64, 8, device=self.device)
 
         _, code = run_and_get_code(torch.compile(fn), x, y, z)
-        # z's assert should appear after the first mm, not at the top
-        # with all the other asserts
-        FileCheck().check("def call").check_count(
-            "assert_size_stride", 2, exactly=True
-        ).check("extern_kernels.mm(").run(code[0])
+        # z's alignment check should appear between the two mm calls:
+        # first mm (uses x, y) -> alignment clone (for z) -> second mm (uses z)
+        FileCheck().check("extern_kernels.mm(").check("clone_preserve_strides").check(
+            "extern_kernels.mm("
+        ).run(code[0])
+
+    @requires_gpu()
+    @skip_if_not_triton
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_alignment_copy_not_emitted_for_cpp_wrapper(self):
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        x = torch.randn(16, 32, device=self.device)
+        y = torch.randn(32, 64, device=self.device)
+
+        _, code = run_and_get_code(torch.compile(fn), x, y)
+        # cpp_wrapper should NOT contain Python-syntax alignment copies
+        self.assertNotIn("clone_preserve_strides", code[0])
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
@@ -13713,7 +13733,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return out
 
         device = "cpu"
-        dtype = torch.double if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         tensor = torch.rand((1,), dtype=dtype, device=device)
         index = torch.tensor([0], dtype=torch.long, device=device)
         source = torch.rand((1,), dtype=dtype, device=device)
@@ -15681,7 +15701,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertFalse("ReductionHint.INNER" in code)
 
     @skip_if_halide
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_triton_argmin_argmax_transpose_logical_index(self):
         def fn(x):
             x.tan_()
@@ -15718,7 +15738,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
 
     @skip_if_halide
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_unbacked_float_item(self):
         def fn(x, max_val):
             return torch.clamp(x, 0, max_val.item())
@@ -15758,7 +15778,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device.lower() == "cuda":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch(combo_kernels=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_combo_kernel_store_mask(self):
