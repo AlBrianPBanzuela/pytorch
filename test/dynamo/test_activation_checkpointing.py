@@ -2618,7 +2618,11 @@ class ActivationCheckpointingMakeFxTests(torch._dynamo.test_case.TestCase):
             else a
             for a in full_args
         )
-        with fake_mode, preserve_node_meta():
+        with (
+            fake_mode,
+            preserve_node_meta(),
+            torch.compiler._non_strict_tracing_context(),
+        ):
             return make_fx(fn)(*fake_args)
 
     @staticmethod

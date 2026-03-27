@@ -1545,7 +1545,7 @@ def _checkpoint_without_reentrant_generator(
             f"but got {determinism_check}"
         )
 
-    if _is_compiling(fn, args, kwargs) and torch.is_grad_enabled():
+    if torch.compiler.is_non_strict_tracing() and torch.is_grad_enabled():
         # Under tracing, skip the checkpoint machinery (saved_tensor_hooks,
         # rng state, CheckpointFrame) and just tag nodes via the dispatch mode.
         if context_fn is noop_context_fn:
@@ -1570,6 +1570,15 @@ def _checkpoint_without_reentrant_generator(
     device_type = _infer_device_type(*args)
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
+    if _is_compiling(fn, args, kwargs) and context_fn is not noop_context_fn:
+        if (
+            not isinstance(forward_context, TorchDispatchMode)
+            or not isinstance(recompute_context, TorchDispatchMode)
+        ):
+            raise AssertionError(
+                "In torch.compile mode, `context_fn` arg passed to `torch.utils.checkpoint` "
+                "must generate a tuple of two `TorchDispatchMode`s."
+            )
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     device_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs(device_type=device_type)
 
