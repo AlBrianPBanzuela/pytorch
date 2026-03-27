@@ -59,18 +59,22 @@ def linear_cross_entropy_batch_chunking_cls(
             "linear_cross_entropy_batch_chunking_cls: target dtype must be torch.int64, got {target.dtype}."
         )
 
+    # we'll define these zeros to speed-up `torch.where` by 50%:
+    izero = torch.zeros((), device=target.device, dtype=target.dtype)
+    fzero = torch.zeros((), device=weight.device, dtype=weight.dtype)
+
     mask = target == ignore_index
     if ignore_index < 0 or ignore_index >= num_classes:
         # map out-of-range ignore_index to 0:
-        target = torch.where(mask, 0, target)
+        target = torch.where(mask, izero, target)
         # The correctness of this mapping is subtle: mask contains the
         # original target that ensures that selected weights are
         # masked from out-of-range ignore_index mapping correctly.
-    neg_weight_target = torch.where(mask, 0, weight.index_select(0, target))
+    neg_weight_target = torch.where(mask, fzero, weight.index_select(0, target))
 
     if reduction == "mean":
         d = neg_weight_target.sum()
-        if d == 0:
+        if d == fzero:
             raise RuntimeError(
                 "linear_cross_entropy_batch_chunking_cls failed to normalize: weights sum is zero"
             )
