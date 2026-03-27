@@ -4216,8 +4216,8 @@ from torch._inductor.runtime.runtime_utils import (
     ) -> None:
         # Generate iteration variables as jnp.arange arrays
         # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-        # if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
-        #     return
+        if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
+            return
 
         kernel_body.writeline("# Define iteration variables as JAX arrays")
 
