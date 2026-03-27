@@ -2552,9 +2552,17 @@ class VariableBuilder:
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
+                # FakeScriptObject wraps the real opaque object during
+                # fake-mode tracing; unwrap before the type check.
+                inner_type = type(inner_value)
+                if isinstance(
+                    inner_value,
+                    torch._library.fake_class_registry.FakeScriptObject,
+                ):
+                    inner_type = type(inner_value.real_obj)
                 if not isinstance(
                     inner_value, torch.Tensor
-                ) and not is_opaque_reference_type(type(inner_value)):
+                ) and not is_opaque_reference_type(inner_type):
                     raise RuntimeError(
                         f"{type(inner_value).__name__!r} found in tensor attrs of "
                         f"{type(value).__name__}.__tensor_flatten__(). "
