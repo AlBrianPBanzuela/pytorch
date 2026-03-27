@@ -35,15 +35,14 @@ enum class NormType { L1, L2, LInf };
 // as we only need to track addresses for the lpnorm_cleanup function below.
 // Why is this struct necessary? For the same reason the TensorListMetadata
 // struct is necessary--which is to ferry static metadata to the CUDA kernel
-// while complying with the 4kb size constraint. Since we only need to track
-// addresses, we introduce this struct to be able to fit more Tensor pointers at
-// a time, currently 400 empirically, compared to the much smaller values in
-// depth_to_max_tensors. This way, we can launch fewer kernels for better
-// performance.
+// while complying with the 32KB kernel arg size constraint (CUDA 12.1+).
+// Since we only need to track addresses, we introduce this struct to be able
+// to fit more Tensor pointers at a time compared to depth_to_max_tensors.
+// This way, we can launch fewer kernels for better performance.
 //
 // IF YOU USE THIS STRUCT, PLEASE ADD A ONE-OFF TEST IN test_foreach.py AS THIS
 // IS CURRENTLY ONLY TESTED FOR _foreach_norm.
-const size_t MAX_TENSORS_PER_KERNEL = 400;
+const size_t MAX_TENSORS_PER_KERNEL = 3200;
 struct TensorListAddresses {
   const void* addresses[MAX_TENSORS_PER_KERNEL];
 };
