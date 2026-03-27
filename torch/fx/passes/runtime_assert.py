@@ -641,8 +641,8 @@ def insert_deferred_runtime_asserts(
                         expr_to_proxy[i0].node.target
                         is not cast_symbool_to_symint_guardless
                     ):
-                        # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
-                        # raises AOTAutograd errors on cast_symbool_to_symint_guardless
+                        # Range assertions are unnecessary for SymBool-backed
+                        # symbols since their range is trivially [0, 1].
 
                         with _set_node_metadata_hook(
                             gm,

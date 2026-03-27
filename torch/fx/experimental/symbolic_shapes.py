@@ -2656,6 +2656,18 @@ def cast_symbool_to_symint_guardless(
     """
     if isinstance(symbool, bool):
         return 1 if symbool else 0
+
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode, handle_sym_dispatch
+
+    proxy_mode = get_proxy_mode()
+    if proxy_mode:
+        # During proxy tensor tracing (e.g. make_fx retracing), go through
+        # handle_sym_dispatch so the output SymInt gets a proxy slot.
+        # Without this, the SymInt from create_symintnode bypasses
+        # __sym_dispatch__ and won't be tracked by the tracer.
+        out = handle_sym_dispatch(cast_symbool_to_symint_guardless, (symbool,), {})
+        return out
+
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(
         int_sym,
