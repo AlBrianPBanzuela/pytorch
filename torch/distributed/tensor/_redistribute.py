@@ -22,7 +22,10 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
-from torch.distributed.tensor._utils import assert_no_mixed_partial_types
+from torch.distributed.tensor._utils import (
+    assert_no_mixed_partial_types,
+    compute_local_shape_and_global_offset,
+)
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -1490,6 +1493,19 @@ def redistribute_local_tensor(
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
+
+    if device_mesh.device_type == "meta":
+        # Logical mesh: no real collectives, just compute the target local
+        # shape and return a meta tensor with the correct shape.
+        if target_spec.tensor_meta is None:
+            raise AssertionError("target spec should have tensor meta defined!")
+        local_shape, _ = compute_local_shape_and_global_offset(
+            target_spec.tensor_meta.shape,
+            device_mesh,
+            target_spec.placements,
+            skip_offset=True,
+        )
+        return local_tensor.new_empty(local_shape, device="meta")
 
     if not device_mesh._is_current_rank_part_of_mesh():
         # if rank is not part of mesh, we skip redistribute and simply return local_tensor,

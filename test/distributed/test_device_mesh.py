@@ -1704,6 +1704,21 @@ class LogicalMeshTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, "logical mesh"):
             a + b
 
+    def test_explicit_redistribute_on_logical_mesh(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        x = DTensor.from_local(torch.randn(2, 16, device="meta"), mesh, [Shard(0)])
+        # Shard(0) -> Replicate (simulated allgather)
+        y = x.redistribute(mesh, [torch.distributed.tensor.Replicate()])
+        self.assertEqual(y.placements, (torch.distributed.tensor.Replicate(),))
+        self.assertEqual(y.shape, torch.Size([8, 16]))
+        self.assertEqual(y._local_tensor.shape, torch.Size([8, 16]))
+
+        # Replicate -> Shard(1) (simulated local slice)
+        z = y.redistribute(mesh, [Shard(1)])
+        self.assertEqual(z.placements, (Shard(1),))
+        self.assertEqual(z.shape, torch.Size([8, 16]))
+        self.assertEqual(z._local_tensor.shape, torch.Size([8, 4]))
+
 
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):
