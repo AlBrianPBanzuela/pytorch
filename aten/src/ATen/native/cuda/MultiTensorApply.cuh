@@ -59,7 +59,7 @@ struct TensorListScalarListMetadata {
   int block_to_chunk[depth_to_max_blocks[n - 1]];
 };
 
-// note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size of
+// note(mkozuki): `n` of 1-3 violate the limit of cuda kernel argument size of
 // 32KB with `c10::complex<double>`
 template <>
 struct TensorListScalarListMetadata<c10::complex<double>, 1> {
