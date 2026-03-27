@@ -604,7 +604,6 @@ static PyTypeObject TraceContextType = {
     nullptr /* tp_free */
 };
 
-
 #if IS_PYTHON_3_13_PLUS
 extern "C" int _PyEval_SetProfile(PyThreadState*, Py_tracefunc, PyObject*);
 #endif
@@ -614,26 +613,29 @@ extern "C" void _PyEval_StopTheWorld(PyInterpreterState*);
 extern "C" void _PyEval_StartTheWorld(PyInterpreterState*);
 #endif
 
+#if IS_PYTHON_3_14_PLUS
 class StopTheWorldGuard {
  public:
   explicit StopTheWorldGuard(PyInterpreterState* interp) : interp_(interp) {
-#if IS_PYTHON_3_14_PLUS
     _PyEval_StopTheWorld(interp_);
-#endif
   }
-
   ~StopTheWorldGuard() {
-#if IS_PYTHON_3_14_PLUS
     _PyEval_StartTheWorld(interp_);
-#endif
   }
-
   StopTheWorldGuard(const StopTheWorldGuard&) = delete;
   StopTheWorldGuard& operator=(const StopTheWorldGuard&) = delete;
 
  private:
   PyInterpreterState* interp_;
 };
+#else
+class StopTheWorldGuard {
+ public:
+  explicit StopTheWorldGuard(PyInterpreterState*) {}
+  StopTheWorldGuard(const StopTheWorldGuard&) = delete;
+  StopTheWorldGuard& operator=(const StopTheWorldGuard&) = delete;
+};
+#endif
 
 // ============================================================================
 // == Thread local cache ======================================================
@@ -836,8 +838,7 @@ static PyObject* c_call_callback(
       auto* local_results = tracer->findThreadLocalResults(tstate);
       if (local_results) {
         Py_INCREF(frame);
-        local_results->active_tracer_->recordCCall(
-            *local_results, frame, func);
+        local_results->active_tracer_->recordCCall(*local_results, frame, func);
         Py_DECREF(frame);
       }
     }
@@ -989,9 +990,8 @@ const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
   return out;
 }
 
-void PythonTracer::setprofileAllThreads(
-    Py_tracefunc func,
-    PyObject* arg) const {
+void PythonTracer::setprofileAllThreads(Py_tracefunc func, PyObject* arg)
+    const {
 #if IS_PYTHON_3_13_PLUS
   PyEval_SetProfileAllThreads(func, arg);
 #else
@@ -1044,8 +1044,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
   interpreter_ = PyInterpreterState_Get();
 
   // Shared context passed as the profile arg to all threads.
-  shared_ctx_ =
-      (TraceContext*)TraceContextType.tp_alloc(&TraceContextType, 0);
+  shared_ctx_ = (TraceContext*)TraceContextType.tp_alloc(&TraceContextType, 0);
   shared_ctx_->tracer_ = this;
 
   // Enable profiling on all threads. setprofileAllThreads handles its own
@@ -1568,13 +1567,11 @@ int PythonTracer::pyProfileFn(
   }
   switch (what) {
     case PyTrace_CALL:
-      local_results->active_tracer_->recordPyCall(
-          *local_results, frame, false);
+      local_results->active_tracer_->recordPyCall(*local_results, frame, false);
       break;
 
     case PyTrace_C_CALL:
-      local_results->active_tracer_->recordCCall(
-          *local_results, frame, arg);
+      local_results->active_tracer_->recordCCall(*local_results, frame, arg);
       break;
 
     case PyTrace_RETURN:
@@ -1582,8 +1579,7 @@ int PythonTracer::pyProfileFn(
       local_results->active_frames_--;
       if (local_results->active_frames_ <
           local_results->remaining_start_frames_) {
-        local_results->remaining_start_frames_ =
-            local_results->active_frames_;
+        local_results->remaining_start_frames_ = local_results->active_frames_;
       }
       break;
 
