@@ -1994,7 +1994,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         if istype(vt, variables.NestedUserFunctionVariable):
             # NestedUserFunctionVariable is created with MAKE_FUNCTION and its
             # __dict__ starts empty. Any mutation will actually be recorded in
-            # the side effects table
+            # the side effects table.
             return {}
         elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
             return SideEffectsProxyDict.get_example_value_dict(vt.vt)
