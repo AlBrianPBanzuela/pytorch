@@ -1057,10 +1057,9 @@ test_unbacked_parity_smoketest() {
     local both_failures=()
     local unbacked_only_failures=()
 
+    # Append a sentinel header so the loop naturally evaluates the last real model
     while IFS= read -r line; do
-      # Issue 3: Broadened regex to match model names with hyphens, slashes, dots
       if [[ "$line" =~ ^---[[:space:]]+([A-Za-z0-9_./-]+)[[:space:]]+--- ]]; then
-        # New model - check previous model
         if [[ -n "$current_model" ]]; then
           if $backed_failed && $unbacked_failed; then
             both_failures+=("$current_model")
@@ -1076,16 +1075,7 @@ test_unbacked_parity_smoketest() {
       elif [[ "$line" =~ unbacked.*FAILED|unbacked.*TIMEOUT|unbacked.*ERROR ]]; then
         unbacked_failed=true
       fi
-    done < "$output_file"
-
-    # Check last model
-    if [[ -n "$current_model" ]]; then
-      if $backed_failed && $unbacked_failed; then
-        both_failures+=("$current_model")
-      elif $unbacked_failed && ! $backed_failed; then
-        unbacked_only_failures+=("$current_model")
-      fi
-    fi
+    done < <(cat "$output_file"; echo "--- END ---")
 
     local has_failures=false
     if [[ ${#both_failures[@]} -gt 0 ]]; then
