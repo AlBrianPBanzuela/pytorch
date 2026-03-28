@@ -1619,6 +1619,7 @@ def _register_distributed_opaque_types():
     register_opaque_type(
         DeviceMesh,
         typ="reference",
+        hoist=True,
         guard_fn=lambda obj: [
             obj._flatten_rank_map,
             obj._layout,
