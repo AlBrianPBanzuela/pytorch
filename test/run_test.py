@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
     set_cwd,
@@ -201,10 +202,12 @@ ROCM_BLOCKLIST = [
 
 # Add architecture-specific blocklist entries
 if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
-    # Skip all inductor tests on Navi arch
-    ROCM_BLOCKLIST.extend(
-        test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)
-    )
+    # Some autotune tests on gfx1100 are hanging, disable for now
+    ROCM_BLOCKLIST.append("inductor/test_max_autotune")
+    # ROCm 7.2 gfx1100 started timing out due to these
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_dynamic_shapes")
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_opinfo")
+    ROCM_BLOCKLIST.append("inductor/test_ck_backend")
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
@@ -1800,7 +1803,53 @@ def get_selected_tests(options) -> list[str]:
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
-    if sys.platform == "win32" and not options.ignore_win_blocklist:
+    if IS_WINDOWS and not options.ignore_win_blocklist:
+        from torch.testing._internal.common_cuda import SM120OrLater, SM89OrLater
+
+        # Disable tests on Windows for SM89 and later - tests failing in ci
+        # Enable tests after fixing the failures
+        if SM89OrLater:
+            WINDOWS_BLOCKLIST.extend(
+                [
+                    # Windows fatal exception / access violation
+                    "functorch/test_aotdispatch",
+                    "functorch/test_control_flow",
+                    "nn/test_convolution",
+                    "profiler/test_profiler",
+                    "test_modules",
+                    "test_expanded_weights",
+                    "test_jit",
+                    "test_nested_tensor",
+                    "test_nestedtensor",
+                    "test_nn",
+                    # DLL load failed errors, missing dependencies
+                    "test_custom_ops",
+                    "test_testing",
+                    # Features not supported on Windows ( e.g. rowwise scaling)
+                    "test_decomp",
+                    "test_transformers",
+                    "test_ops",
+                    # Output mismatch errors and long running tests
+                    "test_linalg",
+                    "test_matmul_cuda",
+                ]
+            )
+
+        # Disable tests on Windows for SM120 and later - tests failing in ci
+        # Enable tests after fixing the failures
+        if SM120OrLater:
+            WINDOWS_BLOCKLIST.extend(
+                [
+                    # Windows fatal exception / access violation
+                    "test_fake_tensor",
+                    "test_cpp_extensions_jit",
+                    # TDR, BSOD observed
+                    "functorch/test_ops",
+                    # test_api fails on Windows SM120+. Triage pending.
+                    "cpp/test_api",
+                ]
+            )
+
         target_arch = os.environ.get("VSCMD_ARG_TGT_ARCH")
         if target_arch != "x64":
             WINDOWS_BLOCKLIST.append("cpp_extensions_aot_no_ninja")

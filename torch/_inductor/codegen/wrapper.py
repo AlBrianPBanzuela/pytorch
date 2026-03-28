@@ -47,9 +47,10 @@ from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
-from ..stream_constants import DEFAULT_STREAM, STREAM_NAME_TEMPLATE
+from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import get_stream_name
 from ..utils import (
+    ALIGNMENT,
     cache_on_self,
     DelayReplaceLine,
     get_benchmark_name,
@@ -78,7 +79,7 @@ from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
     import triton
 
@@ -696,6 +697,7 @@ class KernelCallLine(WrapperLine):
     device: torch.device
     graph_name: str
     original_fxnode_name: str
+    current_stream_idx: int | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._generate_kernel_call_helper(
@@ -710,6 +712,7 @@ class KernelCallLine(WrapperLine):
             device=self.device,
             graph_name=self.graph_name,
             original_fxnode_name=self.original_fxnode_name,
+            current_stream_idx=self.current_stream_idx,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -918,6 +921,23 @@ class AllocateLine(MemoryPlanningLine):
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
+            # In multi-stream graphs, only reuse buffers from the same stream
+            # to avoid races where a stream is still reading a buffer whose
+            # memory slot gets reused by a different stream.
+            if V.graph.scheduler._has_multi_stream_nodes():
+                alloc_stream = V.graph.scheduler.buff_to_stream.get(
+                    self.node.get_name()
+                )
+                free_stream = V.graph.scheduler.buff_to_stream.get(
+                    free_line.node.get_name()
+                )
+                if (
+                    alloc_stream is not None
+                    and free_stream is not None
+                    and alloc_stream != free_stream
+                ):
+                    state.push(key, free_line)
+                    return self
             size = V.graph.sizevars.optimization_hint(
                 V.graph.get_allocation_storage_size(self.node), fallback=0
             ) * get_dtype_size(self.node.get_dtype())
@@ -1213,6 +1233,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def __init__(self):
         super().__init__()
+        self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         self._names_iter: Iterator[int] = count()
         self.args_to_buffers: dict[
             str, None | ir.TensorBox | ir.Buffer | ir.TorchBindObject
@@ -1370,6 +1391,7 @@ class PythonWrapperCodegen(CodeGen):
                 _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 assert_alignment = torch._C._dynamo.guards.assert_alignment
+                from torch._inductor.utils import clone_preserve_strides
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
@@ -1652,6 +1674,33 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_input_size_asserts()
         if config.nan_asserts:
             self.codegen_input_nan_asserts()
+
+    def register_alignment_check_inputs(self) -> None:
+        """Populate pending alignment copies for non-mutated inputs.
+        Called from the scheduler after mutated_input_idxs is computed."""
+        if V.graph.cpp_wrapper:
+            return
+        inputs_to_check = V.graph.inputs_to_check
+        if not inputs_to_check:
+            return
+        # Mutated inputs are handled separately by the runtime wrapper,
+        # which needs to copy back the mutation after the call.
+        mutated_idxs = OrderedSet(V.graph.mutated_input_idxs)
+        for idx in inputs_to_check:
+            if idx not in mutated_idxs:
+                name = V.graph.graph_input_names[idx]
+                self._pending_alignment_copies.add(name)
+
+    def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
+        """Emit alignment check + clone just before the first kernel
+        that reads each input, hiding the cost behind GPU execution."""
+        if V.graph.cpp_wrapper:
+            return
+        for name in input_names:
+            if name in self._pending_alignment_copies:
+                self._pending_alignment_copies.discard(name)
+                self.writeline(f"if {name}.data_ptr() % {ALIGNMENT} != 0:")
+                self.writeline(f"    {name} = clone_preserve_strides({name})")
 
     # this function (and below) takes the graph name as input so
     # that stream caching happens per graph instance. this
@@ -3178,6 +3227,7 @@ class PythonWrapperCodegen(CodeGen):
         )
 
         device = device or V.graph.get_current_device_or_throw()
+        current_stream_idx = V.graph.scheduler.current_stream_idx
         self.writeline(
             KernelCallLine(
                 self,
@@ -3197,6 +3247,7 @@ class PythonWrapperCodegen(CodeGen):
                 graph_name=V.graph.name,
                 # pyrefly: ignore [bad-argument-type]
                 original_fxnode_name=original_fxnode_name,
+                current_stream_idx=current_stream_idx,
             )
         )
 
@@ -3214,6 +3265,7 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
+        current_stream_idx=None,
     ):
         device = device or V.graph.get_current_device_or_throw()
         if not triton and device.type != "cuda":
@@ -3230,9 +3282,17 @@ class PythonWrapperCodegen(CodeGen):
 
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
-        stream_name = PythonWrapperCodegen.write_get_raw_stream(
-            self, device.index, graph_name
-        )
+        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
+            # Inside a user stream context: emit a fresh get_raw_stream call so
+            # it picks up the active stream at runtime, rather than reusing the
+            # LRU-cached stream0 variable which captured the default stream.
+            self.write_get_raw_stream_header()
+            stream_name = "raw_stream"
+            self.writeline(f"{stream_name} = get_raw_stream({device.index})")
+        else:
+            stream_name = PythonWrapperCodegen.write_get_raw_stream(
+                self, device.index, graph_name
+            )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
             self.writeline(
