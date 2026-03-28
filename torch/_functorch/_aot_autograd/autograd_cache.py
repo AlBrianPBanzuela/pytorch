@@ -1181,7 +1181,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         except (pickle.PicklingError, TypeError, AttributeError) as e:
             bad_field = AOTAutogradCache._find_unpicklable_field(entry)
             error_str = str(e)
-            log.warning("AOTAutograd cache unable to serialize compiled graph: %s (bad_field=%s)", e, bad_field)  # noqa: G200
+            log.warning(
+                "AOTAutograd cache unable to serialize compiled graph: %s (bad_field=%s)",
+                e,
+                bad_field,
+            )  # noqa: G200
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {

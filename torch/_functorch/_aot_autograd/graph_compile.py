@@ -205,8 +205,9 @@ def _hoist_opaque_ref_getattrs(
         replacement = new_placeholders[obj_id]
         get_attr_node.replace_all_uses_with(replacement)
         fx_g.graph.erase_node(get_attr_node)
-        if hasattr(fx_g, get_attr_node.target):
-            delattr(fx_g, get_attr_node.target)
+        target_name = str(get_attr_node.target)
+        if hasattr(fx_g, target_name):
+            delattr(fx_g, target_name)
 
     fx_g.recompile()
     return hoisted_info
@@ -222,13 +223,14 @@ def _find_parent_device_mesh(args: list[Any]) -> Any:
     """
     from torch.distributed.device_mesh import DeviceMesh
 
-    best = None
+    best: DeviceMesh | None = None
     for arg in args:
         real = arg
         if isinstance(arg, FakeScriptObject):
             real = getattr(arg, "real_obj", None) or arg
-        if isinstance(real, DeviceMesh):
-            if best is None or len(real.mesh_dim_names) > len(best.mesh_dim_names):
+        if isinstance(real, DeviceMesh) and real.mesh_dim_names is not None:
+            best_dims = best.mesh_dim_names if best is not None else None
+            if best_dims is None or len(real.mesh_dim_names) > len(best_dims):
                 best = real
     return best
 
@@ -1919,7 +1921,10 @@ def _aot_stage2a_partition(
                 # pyrefly: ignore [bad-assignment]
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
-            hoisted_info = _hoist_opaque_ref_getattrs(fx_g, joint_inputs)
+            hoisted_info = _hoist_opaque_ref_getattrs(
+                fx_g,
+                joint_inputs,  # pyrefly: ignore [bad-argument-type]
+            )
             fw_metadata.num_hoisted_opaque_refs = len(hoisted_info)
             fw_metadata.hoisted_opaque_ref_info = hoisted_info
 
