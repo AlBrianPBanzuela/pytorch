@@ -1009,7 +1009,12 @@ class GraphLowering(torch.fx.Interpreter):
         if buffer_name in self.name_to_buffer:
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
-            return self.graph_inputs[buffer_name].get_dtype()
+            inp = self.graph_inputs[buffer_name]
+            if isinstance(inp, ir.NonTensorObj):
+                raise TypeError(
+                    f"get_dtype called on non-tensor graph input {buffer_name!r}"
+                )
+            return inp.get_dtype()
         m = re.match(r"(as_strided|reinterpret_tensor)\(([a-zA-Z0-9_]+),", buffer_name)
         if m:
             return self.get_dtype(m.group(1))
@@ -1024,7 +1029,12 @@ class GraphLowering(torch.fx.Interpreter):
                 return 1
             return buf.get_numel()
         if buffer_name in self.graph_inputs:
-            return self.graph_inputs[buffer_name].get_numel()
+            inp = self.graph_inputs[buffer_name]
+            if isinstance(inp, ir.NonTensorObj):
+                raise TypeError(
+                    f"get_numel called on non-tensor graph input {buffer_name!r}"
+                )
+            return inp.get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
     def run(self, *args: Any) -> Any:  # type: ignore[override]
@@ -1540,6 +1550,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
                     TorchBindObject,
+                    ir.NonTensorObj,
                     ir.OpaqueMultiOutput,
                     ir.OpaqueValueTypeConstant,
                 ),
