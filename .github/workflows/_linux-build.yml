@@ -483,7 +483,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@huydhn/move-common-steps-to-setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
