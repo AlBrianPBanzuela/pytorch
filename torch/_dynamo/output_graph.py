@@ -1536,14 +1536,11 @@ class OutputGraph(OutputGraphCommon):
                 if not self.is_root_tracer():
                     tracer = self.root_tracer
 
-                fake_script_obj = (
-                    torch._library.fake_class_registry.maybe_to_fake_obj(
-                        self.fake_mode, target
-                    )
+                fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                    self.fake_mode, target
                 )
-                hoist_name = OutputGraph.module_key_name(*names)
-                hoist_name = get_unique_name_wrt(
-                    hoist_name, self.nn_modules, self.global_scope
+                hoist_name = re.sub(
+                    r"[^a-zA-Z0-9]+", "_", "_".join(map(str, names))
                 )
 
                 from torch._dynamo.variables.builder import GraphArg
@@ -1560,7 +1557,6 @@ class OutputGraph(OutputGraphCommon):
                     False,
                     None,
                     False,
-                    fake_script_obj,
                 )
                 vt = torch._dynamo.variables.script_object.TorchScriptObjectVariable.create(
                     proxy, fake_script_obj, **options

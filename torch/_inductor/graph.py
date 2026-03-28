@@ -1550,7 +1550,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
                     TorchBindObject,
-                    ir.OpaqueObjectState,
+                    ir.NonTensorObj,
                     ir.OpaqueMultiOutput,
                     ir.OpaqueValueTypeConstant,
                 ),
