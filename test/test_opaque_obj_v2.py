@@ -905,9 +905,7 @@ class TestOpaqueObject(TestCase):
         def scale_with_ref_impl(ref: HoistedRef, x: torch.Tensor) -> torch.Tensor:
             return x * ref.value
 
-        @torch.library.register_fake(
-            "_TestOpaqueObject::scale_with_ref", lib=self.lib
-        )
+        @torch.library.register_fake("_TestOpaqueObject::scale_with_ref", lib=self.lib)
         def scale_with_ref_fake(ref: HoistedRef, x: torch.Tensor) -> torch.Tensor:
             return torch.empty_like(x)
 
