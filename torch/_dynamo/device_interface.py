@@ -16,6 +16,7 @@ specialized implementations for each hardware backend's unique features.
 """
 
 import inspect
+import os
 import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
@@ -479,9 +480,11 @@ class CpuInterface(DeviceInterface):
         def get_device_properties(
             device: torch.types.Device = None,
         ) -> CpuDeviceProperties:
-            import multiprocessing
-
-            cpu_count = multiprocessing.cpu_count()
+            cpu_count = (
+                len(os.sched_getaffinity(0))
+                if hasattr(os, "sched_getaffinity")
+                else os.cpu_count()
+            ) or 1
             return CpuDeviceProperties(cpu_count)
 
     @staticmethod
