@@ -291,6 +291,16 @@ class HoistedString(torch._opaque_base.OpaqueBase):
 register_opaque_type(HoistedString, typ="value", hoist=True)
 
 
+class HoistedRef(OpaqueBase):
+    def __init__(self, value):
+        self.value = value
+
+
+register_opaque_type(
+    HoistedRef, typ="reference", hoist=True, guard_fn=lambda obj: [obj.value]
+)
+
+
 @torch.library.custom_op("mylib::op_with_string", mutates_args=())
 def op_with_string(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
     if s.val == "double":
@@ -878,6 +888,26 @@ class TestOpaqueObject(TestCase):
         @torch.library.register_fake("_TestOpaqueObject::counter_start", lib=self.lib)
         def counter_start_fake(a: Counter) -> torch.Tensor:
             return torch.scalar_tensor(0, dtype=torch.int64)
+
+        hoisted_ref_type = get_opaque_type_name(HoistedRef)
+        torch.library.define(
+            "_TestOpaqueObject::scale_with_ref",
+            f"({hoisted_ref_type} ref, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::scale_with_ref",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def scale_with_ref_impl(ref: HoistedRef, x: torch.Tensor) -> torch.Tensor:
+            return x * ref.value
+
+        @torch.library.register_fake("_TestOpaqueObject::scale_with_ref", lib=self.lib)
+        def scale_with_ref_fake(ref: HoistedRef, x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
 
         super().setUp()
 
@@ -3290,6 +3320,74 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
             dist.destroy_process_group()
             if already_initialized:
                 dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+
+    def test_hoist_reference_type_as_graph_input(self):
+        """When an nn.Module stores a hoisted opaque reference type
+        as an attribute, it becomes a graph placeholder (not get_attr).
+        This ensures compiled artifacts are independent of the concrete
+        object captured at trace time — required for CooR where
+        DeviceMesh differs across ranks."""
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, ref):
+                super().__init__()
+                self.ref = ref
+
+            def forward(self, x):
+                return torch.ops._TestOpaqueObject.scale_with_ref(self.ref, x)
+
+        ref = HoistedRef(2.0)
+        mod = MyModule(ref)
+        x = torch.tensor(3.0)
+
+        backend = EagerAndRecordGraphs()
+        result = torch.compile(mod, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+
+        placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
+        get_attrs = [n for n in graph.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(len(placeholders), 2)
+        self.assertEqual(len(get_attrs), 0)
+        self.assertEqual(result, x * 2.0)
+
+        torch._dynamo.reset()
+        result2 = torch.compile(mod, fullgraph=True, backend="aot_eager")(x)
+        self.assertEqual(result2, x * 2.0)
+
+        torch._dynamo.reset()
+        result3 = torch.compile(mod, fullgraph=True)(x)
+        self.assertEqual(result3, x * 2.0)
+
+    def test_hoist_opaque_ref_getattrs(self):
+        """_hoist_opaque_ref_getattrs converts get_attr nodes for opaque
+        reference types to placeholders in the joint graph, preventing
+        unpicklable objects from landing in torchbind_constants."""
+        from torch._functorch._aot_autograd.graph_compile import (
+            _hoist_opaque_ref_getattrs,
+        )
+
+        ref = HoistedRef(2.0)
+
+        graph = torch.fx.Graph()
+        x_ph = graph.placeholder("x")
+        ref_node = graph.get_attr("_ref")
+        graph.output((x_ph, ref_node))
+
+        root = {"_ref": ref}
+        gm = torch.fx.GraphModule(root, graph)
+
+        joint_inputs = ([torch.tensor(1.0)], [])
+        info = _hoist_opaque_ref_getattrs(gm, joint_inputs)
+
+        self.assertEqual(len(info), 1)
+        self.assertEqual(info[0]["type"], "HoistedRef")
+
+        placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        get_attrs = [n for n in gm.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(len(placeholders), 2)
+        self.assertEqual(len(get_attrs), 0)
+        self.assertEqual(len(joint_inputs[0]), 2)
+        self.assertIs(joint_inputs[0][1], ref)
 
     def test_subclass_parametrization_with_opaque_attrs(self):
         """unwrap_tensor_subclass_parameters should handle non-tensor attrs."""

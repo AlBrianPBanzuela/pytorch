@@ -122,6 +122,149 @@ def is_opaque_node(node: Any) -> bool:
 _thread_local = threading.local()
 
 
+def _hoist_opaque_ref_getattrs(
+    fx_g: torch.fx.GraphModule,
+    joint_inputs: tuple[list[Any], list[Any]],
+) -> list[dict[str, Any]]:
+    """
+    Convert opaque reference get_attr nodes to placeholders in the joint graph.
+
+    Backward closure captures can create get_attr nodes for DeviceMesh submeshes.
+    These end up in torchbind_constants and fail to pickle. By converting them to
+    placeholders, both forward and backward treat them as function arguments.
+    At runtime, a wrapper derives the submeshes from the parent DeviceMesh
+    already present in the args (via Dynamo hoisting + DTensor flatten).
+
+    Extends joint_inputs[0] with the hoisted values and returns picklable
+    metadata about each hoisted value (e.g., mesh_dim_names for DeviceMesh).
+    """
+    from torch._library.opaque_object import is_opaque_reference_type
+
+    hoisted_info: list[dict[str, Any]] = []
+    # Each entry: (get_attr_node, obj_id_of_real_val, val_or_None)
+    # val_or_None is the value for the first occurrence, None for duplicates
+    hoisted_nodes: list[tuple[torch.fx.Node, int, Any | None]] = []
+
+    seen_ids: set[int] = set()
+
+    for node in list(fx_g.graph.nodes):
+        if node.op != "get_attr":
+            continue
+        val = getattr(fx_g, node.target, None)
+        if val is None:
+            continue
+
+        real_val = val
+        if isinstance(val, FakeScriptObject):
+            real_val = getattr(val, "real_obj", None) or val
+
+        if not is_opaque_reference_type(type(real_val)):
+            continue
+
+        obj_id = id(real_val)
+        if obj_id in seen_ids:
+            hoisted_nodes.append((node, obj_id, None))
+        else:
+            hoisted_nodes.append((node, obj_id, val))
+            seen_ids.add(obj_id)
+
+    if not hoisted_nodes:
+        return []
+
+    last_placeholder = None
+    for node in fx_g.graph.nodes:
+        if node.op == "placeholder":
+            last_placeholder = node
+        else:
+            break
+
+    new_placeholders: dict[int, torch.fx.Node] = {}
+    for get_attr_node, obj_id, val in hoisted_nodes:
+        if val is None:
+            continue
+
+        real_val = val
+        if isinstance(val, FakeScriptObject):
+            real_val = getattr(val, "real_obj", None) or val
+
+        with fx_g.graph.inserting_after(last_placeholder):
+            new_ph = fx_g.graph.placeholder(f"hoisted_{get_attr_node.name}")
+            new_ph.meta = get_attr_node.meta.copy()
+            new_ph.meta["val"] = val
+            last_placeholder = new_ph
+
+        new_placeholders[obj_id] = new_ph
+        joint_inputs[0].append(val)
+
+        info: dict[str, Any] = {"type": type(real_val).__name__}
+        if hasattr(real_val, "mesh_dim_names"):
+            info["mesh_dim_names"] = tuple(real_val.mesh_dim_names)
+        hoisted_info.append(info)
+
+    for get_attr_node, obj_id, _val in hoisted_nodes:
+        replacement = new_placeholders[obj_id]
+        get_attr_node.replace_all_uses_with(replacement)
+        fx_g.graph.erase_node(get_attr_node)
+        target_name = str(get_attr_node.target)
+        if hasattr(fx_g, target_name):
+            delattr(fx_g, target_name)
+
+    fx_g.recompile()
+    return hoisted_info
+
+
+def _find_parent_device_mesh(args: list[Any]) -> Any:
+    """
+    Find the DeviceMesh with the most dimensions among function args.
+
+    At runtime, Dynamo hoisting + DTensor flatten ensure that the parent
+    DeviceMesh is among the function arguments. This helper finds it so we
+    can derive submeshes for hoisted opaque refs.
+    """
+    from torch.distributed.device_mesh import DeviceMesh
+
+    best: DeviceMesh | None = None
+    for arg in args:
+        real = arg
+        if isinstance(arg, FakeScriptObject):
+            real = getattr(arg, "real_obj", None) or arg
+        if isinstance(real, DeviceMesh) and real.mesh_dim_names is not None:
+            best_dims = best.mesh_dim_names if best is not None else None
+            if best_dims is None or len(real.mesh_dim_names) > len(best_dims):
+                best = real
+    return best
+
+
+def _wrap_hoisted_opaque_refs(
+    compiled_fn: Callable[..., Any],
+    info_list: list[dict[str, Any]],
+) -> Callable[..., Any]:
+    """
+    Wrap a compiled function to inject hoisted opaque ref values at runtime.
+
+    At runtime, finds the parent DeviceMesh among the existing args and
+    derives the needed submeshes based on the metadata in info_list.
+    """
+    from functools import wraps
+
+    @wraps(compiled_fn)
+    def wrapper(args: list[Any]) -> Any:
+        parent_mesh = _find_parent_device_mesh(args)
+        if parent_mesh is None:
+            raise RuntimeError(
+                "Cannot find parent DeviceMesh in runtime args to derive "
+                "hoisted submeshes: "
+                f"{[i.get('mesh_dim_names') for i in info_list]}"
+            )
+        for info in info_list:
+            dim_names = tuple(info["mesh_dim_names"])
+            args.append(parent_mesh[dim_names])
+        return compiled_fn(args)
+
+    wrapper._boxed_call = True  # type: ignore[attr-defined]
+    return wrapper
+
+
 @contextmanager
 def maybe_skip_decompose(aot_config: AOTConfig) -> Generator[None, None, None]:
     old_decomp = aot_config.decompositions
@@ -1778,6 +1921,13 @@ def _aot_stage2a_partition(
                 # pyrefly: ignore [bad-assignment]
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
+            hoisted_info = _hoist_opaque_ref_getattrs(
+                fx_g,
+                joint_inputs,  # pyrefly: ignore [bad-argument-type]
+            )
+            fw_metadata.num_hoisted_opaque_refs = len(hoisted_info)
+            fw_metadata.hoisted_opaque_ref_info = hoisted_info
+
             static_lifetime_input_indices = fw_metadata.static_input_indices
             if aot_config.partition_fn is None:
                 raise AssertionError("aot_config.partition_fn must not be None")
@@ -2547,6 +2697,11 @@ def _aot_stage2b_compile_forward_or_inference(
             aot_config,
             runtime_metadata=fw_metadata,
         )
+
+        if fw_metadata.num_hoisted_opaque_refs > 0:
+            compiled_fw_func = _wrap_hoisted_opaque_refs(
+                compiled_fw_func, fw_metadata.hoisted_opaque_ref_info
+            )
 
         compiled_fw_func = AOTDispatchSubclassWrapper(
             fw_only=None,
