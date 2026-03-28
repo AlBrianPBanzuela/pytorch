@@ -1931,7 +1931,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
     def _finalize_partial_render(
         self, partial_code: str | PartialRender
     ) -> str | PartialRender:
-        # Capture hook outputs (kernel-internal operation).
+        # Capture hook outputs.
         hook_outputs: dict[str, str] = {}
         with V.set_kernel_handler(self):
             for key, hook in self.render_hooks.items():
