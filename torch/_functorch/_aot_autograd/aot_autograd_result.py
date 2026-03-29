@@ -499,12 +499,12 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 )
 
         # Wrap the forward function in post compile wrappers
-        if self.runtime_metadata.num_hoisted_opaque_refs > 0:
-            from .graph_compile import _wrap_hoisted_opaque_refs
+        if self.runtime_metadata.num_hoisted_device_meshes > 0:
+            from .graph_compile import _wrap_hoisted_device_meshes
 
-            compiled_fw_func = _wrap_hoisted_opaque_refs(
+            compiled_fw_func = _wrap_hoisted_device_meshes(
                 compiled_fw_func,
-                self.runtime_metadata.hoisted_opaque_ref_info,
+                self.runtime_metadata.hoisted_device_mesh_info,
             )
 
         compiled_fw_func = AOTDispatchSubclassWrapper(

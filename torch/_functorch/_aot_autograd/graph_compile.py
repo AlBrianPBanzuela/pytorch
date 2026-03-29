@@ -122,12 +122,12 @@ def is_opaque_node(node: Any) -> bool:
 _thread_local = threading.local()
 
 
-def _hoist_opaque_ref_getattrs(
+def _hoist_device_mesh_getattrs(
     fx_g: torch.fx.GraphModule,
     joint_inputs: tuple[list[Any], list[Any]],
 ) -> list[dict[str, Any]]:
     """
-    Convert opaque reference get_attr nodes to placeholders in the joint graph.
+    Convert DeviceMesh get_attr nodes to placeholders in the joint graph.
 
     Backward closure captures can create get_attr nodes for DeviceMesh submeshes.
     These end up in torchbind_constants and fail to pickle. By converting them to
@@ -135,10 +135,10 @@ def _hoist_opaque_ref_getattrs(
     At runtime, a wrapper derives the submeshes from the parent DeviceMesh
     already present in the args (via Dynamo hoisting + DTensor flatten).
 
-    Extends joint_inputs[0] with the hoisted values and returns picklable
-    metadata about each hoisted value (e.g., mesh_dim_names for DeviceMesh).
+    Only hoists DeviceMesh instances. Extends joint_inputs[0] with the hoisted
+    values and returns picklable metadata for runtime submesh derivation.
     """
-    from torch._library.opaque_object import should_hoist
+    from torch.distributed.device_mesh import DeviceMesh
 
     hoisted_info: list[dict[str, Any]] = []
     # Each entry: (get_attr_node, obj_id_of_real_val, val_or_None)
@@ -158,7 +158,7 @@ def _hoist_opaque_ref_getattrs(
         if isinstance(val, FakeScriptObject):
             real_val = getattr(val, "real_obj", None) or val
 
-        if not should_hoist(type(real_val)):
+        if not isinstance(real_val, DeviceMesh):
             continue
 
         obj_id = id(real_val)
@@ -196,8 +196,8 @@ def _hoist_opaque_ref_getattrs(
         new_placeholders[obj_id] = new_ph
         joint_inputs[0].append(val)
 
-        info: dict[str, Any] = {"type": type(real_val).__name__}
-        if hasattr(real_val, "mesh_dim_names") and real_val.mesh_dim_names is not None:
+        info: dict[str, Any] = {}
+        if real_val.mesh_dim_names is not None:
             info["mesh_dim_names"] = tuple(real_val.mesh_dim_names)
         hoisted_info.append(info)
 
@@ -219,7 +219,7 @@ def _find_parent_device_mesh(args: list[Any]) -> Any:
 
     At runtime, Dynamo hoisting + DTensor flatten ensure that the parent
     DeviceMesh is among the function arguments. This helper finds it so we
-    can derive submeshes for hoisted opaque refs.
+    can derive submeshes for hoisted DeviceMesh nodes.
     """
     from torch.distributed.device_mesh import DeviceMesh
 
@@ -238,15 +238,15 @@ def _find_parent_device_mesh(args: list[Any]) -> Any:
     return best
 
 
-def _wrap_hoisted_opaque_refs(
+def _wrap_hoisted_device_meshes(
     compiled_fn: Callable[..., Any],
     info_list: list[dict[str, Any]],
 ) -> Callable[..., Any]:
     """
-    Wrap a compiled function to inject hoisted opaque ref values at runtime.
+    Wrap a compiled function to inject hoisted DeviceMesh submeshes at runtime.
 
-    At runtime, finds the parent DeviceMesh among the existing args and
-    derives the needed submeshes based on the metadata in info_list.
+    Finds the parent DeviceMesh among the existing args and derives the needed
+    submeshes based on mesh_dim_names metadata in info_list.
     """
     from functools import wraps
 
@@ -1927,12 +1927,12 @@ def _aot_stage2a_partition(
                 # pyrefly: ignore [bad-assignment]
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
-            hoisted_info = _hoist_opaque_ref_getattrs(
+            hoisted_info = _hoist_device_mesh_getattrs(
                 fx_g,
                 joint_inputs,  # pyrefly: ignore [bad-argument-type]
             )
-            fw_metadata.num_hoisted_opaque_refs = len(hoisted_info)
-            fw_metadata.hoisted_opaque_ref_info = hoisted_info
+            fw_metadata.num_hoisted_device_meshes = len(hoisted_info)
+            fw_metadata.hoisted_device_mesh_info = hoisted_info
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
             if aot_config.partition_fn is None:
@@ -2704,9 +2704,9 @@ def _aot_stage2b_compile_forward_or_inference(
             runtime_metadata=fw_metadata,
         )
 
-        if fw_metadata.num_hoisted_opaque_refs > 0:
-            compiled_fw_func = _wrap_hoisted_opaque_refs(
-                compiled_fw_func, fw_metadata.hoisted_opaque_ref_info
+        if fw_metadata.num_hoisted_device_meshes > 0:
+            compiled_fw_func = _wrap_hoisted_device_meshes(
+                compiled_fw_func, fw_metadata.hoisted_device_mesh_info
             )
 
         compiled_fw_func = AOTDispatchSubclassWrapper(
