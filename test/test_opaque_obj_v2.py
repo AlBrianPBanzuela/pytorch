@@ -3508,6 +3508,37 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
         result3 = torch.compile(mod, fullgraph=True)(x)
         self.assertEqual(result3, x * 2.0)
 
+    def test_hoist_opaque_ref_getattrs(self):
+        """_hoist_opaque_ref_getattrs converts get_attr nodes for opaque
+        reference types to placeholders in the joint graph, preventing
+        unpicklable objects from landing in torchbind_constants."""
+        from torch._functorch._aot_autograd.graph_compile import (
+            _hoist_opaque_ref_getattrs,
+        )
+
+        ref = HoistedRef(2.0)
+
+        graph = torch.fx.Graph()
+        x_ph = graph.placeholder("x")
+        ref_node = graph.get_attr("_ref")
+        graph.output((x_ph, ref_node))
+
+        root = {"_ref": ref}
+        gm = torch.fx.GraphModule(root, graph)
+
+        joint_inputs = ([torch.tensor(1.0)], [])
+        info = _hoist_opaque_ref_getattrs(gm, joint_inputs)
+
+        self.assertEqual(len(info), 1)
+        self.assertEqual(info[0]["type"], "HoistedRef")
+
+        placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        get_attrs = [n for n in gm.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(len(placeholders), 2)
+        self.assertEqual(len(get_attrs), 0)
+        self.assertEqual(len(joint_inputs[0]), 2)
+        self.assertIs(joint_inputs[0][1], ref)
+
     def test_subclass_parametrization_with_opaque_attrs(self):
         """unwrap_tensor_subclass_parameters should handle non-tensor attrs."""
         from torch._functorch._aot_autograd.subclass_parametrization import (
