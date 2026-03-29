@@ -29,7 +29,6 @@
 #include <ATen/native/IndexKernel.h>
 #include <ATen/ops/embedding_dense_backward_native.h>
 #include <ATen/ops/flip_native.h>
-#include <ATen/ops/from_blob.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_copy_native.h>
@@ -313,7 +312,6 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
               out_.device(),
               " and self on ",
               self.device());
-  TORCH_CHECK(self.dim() <= 16, "nonzero is not supported for tensor with more than 16 dimensions");
   TORCH_CHECK(out_.is_mps());
 
   Tensor input = self.contiguous();
@@ -370,9 +368,9 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   // Step 3: scatter indices (block_offsets already on GPU)
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+      auto computeEncoder = stream->commandEncoder();
       auto kernel_name = fmt::format("scatter_nonzero_indices_{}", type_str);
-      id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(kernel_name);
+      auto pso = lib.getPipelineStateForFunc(kernel_name);
 
       [computeEncoder setComputePipelineState:pso];
       mtl_setArgs(computeEncoder, input, prefix_buf, out, ndim_int, input.sizes(), block_offsets_buf);
