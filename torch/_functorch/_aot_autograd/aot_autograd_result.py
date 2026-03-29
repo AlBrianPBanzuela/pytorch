@@ -499,14 +499,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 )
 
         # Wrap the forward function in post compile wrappers
-        if self.runtime_metadata.num_hoisted_opaque_refs > 0:
-            from .graph_compile import _wrap_hoisted_opaque_refs
-
-            compiled_fw_func = _wrap_hoisted_opaque_refs(
-                compiled_fw_func,
-                self.runtime_metadata.hoisted_opaque_ref_info,
-            )
-
         compiled_fw_func = AOTDispatchSubclassWrapper(
             trace_joint=needs_autograd,
             fw_only=None,
@@ -528,7 +520,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         ).post_compile(
             compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
         )
-
         # pyrefly: ignore [missing-attribute]
         compiled_fw_func._boxed_call = True
         disable_amp = torch._C._is_any_autocast_enabled()
