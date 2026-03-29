@@ -197,7 +197,7 @@ def _hoist_opaque_ref_getattrs(
         joint_inputs[0].append(val)
 
         info: dict[str, Any] = {"type": type(real_val).__name__}
-        if hasattr(real_val, "mesh_dim_names"):
+        if hasattr(real_val, "mesh_dim_names") and real_val.mesh_dim_names is not None:
             info["mesh_dim_names"] = tuple(real_val.mesh_dim_names)
         hoisted_info.append(info)
 
@@ -228,10 +228,13 @@ def _find_parent_device_mesh(args: list[Any]) -> Any:
         real = arg
         if isinstance(arg, FakeScriptObject):
             real = getattr(arg, "real_obj", None) or arg
-        if isinstance(real, DeviceMesh) and real.mesh_dim_names is not None:
-            best_dims = best.mesh_dim_names if best is not None else None
-            if best_dims is None or len(real.mesh_dim_names) > len(best_dims):
+        if isinstance(real, DeviceMesh):
+            if best is None:
                 best = real
+            elif real.mesh_dim_names is not None:
+                best_dims = best.mesh_dim_names if best is not None else None
+                if best_dims is None or len(real.mesh_dim_names) > len(best_dims):
+                    best = real
     return best
 
 
@@ -257,8 +260,11 @@ def _wrap_hoisted_opaque_refs(
                 f"{[i.get('mesh_dim_names') for i in info_list]}"
             )
         for info in info_list:
-            dim_names = tuple(info["mesh_dim_names"])
-            args.append(parent_mesh[dim_names])
+            if "mesh_dim_names" in info:
+                dim_names = tuple(info["mesh_dim_names"])
+                args.append(parent_mesh[dim_names])
+            else:
+                args.append(parent_mesh)
         return compiled_fn(args)
 
     wrapper._boxed_call = True  # type: ignore[attr-defined]
