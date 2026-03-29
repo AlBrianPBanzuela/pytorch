@@ -3740,7 +3740,6 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
         for code in codes:
             self.assertNotIn("pickle", code)
 
-
     def test_opaque_object_state_in_graph_output(self):
         """When compile_fx_inner receives a graph where a raw opaque reference
         type appears in the outputs (not just inputs), inductor must handle it.
