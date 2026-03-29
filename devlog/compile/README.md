@@ -5,14 +5,14 @@ performance analyses, directional proposals, and lessons learned.
 
 ## Why DevLog?
 
-- **Lower bar than pytorch.org/blog.**  If you can write a good technical
+- **Lower bar than pytorch.org/blog.**  If you can write a good Workplace
   post, you can write a devlog entry.  No editorial pipeline, no marketing
   review — just a PR.
 - **AI-accessible.**  LLM coding assistants index the repo and can surface
   these notes as context.
 - **OSS-friendly.**  Most compiler discussions have no reason to stay
   internal.
-- **Durable.**  Ephemeral posts fade in days.  Markdown in the repo is
+- **Durable.**  Workplace posts fade in days.  Markdown in the repo is
   permanent.
 
 ## Topics

@@ -9,8 +9,6 @@ tags: [dynamic_shapes, unbacked, torch.export, compile_time, symbolic_shapes]
 
 ![Compile time reduction](./images/2026-02-27-compile-time-header.jpg)
 
-> **TL;DR**
-
 > **TL;DR** – A regression report revealed that
 > exporting a model with many unbacked (data-dependent) symbols took
 > **264s**.  Profiling showed the latency was dominated by
@@ -35,6 +33,8 @@ opportunities, particularly for unbacked symbols.  Eight optimizations
 were implemented, resulting in an overall **~3x reduction in export time**,
 from **264s to 87s**.
 
+![Profiling hotspot: SymNode.expr dominates trace time](./images/2026-02-27-compile-time-fig1.png)
+
 ## Common patterns for unbacked symbols
 
 One key pattern is checking `u0 >= 0`, which we do whenever we allocate an
@@ -46,9 +46,11 @@ produced by concatenations).
 These are evaluated repeatedly across retraces of the graph.  Many of the
 optimizations below target these common patterns.
 
+![Common unbacked symbol patterns and their evaluation cost](./images/2026-02-27-compile-time-fig2.png)
+
 ## The optimizations
 
-### 1. Config: `aggressive_guard_free_semantics` ([PR #174654](https://github.com/pytorch/pytorch/pull/174654))
+### 1. Config: `aggressive_guard_free_semantics`
 
 When using `guard_or_false` and `guard_or_true`, we always have a safe
 fallback value that we can take, and the question is how much effort we
@@ -85,6 +87,8 @@ performed more complex and expensive reasoning, especially for unbacked
 symbols.  A direct dictionary lookup into `backed_var_to_val` was
 sufficient.  **8% improvement.**
 
+![Optimization impact breakdown](./images/2026-02-27-compile-time-fig3.png)
+
 ### 5. Skip sympy evaluation for single unbacked symbol vs. constant ([PR #174662](https://github.com/pytorch/pytorch/pull/174662))
 
 Constructing relational expressions like `u0 >= 0`, `u0 == 1` where one
@@ -113,6 +117,8 @@ range `[0, ∞]` will be fast due to the earlier optimization.
 `sympy.Add(*args, evaluate=False)` internally iterates over all args twice
 performing redundant computations.  Using `_from_args` directly with
 `is_commutative=True` saves **5% improvement.**
+
+![Cumulative improvement: 264s → 87s](./images/2026-02-27-compile-time-fig4.png)
 
 ## Process takeaways
 
