@@ -292,6 +292,16 @@ class HoistedString(torch._opaque_base.OpaqueBase):
 register_opaque_type(HoistedString, typ="value", hoist=True)
 
 
+class HoistedRef(OpaqueBase):
+    def __init__(self, value):
+        self.value = value
+
+
+register_opaque_type(
+    HoistedRef, typ="reference", hoist=True, guard_fn=lambda obj: [obj.value]
+)
+
+
 @torch.library.custom_op("mylib::op_with_string", mutates_args=())
 def op_with_string(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
     if s.val == "double":
@@ -879,6 +889,26 @@ class TestOpaqueObject(TestCase):
         @torch.library.register_fake("_TestOpaqueObject::counter_start", lib=self.lib)
         def counter_start_fake(a: Counter) -> torch.Tensor:
             return torch.scalar_tensor(0, dtype=torch.int64)
+
+        hoisted_ref_type = get_opaque_type_name(HoistedRef)
+        torch.library.define(
+            "_TestOpaqueObject::scale_with_ref",
+            f"({hoisted_ref_type} ref, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::scale_with_ref",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def scale_with_ref_impl(ref: HoistedRef, x: torch.Tensor) -> torch.Tensor:
+            return x * ref.value
+
+        @torch.library.register_fake("_TestOpaqueObject::scale_with_ref", lib=self.lib)
+        def scale_with_ref_fake(ref: HoistedRef, x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
 
         super().setUp()
 
@@ -3378,6 +3408,136 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
         res2 = opt_f(x, "square")
         self.assertEqual(res2, f(x, "square"))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_opaque_multi_output_not_tensor_irnode(self):
+        """OpaqueMultiOutput must not be classified as a tensor IR node.
+
+        _is_tensor_irnode is used to select nodes for stride constraint
+        functions (require_stride1, require_contiguous, etc). If
+        OpaqueMultiOutput passes the check, those functions would call
+        get_stride/get_dtype/make_loader on it and crash."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor import ir
+        from torch._inductor.lowering import _is_tensor_irnode
+
+        opaque_multi = ir.OpaqueMultiOutput.__new__(ir.OpaqueMultiOutput)
+        self.assertIsInstance(opaque_multi, ir.IRNode)
+        self.assertFalse(_is_tensor_irnode(opaque_multi))
+
+        non_tensor = MagicMock(spec=ir.NonTensorObj)
+        non_tensor.__class__ = ir.NonTensorObj
+        self.assertFalse(_is_tensor_irnode(non_tensor))
+
+        self.assertFalse(_is_tensor_irnode(42))
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_fake_script_object_process_group_pybind(self):
+        """FakeScriptObject wrapping ProcessGroup must be unwrapped in the
+        pybind toIValue before casting to c10::intrusive_ptr<ProcessGroup>.
+
+        During Dynamo tracing with CooR, mesh_get_process_group returns a
+        FakeScriptObject-wrapped ProcessGroup. When that flows into a C++
+        custom op, toIValue needs to unwrap real_obj before the pybind
+        cast. This test exercises that path by calling
+        mesh_get_process_group (which returns a wrapped PG during tracing)
+        and passing it to another op that consumes the ProcessGroup."""
+        from torch.distributed.device_mesh import (
+            _register_distributed_opaque_types,
+            DeviceMesh,
+        )
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        already_initialized = dist.is_initialized()
+        if already_initialized:
+            dist.destroy_process_group()
+
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+        try:
+            _register_distributed_opaque_types()
+            mesh = DeviceMesh("cpu", torch.arange(2))
+
+            def f(mesh, x):
+                pg = torch.ops._dtensor.mesh_get_process_group(mesh, 0)
+                return x + pg.size()
+
+            x = torch.randn(4)
+            compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+            result = compiled_f(mesh, x)
+            expected = f(mesh, x)
+            self.assertEqual(result, expected)
+        finally:
+            dist.destroy_process_group()
+            if already_initialized:
+                dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+
+    def test_hoist_reference_type_as_graph_input(self):
+        """When an nn.Module stores a hoisted opaque reference type
+        as an attribute, it becomes a graph placeholder (not get_attr).
+        This ensures compiled artifacts are independent of the concrete
+        object captured at trace time — required for CooR where
+        DeviceMesh differs across ranks."""
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, ref):
+                super().__init__()
+                self.ref = ref
+
+            def forward(self, x):
+                return torch.ops._TestOpaqueObject.scale_with_ref(self.ref, x)
+
+        ref = HoistedRef(2.0)
+        mod = MyModule(ref)
+        x = torch.tensor(3.0)
+
+        backend = EagerAndRecordGraphs()
+        result = torch.compile(mod, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+
+        placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
+        get_attrs = [n for n in graph.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(len(placeholders), 2)
+        self.assertEqual(len(get_attrs), 0)
+        self.assertEqual(result, x * 2.0)
+
+        torch._dynamo.reset()
+        result2 = torch.compile(mod, fullgraph=True, backend="aot_eager")(x)
+        self.assertEqual(result2, x * 2.0)
+
+        torch._dynamo.reset()
+        result3 = torch.compile(mod, fullgraph=True)(x)
+        self.assertEqual(result3, x * 2.0)
+
+    def test_hoist_opaque_ref_getattrs(self):
+        """_hoist_opaque_ref_getattrs converts get_attr nodes for opaque
+        reference types to placeholders in the joint graph, preventing
+        unpicklable objects from landing in torchbind_constants."""
+        from torch._functorch._aot_autograd.graph_compile import (
+            _hoist_opaque_ref_getattrs,
+        )
+
+        ref = HoistedRef(2.0)
+
+        graph = torch.fx.Graph()
+        x_ph = graph.placeholder("x")
+        ref_node = graph.get_attr("_ref")
+        graph.output((x_ph, ref_node))
+
+        root = {"_ref": ref}
+        gm = torch.fx.GraphModule(root, graph)
+
+        joint_inputs = ([torch.tensor(1.0)], [])
+        info = _hoist_opaque_ref_getattrs(gm, joint_inputs)
+
+        self.assertEqual(len(info), 1)
+        self.assertEqual(info[0]["type"], "HoistedRef")
+
+        placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        get_attrs = [n for n in gm.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(len(placeholders), 2)
+        self.assertEqual(len(get_attrs), 0)
+        self.assertEqual(len(joint_inputs[0]), 2)
+        self.assertIs(joint_inputs[0][1], ref)
 
     def test_subclass_parametrization_with_opaque_attrs(self):
         """unwrap_tensor_subclass_parameters should handle non-tensor attrs."""
