@@ -17,6 +17,7 @@ import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
+    _StridedShardNotDecodableError,
     DTensorSpec,
     ShardOrder,
     ShardOrderEntry,
@@ -1448,7 +1449,7 @@ def _gen_transform_infos_non_cached(
             transform_infos = drp.generate_graph_based_transform_infos(
                 src_spec, dst_spec, src_spec.shape
             )
-        except ValueError:
+        except _StridedShardNotDecodableError:
             transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     else:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
