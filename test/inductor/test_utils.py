@@ -1,20 +1,20 @@
 # Owner(s): ["module: inductor"]
 
 import importlib.util
-import sympy
 import unittest
 
+import sympy
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
 from torch._inductor.fx_utils import count_flops_fx, countable_fx
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch._inductor.sizevars import SizeVarAllocator
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._sympy.functions import Identity
 
@@ -245,7 +245,7 @@ class TestUtils(TestCase):
     def test_symbolic_multiplication_divisibility_propagation(self):
         """
         Verifies that divisibility is correctly propagated through symbolic products.
-        This ensures that if a single factor is known to be divisible by N, 
+        This ensures that if a single factor is known to be divisible by N,
         the entire product is also recognized as divisible by N.
         Ref: https://github.com/pytorch/pytorch/issues/177146
         """
@@ -258,31 +258,30 @@ class TestUtils(TestCase):
         s1 = Symbol("s1", integer=True)
         denominator = 16
 
-        # Add a symbolic constraint to the ShapeEnv indicating that s1 is congruent to 0 modulo `denominator`.
-        allocator.shape_env.add_constraint(
-            sympy.Eq(sympy.Mod(s1, denominator), 0)
-        )
+        # Encode "s1 % 16 == 0" using the ShapeEnv range representation:
+        # (lower bound=0, upper bound=None, stride=16)
+        allocator.shape_env.var_to_range[s1] = (0, None, 16)
 
 
         # Test Case 1: Simple product (s0 * s1) -> should be divisible by 16
         product_expr = s0 * s1
         self.assertTrue(
             allocator.statically_known_multiple_of(product_expr, denominator),
-            f"Failed to propagate divisibility of {s1} to the product {product_expr}"
+            f"Failed to propagate divisibility of {s1} to the product {product_expr}",
         )
 
         # Test Case 2: Multi-factor product (s0 * s1 * 2) -> should be divisible by 16
         complex_product = s0 * s1 * 2
         self.assertTrue(
             allocator.statically_known_multiple_of(complex_product, denominator),
-            "Failed to propagate divisibility in a multi-factor product"
+            "Failed to propagate divisibility in a multi-factor product",
         )
 
         # Test Case 3: Constant factor divisibility (s0 * 32) -> 32 % 16 == 0
         constant_multiple = s0 * 32
         self.assertTrue(
             allocator.statically_known_multiple_of(constant_multiple, denominator),
-            "Failed to recognize constant factor divisibility directly"
+            "Failed to recognize constant factor divisibility directly",
         )
 
 
