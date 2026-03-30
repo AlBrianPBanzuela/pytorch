@@ -9,8 +9,6 @@ tags: [dynamic_shapes, unbacked, performance, vllm, torchbench, inductor]
 
 ![Backed vs unbacked perf parity](./images/2026-03-25-perf-parity-header.jpg)
 
-> **TL;DR**
-
 > **TL;DR** – Unbacked dynamic shapes had 2x–20% slowdowns on TorchBench
 > and ~30% regressions on vLLM.  We fixed the root causes — now unbacked
 > matches backed across all tested models and configurations.
@@ -155,6 +153,16 @@ also serve as a continuous signal and line of defense against regressions.
   disruption.
 - The main remaining piece for unbacked is better APIs for specifying
   dynamic shapes specs and dispatch — this will be a focus in Q2.
+
+## Acknowledgments
+
+Special thanks to Jason Ansel ([@jansel](https://github.com/jansel)) for
+his prompt diff reviews throughout the process. Thanks to Bob Ren
+([@bobrenjc93](https://github.com/bobrenjc93)) for adding the early work
+of hint override that `optimization_hint` depends on, and to Colin Peppler
+([@colinpeppler](https://github.com/colinpeppler)) for adding the logic of
+consistent optimization hint generation that was consolidated in
+`optimization_hint`.
 
 ## References
 

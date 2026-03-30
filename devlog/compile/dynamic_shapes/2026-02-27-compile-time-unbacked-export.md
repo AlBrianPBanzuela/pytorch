@@ -18,9 +18,11 @@ tags: [dynamic_shapes, unbacked, torch.export, compile_time, symbolic_shapes]
 
 ## Background
 
-A team reported a severe slowdown when exporting a model that heavily
+A report indicated a severe slowdown when exporting a model that heavily
 uses data-dependent operations (i.e., unbacked symbolic shapes).  Profiling
 showed that most of the time was spent inside the symbolic shape system.
+
+![Profiling hotspot: SymNode.expr takes significant trace time](./images/2026-02-27-compile-time-fig1.png)
 
 At the time of investigation, `torch.export` did not support profiling
 out of the box, which made root-cause analysis difficult.  After
@@ -33,9 +35,8 @@ opportunities, particularly for unbacked symbols.  Eight optimizations
 were implemented, resulting in an overall **~3x reduction in export time**,
 from **264s to 87s**.
 
-![Profiling hotspot: SymNode.expr dominates trace time](./images/2026-02-27-compile-time-fig1.png)
 
-## Common patterns for unbacked symbols
+## Patterns
 
 One key pattern is checking `u0 >= 0`, which we do whenever we allocate an
 unbacked size.  Similarly, checks like `u0 == 0`, `u0 == 1`, `u0 > 0`,
@@ -46,7 +47,6 @@ produced by concatenations).
 These are evaluated repeatedly across retraces of the graph.  Many of the
 optimizations below target these common patterns.
 
-![Common unbacked symbol patterns and their evaluation cost](./images/2026-02-27-compile-time-fig2.png)
 
 ## The optimizations
 
@@ -79,6 +79,9 @@ became a significant cost.
 A per-SymNode cache was added that is invalidated only when replacements
 change (tracked via a version counter).  **9% improvement.**
 
+![Profiling hotspot: SymNode.expr takes significant trace time](./images/2026-02-27-compile-time-fig1.png)
+
+
 ### 4. Optimize `_smart_symbol_sort` hint access ([PR #174655](https://github.com/pytorch/pytorch/pull/174655))
 
 `_smart_symbol_sort` previously called `size_hint()` on individual symbols
@@ -87,7 +90,6 @@ performed more complex and expensive reasoning, especially for unbacked
 symbols.  A direct dictionary lookup into `backed_var_to_val` was
 sufficient.  **8% improvement.**
 
-![Optimization impact breakdown](./images/2026-02-27-compile-time-fig3.png)
 
 ### 5. Skip sympy evaluation for single unbacked symbol vs. constant ([PR #174662](https://github.com/pytorch/pytorch/pull/174662))
 
@@ -96,6 +98,7 @@ side is an unbacked symbol and the other is a constant triggered expensive
 sympy evaluation.  Since unbacked symbols have no assumptions, there's
 nothing to simplify.  Using `evaluate=False` skips this unnecessary work.
 **15% improvement.**
+![cost of sympy_eq](./images/2026-02-27-compile-time-fig2.png)
 
 ### 6. Avoid redundant `compute_hint()` calls during expression construction ([PR #174664](https://github.com/pytorch/pytorch/pull/174664))
 
@@ -103,6 +106,8 @@ When `SymNode` operations produce results with unavailable hints, passing
 `None` to `SymNode.__init__` caused it to retry expensive `compute_hint()`
 for no reason — it will fail.  A sentinel value now explicitly indicates
 "hint unavailable, don't recompute."  **7% improvement.**
+
+![compute hint overhead](./images/2026-02-27-compile-time-fig3.png)
 
 ### 7. Skip static eval for unbounded unbacked symbols ([PR #174652](https://github.com/pytorch/pytorch/pull/174652))
 
