@@ -109,4 +109,5 @@ def _register_lint_commands(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--commit", help="commit SHA (for --re, skips PR detection)")
     parser.add_argument("--dry-run", action="store_true", default=False, help="dry run (for --re)")
     parser.add_argument("--no-follow", action="store_true", default=False, help="don't follow logs (for --re)")
+    parser.add_argument("--show-hint", action="store_true", default=False, help="print rerun command after execution")
     parser.set_defaults(func=lambda args: PytorchTestRunner(args).run())

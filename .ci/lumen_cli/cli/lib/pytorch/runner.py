@@ -119,6 +119,7 @@ class PytorchTestRunner:
         self.commit = getattr(args, "commit", None)
         self.dry_run = getattr(args, "dry_run", False)
         self.no_follow = getattr(args, "no_follow", False)
+        self.show_hint = getattr(args, "show_hint", False)
 
     def run(self) -> None:
         if self.group_id not in LINT_PLANS:
@@ -139,3 +140,6 @@ class PytorchTestRunner:
             )
         else:
             run_plan(self.group_id, plan, self.env_overrides, self.input_overrides)
+            if self.show_hint:
+                hint = _rerun_hint(self.group_id, self.env_overrides, self.input_overrides)
+                logger.info("To rerun on RE:\n  %s", hint)
