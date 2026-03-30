@@ -101,9 +101,36 @@ def vt_implements_slot(
         return m1 is not m2
 
 
+def vt_implements_tp_iter(obj: "VariableTracker") -> bool:
+    return vt_implements_slot(obj, "__iter__", "iter_impl")
+
+
+def vt_sequence_check(obj: "VariableTracker") -> bool:
+    """Implements PySequence_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#1715
+    from .dicts import ConstDictVariable
+
+    if istype(obj, ConstDictVariable):
+        return False
+
+    # needs generic_getitem to be implemented in Dynamo
+    return True
+    # return vt_implements_method(obj, " getitem_impl")
+
+
+def vt_mapping_check(obj: "VariableTracker") -> bool:
+    """Implements PyMapping_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#2302
+
+    # needs generic_getitem to be implemented in Dynamo
+    return True
+    # return vt_implements_method(obj, " getitem_impl")
+
+
 def generic_len(
     tx: "InstructionTranslator", obj: "VariableTracker"
 ) -> "VariableTracker":
+    # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L53-L69
     """
     Implements PyObject_Size/PyObject_Length semantics for VariableTracker objects.
     Routes to obj.len_impl(tx)
@@ -119,22 +146,6 @@ def generic_getitem(
     Routes to obj.getitem_impl(tx, item)
     """
     return obj.getitem_impl(tx, item)
-
-
-def vt_implements_tp_iter(obj: "VariableTracker") -> bool:
-    return vt_implements_slot(obj, "__iter__", "iter_impl")
-
-
-def vt_sequence_check(obj: "VariableTracker") -> bool:
-    """Implements PySequence_Check semantics for VariableTracker objects."""
-    from .dicts import ConstDictVariable
-
-    if istype(obj, ConstDictVariable):
-        return False
-
-    # needs generic_getitem to be implemented in Dynamo
-    return True
-    # return vt_implements_method(obj, " getitem_impl")
 
 
 # TODO(guilhermeleobas): should we narrow the return type to IteratorVariable?
@@ -210,16 +221,10 @@ def vt_implements_sq_contains(obj: "VariableTracker") -> bool:
     return vt_implements_slot(obj, "__contains__", "contains_impl")
 
 
-def generic_contains(
+def vt_sequence_contains(
     tx: "InstructionTranslator", obj: "VariableTracker", item: "VariableTracker"
 ) -> "VariableTracker":
-    """
-    Implements PySequence_Contains semantics for VariableTracker objects.
-
-    If the object has sq_contains (i.e., __contains__), calls obj.contains_impl(tx, item).
-    Otherwise falls back to iterating over obj and comparing each element.
-    """
-    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2148
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2273
     if vt_implements_sq_contains(obj):
         return obj.contains_impl(tx, item)
     # Fallback mirrors _PySequence_IterSearch: call PyObject_GetIter first (which
@@ -228,3 +233,27 @@ def generic_contains(
     return UserFunctionVariable(polyfills.impl_CONTAINS_OP_fallback).call_function(
         tx, [item, it], {}
     )
+
+
+def generic_contains(
+    tx: "InstructionTranslator", obj: "VariableTracker", item: "VariableTracker"
+) -> "VariableTracker":
+    """
+    Implements PyMapping_Contains / PySequence_Contains semantics for VariableTracker objects.
+
+    If the object has sq_contains (i.e., __contains__), calls obj.contains_impl(tx, item).
+    Otherwise falls back to iterating over obj and comparing each element.
+    """
+    if vt_mapping_check(obj):
+        # TODO(guilhermeleobas): This should check for __contains__
+        # Using vt_implements_sq_contains for now but is wrong!
+        if vt_implements_sq_contains(obj):
+            return obj.contains_impl(tx, item)
+        else:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"Argument of type '{obj.python_type_name()}' is not iterable"],
+            )
+    else:
+        return vt_sequence_contains(tx, obj, item)
