@@ -1654,6 +1654,15 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
         # Same code path as above, but exercises the user-facing API
         self.assertEqual(src_dt.full_tensor(), input_1d)
 
+        # 2D mesh: _StridedShard with undecodable split_factor falls back to greedy
+        mesh_2d = init_device_mesh(self.device_type, (4, 2))
+        input_2d = torch.randn((24, 8), device=self.device_type)
+        src_dt = distribute_tensor(
+            input_2d, mesh_2d, [_StridedShard(0, split_factor=3), Replicate()]
+        )
+        result_dt = src_dt.redistribute(mesh_2d, [Replicate(), Replicate()])
+        self.assertEqual(result_dt.to_local(), input_2d)
+
         # 3D mesh cases
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((31, 13, 11), device=self.device_type)
