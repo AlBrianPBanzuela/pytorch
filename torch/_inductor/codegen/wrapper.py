@@ -1344,7 +1344,6 @@ class PythonWrapperCodegen(CodeGen):
                 _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 assert_alignment = torch._C._dynamo.guards.assert_alignment
-                from torch._inductor.utils import clone_preserve_strides
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
@@ -1637,6 +1636,11 @@ class PythonWrapperCodegen(CodeGen):
             if idx not in mutated_idxs:
                 name = V.graph.graph_input_names[idx]
                 self._pending_alignment_copies.add(name)
+        if self._pending_alignment_copies:
+            V.graph._defers_input_alignment = True
+            self.imports.writeline(
+                "from torch._inductor.utils import clone_preserve_strides"
+            )
 
     def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
         """Emit alignment check + clone just before the first kernel
