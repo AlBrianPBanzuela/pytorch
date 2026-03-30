@@ -185,8 +185,7 @@ its type to `common_constant_types`.
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
-            name_variable = variables.ConstantVariable.create(name)
-            raise_observed_exception(AttributeError, tx, args=[name_variable])
+            raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -272,7 +271,7 @@ its type to `common_constant_types`.
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=list(exc.args),
                     )
             if (
                 hasattr(operator, name)
@@ -293,9 +292,7 @@ its type to `common_constant_types`.
                     try:
                         return ConstantVariable.create(op(self.value, add_target))
                     except Exception as e:
-                        raise_observed_exception(
-                            type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                        )
+                        raise_observed_exception(type(e), tx, args=list(e.args))
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
