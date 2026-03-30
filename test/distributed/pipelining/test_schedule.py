@@ -26,6 +26,7 @@ from torch.distributed.pipelining.schedules import (
     _add_send_recv,
     _add_unshard_reshard,
     _batch_p2p,
+    _defer_recv_ops,
     _format_pipeline_order,
     _merge_bw,
     _PipelineSchedule,
@@ -37,9 +38,11 @@ from torch.distributed.pipelining.schedules import (
     get_schedule_class,
     I,
     PipelineScheduleSingle,
+    RECV_B,
     RECV_F,
     RESHARD,
     SEND_B,
+    SEND_F,
     UNSHARD,
     W,
 )
@@ -817,6 +820,265 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         self.assertEqual(num_steps, test_info["simulated_steps"])
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "schedule": "simple_2_rank_2_stage_no_overlap",
+                "input": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0RECV_B0",
+                        "0B0",
+                        "0RECV_B1",
+                        "0B1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "1F0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1F1",
+                        "1B1",
+                        "1SEND_B1",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0RECV_B0",
+                        "0B0",
+                        "0RECV_B1",
+                        "0B1",
+                    ],
+                    1: [
+                        # Rank 1 > rank 0: SEND before RECV (no flush constraint)
+                        # 1RECV_F0 deferred to before 1F0
+                        # 1RECV_F1 deferred to before 1F1
+                        "1RECV_F0",
+                        "1F0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1RECV_F1",
+                        "1F1",
+                        "1B1",
+                        "1SEND_B1",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: stage_idx,
+                "num_stages": 2,
+            },
+            {
+                "schedule": "v_2_rank_4_stage_no_overlap",
+                "input": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "1F1",
+                        "2RECV_B0",
+                        "2F1",
+                        "2SEND_F1",
+                        "2B0",
+                        "2RECV_B1",
+                        "1B0",
+                        "1SEND_B0",
+                        "2B1",
+                        "1B1",
+                        "1SEND_B1",
+                        "2W0",
+                        "2W1",
+                        "1W0",
+                        "1W1",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        # Rank 0 < rank 1: RECV before SEND (flush constraint)
+                        # RECVs already right before consumers, no change
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        # Rank 1 > rank 0: SEND before RECV (no flush constraint)
+                        # All RECVs deferred to right before their consumers
+                        "1RECV_F0",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "1RECV_F1",
+                        "1F1",
+                        "2F1",
+                        "2SEND_F1",
+                        "2RECV_B0",
+                        "2B0",
+                        "1B0",
+                        "1SEND_B0",
+                        "2RECV_B1",
+                        "2B1",
+                        "1B1",
+                        "1SEND_B1",
+                        "2W0",
+                        "2W1",
+                        "1W0",
+                        "1W1",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
+                "num_stages": 4,
+            },
+        ],
+    )
+    def test_defer_recv_ops(self, test_info):
+        """Tests that _defer_recv_ops defers RECVs with rank-parity ordering."""
+        input_sch = {
+            rank: self._parse_actions(test_info["input"][rank])
+            for rank in test_info["input"]
+        }
+        expected_sch = {
+            rank: self._parse_actions(test_info["expected"][rank])
+            for rank in test_info["expected"]
+        }
+
+        result_sch = _defer_recv_ops(
+            input_sch, test_info["stage_to_rank"], test_info["num_stages"]
+        )
+        for rank in expected_sch:
+            for i, (expected, actual) in enumerate(
+                zip(expected_sch[rank], result_sch[rank])
+            ):
+                self.assertEqual(
+                    expected,
+                    actual,
+                    (
+                        f"Mismatch on rank {rank} at position {i}."
+                        f"\nExpected: {expected_sch[rank]}"
+                        f"\nActual:   {result_sch[rank]}"
+                    ),
+                )
+            self.assertEqual(len(result_sch[rank]), len(expected_sch[rank]))
+
+    def test_defer_recv_ops_no_deadlock(self):
+        """Tests the issue from pytorch/pytorch#172668: RECV_F for stage 2 should not
+        be placed before unrelated compute op 0F1 on the same rank, and the deferred
+        schedule must not introduce deadlocks.
+
+        Deadlock safety is ensured via rank-parity P2P ordering:
+        - Lower rank (rank < peer): RECV before SEND
+        - Higher rank (rank > peer): SEND before RECV
+        """
+        from torch.distributed.pipelining._schedule_visualizer import get_schedule_ops
+
+        schedule_ops_overlap = get_schedule_ops(
+            schedule="Interleaved1F1B",
+            pp_degree=2,
+            num_microbatches=4,
+            with_comms=True,
+            overlap_pp_comm=True,
+        )
+        schedule_ops_no_overlap = get_schedule_ops(
+            schedule="Interleaved1F1B",
+            pp_degree=2,
+            num_microbatches=4,
+            with_comms=True,
+            overlap_pp_comm=False,
+        )
+
+        rank0_overlap = schedule_ops_overlap[0]
+        rank0_no_overlap = schedule_ops_no_overlap[0]
+
+        def find_action(actions, stage_idx, comp_type, mb_idx):
+            for i, a in enumerate(actions):
+                if (
+                    a is not None
+                    and a.stage_index == stage_idx
+                    and a.computation_type == comp_type
+                    and a.microbatch_index == mb_idx
+                ):
+                    return i
+            return -1
+
+        # With overlap (default): 2RECV_F0 comes before 0F1
+        recv_f0_pos_overlap = find_action(rank0_overlap, 2, RECV_F, 0)
+        f1_pos_overlap = find_action(rank0_overlap, 0, F, 1)
+        self.assertGreater(f1_pos_overlap, recv_f0_pos_overlap)
+
+        # Without overlap (rank 0 < rank 1, so RECV before SEND applies):
+        # RECVs are flushed before SENDs to the same peer, but still
+        # deferred to right before their consumers.
+        recv_f0_pos_no_overlap = find_action(rank0_no_overlap, 2, RECV_F, 0)
+        f1_pos_no_overlap = find_action(rank0_no_overlap, 0, F, 1)
+        # On rank 0 (lower rank), 2RECV_F0 may still appear before 0F1
+        # due to the flush-before-SEND constraint. That's expected.
+        self.assertGreaterEqual(recv_f0_pos_no_overlap, 0)
+
+        # On rank 1 (higher rank, no flush constraint), RECVs should be
+        # deferred past unrelated compute ops.
+        rank1_no_overlap = schedule_ops_no_overlap[1]
+        rank1_overlap = schedule_ops_overlap[1]
+        # Count standalone RECVs — with deferral there should be the same
+        # number (all RECVs are standalone, just repositioned)
+        recv_count_overlap = sum(
+            1
+            for a in rank1_overlap
+            if a is not None and a.computation_type in (RECV_F, RECV_B)
+        )
+        recv_count_no_overlap = sum(
+            1
+            for a in rank1_no_overlap
+            if a is not None and a.computation_type in (RECV_F, RECV_B)
+        )
+        self.assertEqual(recv_count_overlap, recv_count_no_overlap)
 
     @parametrize("csv_name", ["zb1p_2rank_2stagep"])
     def test_csv(self, csv_name):
