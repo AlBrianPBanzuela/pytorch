@@ -148,6 +148,47 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_triton_wheel() {
+  local pinned_commit
+  pinned_commit=$(get_pinned_commit triton)
+  local short_hash="${pinned_commit:0:8}"
+  local index_url="https://download.pytorch.org/whl/nightly/triton/"
+  local python_version
+  # Wheel python tags: cp314-cp314 (regular) vs cp314-cp314t (free-threaded).
+  # The 't' suffix only appears on the second tag (ABI tag).
+  python_version=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
+  local python_abi
+  python_abi=$(python -c "import sysconfig, sys; t = 't' if sysconfig.get_config_var('Py_GIL_DISABLED') else ''; print(f'cp{sys.version_info.major}{sys.version_info.minor}{t}')")
+  local arch
+  arch=$(uname -m)
+
+  echo "Looking for triton wheel matching commit ${short_hash} (python=${python_version}, arch=${arch})"
+
+  local wheel
+  wheel=$(curl -sL "${index_url}" | \
+    grep -oP "triton-[^\"]+" | \
+    grep "git${short_hash}" | \
+    grep -- "-${python_version}-${python_abi}-" | \
+    grep "${arch}" | \
+    head -1)
+
+  if [ -z "${wheel}" ]; then
+    fatal "No triton wheel found matching commit ${short_hash} for ${python_version} on ${arch}"
+  fi
+
+  echo "Installing triton wheel: ${wheel}"
+  pip install "https://download.pytorch.org/whl/nightly/${wheel}"
+
+  # Verify the installed triton matches the pinned commit
+  local installed_version
+  installed_version=$(pip show triton 2>/dev/null | grep "^Version:" | awk '{print $2}')
+  if [[ "${installed_version}" != *"${short_hash}"* ]]; then
+    fatal "Installed triton version '${installed_version}' does not match pinned commit ${short_hash}"
+  fi
+
+  echo "Successfully installed triton ${installed_version}"
+}
+
 function detect_cuda_arch() {
   if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
     if command -v nvidia-smi; then
