@@ -125,7 +125,7 @@ has_side_effect(torch.ops.streams.join.default)
 def record_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    stream.record_event(event)
+    event.record(stream)
 
 
 @record_event.register_fake
@@ -143,7 +143,7 @@ has_side_effect(torch.ops.streams.record_event.default)
 def wait_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    stream.wait_event(event)
+    event.wait(stream)
 
 
 @wait_event.register_fake
@@ -169,6 +169,19 @@ def _(event_index: int) -> None:
 
 
 has_side_effect(torch.ops.streams.synchronize_event.default)
+
+
+@custom_op("streams::synchronize_device", mutates_args=())
+def synchronize_device(device_type: str, device_index: int) -> None:
+    torch.accelerator.synchronize(torch.device(device_type, device_index))
+
+
+@synchronize_device.register_fake
+def _(device_type: str, device_index: int) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.synchronize_device.default)
 
 
 @custom_op("streams::wait_stream", mutates_args=())
@@ -225,6 +238,9 @@ def _(
     stream_index: int,
 ) -> None:
     pass
+
+
+has_side_effect(torch.ops.streams.record_stream.default)
 
 
 class SymbolicStreamState:
@@ -340,6 +356,9 @@ class StreamVariable(StreamContextVariable):
 
     def python_type(self) -> type:
         return torch.Stream
+
+    def get_real_python_backed_value(self) -> object:
+        return self.value
 
     def call_method(
         self,
@@ -486,6 +505,9 @@ class EventVariable(VariableTracker):
         self.proxy = proxy
         self.value = value
         self.user_object_index = user_object_index
+
+    def get_real_python_backed_value(self) -> object:
+        return self.value
 
     def call_method(
         self,
