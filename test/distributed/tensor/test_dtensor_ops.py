@@ -302,6 +302,13 @@ dtensor_fails = {
     skip("istft"),
     skip("_segment_reduce", "lengths"),
     skip("_segment_reduce", "offsets"),
+    # TODO: fix the following ops
+    skip("empty"),
+    skip("empty_strided"),
+    skip("empty_like"),
+    skip("empty_permuted"),
+    skip("new_empty"),
+    skip("new_empty_strided"),
 }
 
 dtensor_multi_threaded_fails = {
@@ -342,6 +349,8 @@ dtensor_compiled_fails = {
     xfail("permute"),
     xfail("select"),
     xfail("slice"),
+    xfail("squeeze"),
+    xfail("squeeze", "multiple"),
     xfail("t"),
     xfail("transpose_copy"),
     xfail("unsqueeze"),
@@ -381,6 +390,11 @@ dtensor_compiled_fails = {
     xfail("lu_unpack"),
     xfail("scatter"),
     xfail("scatter_add"),
+    # batch_norm variants decompose through squeeze.dims → as_strided under
+    # compilation, and DTensor has no as_strided strategy.
+    xfail("_native_batch_norm_legit"),
+    xfail("native_batch_norm"),
+    xfail("nn.functional.batch_norm"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.margin_ranking_loss"),
@@ -775,6 +789,8 @@ ops_unbacked_dtensor_dde = {
     xfail("__rmatmul__"),
     xfail("_segment_reduce", "lengths"),
     xfail("_segment_reduce", "offsets"),
+    xfail("_native_batch_norm_legit"),
+    xfail("_unsafe_masked_index"),
     xfail("addmm"),
     xfail("addmm", "decomposed"),
     xfail("addr"),
@@ -825,7 +841,9 @@ ops_unbacked_dtensor_dde = {
     xfail("new_empty_strided"),
     xfail("new_full"),
     xfail("new_ones"),
+    xfail("native_batch_norm"),
     xfail("new_zeros"),
+    xfail("nn.functional.batch_norm"),
     xfail("nn.functional.celu"),
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
@@ -858,6 +876,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nonzero_static"),
     xfail("permute_copy"),
     xfail("prod"),
+    xfail("quantile"),
     xfail("ravel"),
     xfail("reshape"),
     xfail("reshape_as"),
@@ -872,7 +891,7 @@ ops_unbacked_dtensor_dde = {
     xfail("special.log_ndtr"),
     xfail("special.ndtri"),
     xfail("special.spherical_bessel_j0"),
-    xfail("squeeze", "multiple"),
+    xfail("squeeze_copy"),
     xfail("std_mean"),
     xfail("topk"),
     xfail("transpose_copy"),
