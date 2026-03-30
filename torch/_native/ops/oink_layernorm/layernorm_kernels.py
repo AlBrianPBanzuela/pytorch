@@ -32,15 +32,15 @@ from __future__ import annotations
 
 import importlib.metadata
 import math
+import operator
 import os
 import re
-import operator
-from typing import Optional, Tuple, Type
+
+import cuda.bindings.driver as cuda  # provided by NVIDIA cuda-python
 
 import torch
 from torch import Tensor
 
-import cuda.bindings.driver as cuda  # provided by NVIDIA cuda-python
 
 # CuTeDSL caches generated MLIR into a tempdir under a global default
 # (`/tmp/$USER/cutlass_python_cache`). The cache bytecode format can differ across
@@ -67,36 +67,37 @@ except Exception as e:
     ) from e
 
 import cutlass.cute as cute
-from cutlass import Float32, Int32, const_expr
+from cutlass import const_expr, Float32, Int32
 from cutlass.cute import runtime as rt
 from cutlass.cute.runtime import from_dlpack
 
-from .._oink_utils.lite_quack import (
-    _KERNEL_ACCEPTS_LAYOUT_ARGS,
-    TORCH2CUTE_DTYPE,
-    ReductionBase as _ReductionBase,
-    convert_from_dlpack as convert_from_dlpack_cute,
-    get_sm_count,
-    predicate_k,
-    row_reduce,
-    warp_reduce,
-)
 from .._oink_utils.fast_launch import (
-    StableF32Arg,
-    StableI32Arg,
     disable_fast_launch,
     fast_launch_enabled,
     set_runtime_ptr,
+    StableF32Arg,
+    StableI32Arg,
     tls_cache as _tls_fast_launch_cache,
 )
+from .._oink_utils.lite_quack import (
+    _KERNEL_ACCEPTS_LAYOUT_ARGS,
+    convert_from_dlpack as convert_from_dlpack_cute,
+    get_sm_count,
+    predicate_k,
+    ReductionBase as _ReductionBase,
+    row_reduce,
+    TORCH2CUTE_DTYPE,
+    warp_reduce,
+)
+
 
 # Simple compile cache for the forward kernel
-_COMPILE_CACHE: dict[Tuple[int, type[cutlass.Numeric], bool, bool, bool], object] = {}
-_PTR_COMPILE_CACHE: dict[Tuple[object, ...], object] = {}
+_COMPILE_CACHE: dict[tuple[int, type[cutlass.Numeric], bool, bool, bool], object] = {}
+_PTR_COMPILE_CACHE: dict[tuple[object, ...], object] = {}
 
 # Backward compile caches: one for dx, one for parameter gradients.
-_BWD_DX_COMPILE_CACHE: dict[Tuple[int, Type[cutlass.Numeric]], object] = {}
-_BWD_PARAM_COMPILE_CACHE: dict[Tuple[int, Type[cutlass.Numeric], bool], object] = {}
+_BWD_DX_COMPILE_CACHE: dict[tuple[int, type[cutlass.Numeric]], object] = {}
+_BWD_PARAM_COMPILE_CACHE: dict[tuple[int, type[cutlass.Numeric], bool], object] = {}
 
 
 class _PtrLayernormFastLaunch:
@@ -108,10 +109,10 @@ class _PtrLayernormFastLaunch:
         capi_func: object,
         ptr_x: object,
         ptr_w: object,
-        ptr_b: Optional[object],
+        ptr_b: object | None,
         ptr_out: object,
-        ptr_rstd: Optional[object],
-        ptr_mean: Optional[object],
+        ptr_rstd: object | None,
+        ptr_mean: object | None,
         arg_m: StableI32Arg,
         arg_ld: StableI32Arg,
         arg_eps: StableF32Arg,
@@ -155,10 +156,10 @@ class _PtrLayernormFastLaunch:
         *,
         x: Tensor,
         weight: Tensor,
-        bias: Optional[Tensor],
+        bias: Tensor | None,
         out: Tensor,
-        rstd: Optional[Tensor],
-        mean: Optional[Tensor],
+        rstd: Tensor | None,
+        mean: Tensor | None,
         M: int,
         ld: int,
         eps: float,
@@ -329,10 +330,10 @@ class _PtrLayernormFastLaunch:
         *,
         x: Tensor,
         weight: Tensor,
-        bias: Optional[Tensor],
+        bias: Tensor | None,
         out: Tensor,
-        rstd: Optional[Tensor],
-        mean: Optional[Tensor],
+        rstd: Tensor | None,
+        mean: Tensor | None,
         M: int,
         ld: int,
         eps: float,
@@ -414,7 +415,7 @@ def _get_fast_ptr_layernorm_launcher(
     stream_handle: int,
     assumed_align_xo: int,
     eps: float,
-) -> Optional[_PtrLayernormFastLaunch]:
+) -> _PtrLayernormFastLaunch | None:
     if not fast_launch_enabled():
         return None
     key = (
@@ -555,19 +556,19 @@ class LayerNormSM100(_ReductionBase):
         dtype: type[cutlass.Numeric],
         N: int,
         *,
-        copy_bits_x: Optional[int] = None,
+        copy_bits_x: int | None = None,
         direct_gmem: bool = False,
     ):
         super().__init__(dtype, N, stage=2)  # 2 stages for mean and var
         # Default reload policy mirrors Quack: use SMEM reload only for
         # very large hidden sizes. We keep this conservative for LayerNorm
         # and tune primarily via threads-per-block / cluster_n.
-        self.reload_from: Optional[str] = None if N <= 16384 else "smem"
+        self.reload_from: str | None = None if N <= 16384 else "smem"
         # SM100 tuning: for DSv3 hidden sizes where we fuse mean+var stats,
         # delay loading fp32 weights/bias until after the reductions to lower
         # register pressure.
         self.delay_w_load: bool = bool(N in (4096, 6144, 7168, 8192))
-        self.copy_bits_x: Optional[int] = (
+        self.copy_bits_x: int | None = (
             int(copy_bits_x) if copy_bits_x is not None else None
         )
         self.direct_gmem: bool = bool(direct_gmem)
@@ -630,10 +631,10 @@ class LayerNormSM100(_ReductionBase):
         self,
         mX: cute.Tensor,
         mW: cute.Tensor,
-        mB: Optional[cute.Tensor],
+        mB: cute.Tensor | None,
         mO: cute.Tensor,
-        mRstd: Optional[cute.Tensor],
-        mMean: Optional[cute.Tensor],
+        mRstd: cute.Tensor | None,
+        mMean: cute.Tensor | None,
         stream: cuda.CUstream,
         eps: Float32 = 1e-6,
     ):
@@ -732,10 +733,10 @@ class LayerNormSM100(_ReductionBase):
         self,
         ptr_x: cute.Pointer,
         ptr_w: cute.Pointer,
-        ptr_b: Optional[cute.Pointer],
+        ptr_b: cute.Pointer | None,
         ptr_out: cute.Pointer,
-        ptr_rstd: Optional[cute.Pointer],
-        ptr_mean: Optional[cute.Pointer],
+        ptr_rstd: cute.Pointer | None,
+        ptr_mean: cute.Pointer | None,
         M: Int32,
         ld: Int32,
         stream: cuda.CUstream,
@@ -783,10 +784,10 @@ class LayerNormSM100(_ReductionBase):
         self,
         mX: cute.Tensor,
         mW: cute.Tensor,
-        mB: Optional[cute.Tensor],
+        mB: cute.Tensor | None,
         mO: cute.Tensor,
-        mRstd: Optional[cute.Tensor],
-        mMean: Optional[cute.Tensor],
+        mRstd: cute.Tensor | None,
+        mMean: cute.Tensor | None,
         eps: Float32,
         tv_layout: cute.Layout,
         tiler_mn: cute.Shape,
@@ -1036,10 +1037,10 @@ class LayerNormSM100(_ReductionBase):
             self,
             mX: cute.Tensor,
             mW: cute.Tensor,
-            mB: Optional[cute.Tensor],
+            mB: cute.Tensor | None,
             mO: cute.Tensor,
-            mRstd: Optional[cute.Tensor],
-            mMean: Optional[cute.Tensor],
+            mRstd: cute.Tensor | None,
+            mMean: cute.Tensor | None,
             eps: Float32,
             tv_layout: cute.Layout,
             tiler_mn: cute.Shape,
@@ -1066,10 +1067,10 @@ class LayerNormSM100(_ReductionBase):
             self,
             mX: cute.Tensor,
             mW: cute.Tensor,
-            mB: Optional[cute.Tensor],
+            mB: cute.Tensor | None,
             mO: cute.Tensor,
-            mRstd: Optional[cute.Tensor],
-            mMean: Optional[cute.Tensor],
+            mRstd: cute.Tensor | None,
+            mMean: cute.Tensor | None,
             eps: Float32,
         ):
             largest_dtype_width = const_expr(
@@ -1113,7 +1114,7 @@ class LayerNormSM100(_ReductionBase):
 def layernorm(
     x: Tensor,
     weight: Tensor,
-    bias: Optional[Tensor] = None,
+    bias: Tensor | None = None,
     eps: float = 1e-6,
     return_rstd: bool = False,
     return_mean: bool = False,
@@ -1237,7 +1238,7 @@ def layernorm(
     return out
 
 
-def _can_use_ptr_path(x: Tensor, weight: Tensor, bias: Optional[Tensor]) -> bool:
+def _can_use_ptr_path(x: Tensor, weight: Tensor, bias: Tensor | None) -> bool:
     """Return True if we can safely use the pointer-based fast path.
 
     This is intentionally conservative: we target the common inference-like
@@ -1280,10 +1281,10 @@ def _layernorm_forward_ptr_into(
     *,
     x: Tensor,
     weight: Tensor,
-    bias: Optional[Tensor],
+    bias: Tensor | None,
     out: Tensor,
-    rstd: Optional[Tensor],
-    mean: Optional[Tensor],
+    rstd: Tensor | None,
+    mean: Tensor | None,
     eps: float,
 ) -> None:
     """Launch the pointer-based LayerNorm kernel into preallocated outputs."""
@@ -1310,7 +1311,7 @@ def _layernorm_forward_ptr_into(
     # - <=128b vectorization (cp.async-compatible)
     # - shared-memory staging for X (gmem->smem->rmem) to amortize global latency
     direct_gmem = False
-    copy_bits_x: Optional[int] = None
+    copy_bits_x: int | None = None
     assumed_align_xo = 16
 
     # DSv3 hidden sizes are often latency-bound on small M. For these N buckets,
@@ -1328,8 +1329,8 @@ def _layernorm_forward_ptr_into(
     # DSv3 smallest point (M=4096, N=7168) is latency-sensitive. Increasing
     # per-row parallelism improves the reduction path and consistently beats
     # Quack on this machine.
-    tpr_override: Optional[int] = None
-    nt_override: Optional[int] = None
+    tpr_override: int | None = None
+    nt_override: int | None = None
     if dtype_x.width == 16 and N == 7168 and M <= 4096:
         tpr_override = 224
         nt_override = 224
@@ -1520,7 +1521,7 @@ def _layernorm_forward_ptr_into(
 def layernorm_ref(
     x: Tensor,
     weight: Tensor,
-    bias: Optional[Tensor] = None,
+    bias: Tensor | None = None,
     eps: float = 1e-6,
 ) -> Tensor:
     """
@@ -1533,7 +1534,7 @@ def layernorm_ref(
     return y.to(x.dtype)
 
 
-def _as_2d(x: Tensor) -> Tuple[Tensor, Tuple[int, ...]]:
+def _as_2d(x: Tensor) -> tuple[Tensor, tuple[int, ...]]:
     if x.dim() == 2:
         return x, x.shape
     original_shape = x.shape
@@ -1542,7 +1543,7 @@ def _as_2d(x: Tensor) -> Tuple[Tensor, Tuple[int, ...]]:
     return x.reshape(M, N), original_shape
 
 
-def _restore_shape(x: Tensor, shape: Tuple[int, ...]) -> Tensor:
+def _restore_shape(x: Tensor, shape: tuple[int, ...]) -> Tensor:
     return x.reshape(shape)
 
 
@@ -1681,8 +1682,8 @@ def _layernorm_backward_param_kernel(
     mdO: cute.Tensor,
     mRstd: cute.Tensor,
     mMean: cute.Tensor,
-    mdW_partial: Optional[cute.Tensor],
-    mdB_partial: Optional[cute.Tensor],
+    mdW_partial: cute.Tensor | None,
+    mdB_partial: cute.Tensor | None,
     num_blocks: Int32,
 ) -> None:
     """
@@ -1731,8 +1732,8 @@ def _layernorm_backward_param(
     mdO: cute.Tensor,
     mRstd: cute.Tensor,
     mMean: cute.Tensor,
-    mdW_partial: Optional[cute.Tensor],
-    mdB_partial: Optional[cute.Tensor],
+    mdW_partial: cute.Tensor | None,
+    mdB_partial: cute.Tensor | None,
     num_blocks: Int32,
     stream: cuda.CUstream,
 ) -> None:
@@ -1821,8 +1822,8 @@ def _layernorm_backward_params_sm100(
     x_2d: Tensor,
     rstd_1d: Tensor,
     mean_1d: Tensor,
-    dw_partial: Optional[Tensor],
-    db_partial: Optional[Tensor],
+    dw_partial: Tensor | None,
+    db_partial: Tensor | None,
     sm_count: int,
 ) -> None:
     """
@@ -1894,8 +1895,8 @@ def layernorm_backward(
     weight: Tensor,
     rstd: Tensor,
     mean: Tensor,
-    bias: Optional[Tensor] = None,
-) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    bias: Tensor | None = None,
+) -> tuple[Tensor, Tensor | None, Tensor | None]:
     """
     LayerNorm backward implemented in CuteDSL / CUTLASS.
 

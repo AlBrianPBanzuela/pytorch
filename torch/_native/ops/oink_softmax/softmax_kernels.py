@@ -29,12 +29,12 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import re
-from typing import Type
+
+import cuda.bindings.driver as cuda  # provided by NVIDIA cuda-python
 
 import torch
 from torch import Tensor
 
-import cuda.bindings.driver as cuda  # provided by NVIDIA cuda-python
 
 # CuTeDSL caches generated MLIR into a tempdir under a global default
 # (`/tmp/$USER/cutlass_python_cache`). The cache bytecode format can differ across
@@ -61,29 +61,30 @@ except Exception as e:
     ) from e
 
 import cutlass.cute as cute
-from cutlass import Float32, Int32, const_expr
+from cutlass import const_expr, Float32, Int32
 from cutlass.cute import runtime as rt
 from cutlass.cute.runtime import from_dlpack
 
 from .._oink_utils.fast_launch import (
-    StableI32Arg,
     disable_fast_launch,
     fast_launch_enabled,
     set_runtime_ptr,
+    StableI32Arg,
     tls_cache as _tls_fast_launch_cache,
 )
 from .._oink_utils.lite_quack import (
     _KERNEL_ACCEPTS_LAYOUT_ARGS,
-    TORCH2CUTE_DTYPE,
-    ReductionBase,
     fill_oob,
     online_softmax_reduce,
     predicate_k,
+    ReductionBase,
     row_reduce,
+    TORCH2CUTE_DTYPE,
 )
 
-_FWD_COMPILE_CACHE: dict[tuple[Type[cutlass.Numeric], int], object] = {}
-_BWD_COMPILE_CACHE: dict[tuple[Type[cutlass.Numeric], int], object] = {}
+
+_FWD_COMPILE_CACHE: dict[tuple[type[cutlass.Numeric], int], object] = {}
+_BWD_COMPILE_CACHE: dict[tuple[type[cutlass.Numeric], int], object] = {}
 _PTR_FWD_COMPILE_CACHE: dict[tuple[object, ...], object] = {}
 _PTR_BWD_COMPILE_CACHE: dict[tuple[object, ...], object] = {}
 _PTR_FWDBWD_COMPILE_CACHE: dict[tuple[object, ...], object] = {}
@@ -358,7 +359,7 @@ def _get_fast_ptr_softmax_launcher(
 
 
 class SoftmaxFwdSM100(ReductionBase):
-    def __init__(self, dtype: Type[cutlass.Numeric], N: int):
+    def __init__(self, dtype: type[cutlass.Numeric], N: int):
         # One-stage online reduction: pack (max, sum_exp) into Int64 reduction buffer.
         super().__init__(dtype, N, stage=1, reduction_dtype=cutlass.Int64)
 
@@ -608,7 +609,7 @@ class SoftmaxFwdSM100(ReductionBase):
 
 
 class SoftmaxBwdSM100(ReductionBase):
-    def __init__(self, dtype: Type[cutlass.Numeric], N: int):
+    def __init__(self, dtype: type[cutlass.Numeric], N: int):
         # One stage for dot(dy, y) per row.
         super().__init__(dtype, N, stage=1, reduction_dtype=cutlass.Float32)
 
@@ -879,7 +880,7 @@ class SoftmaxFwdBwdSM100(ReductionBase):
     composition.
     """
 
-    def __init__(self, dtype: Type[cutlass.Numeric], N: int):
+    def __init__(self, dtype: type[cutlass.Numeric], N: int):
         # Online softmax reduction uses an Int64 reduction buffer packing
         # (max, sum_exp) pairs. We allocate a separate Float32 reduction buffer
         # for dot(dy, y).

@@ -43,9 +43,7 @@ def _softmax_out_impl(
         result = softmax_forward(self)
         out.copy_(result)
         return out
-    return _fallback_kernel.call_boxed(
-        dispatch_keys, self, dim, half_to_float, out
-    )
+    return _fallback_kernel.call_boxed(dispatch_keys, self, dim, half_to_float, out)
 
 
 def _register_oink_softmax() -> None:

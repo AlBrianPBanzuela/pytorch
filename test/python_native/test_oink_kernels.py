@@ -267,9 +267,7 @@ class TestOinkLayernormCorrectness(TestCase):
             b = torch.randn(N, device="cuda", dtype=torch.float32)
             eps = 1e-5
 
-            ref = torch.nn.functional.layer_norm(x.float(), [N], w, b, eps).to(
-                x.dtype
-            )
+            ref = torch.nn.functional.layer_norm(x.float(), [N], w, b, eps).to(x.dtype)
             result, _, _ = torch.native_layer_norm(x, [N], w, b, eps)
             torch.testing.assert_close(
                 result,
