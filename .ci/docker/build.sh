@@ -136,12 +136,12 @@ case "$tag" in
   pytorch-linux-jammy-py3-clang18-onnx)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
-    VISION=yes
-    ONNX=yes
     ;;
   pytorch-linux-jammy-py3.10-clang18)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
+    VISION=yes
+    ONNX=yes
     ;;
   pytorch-linux-jammy-py3.11-clang18)
     ANACONDA_PYTHON_VERSION=3.11
@@ -230,7 +230,6 @@ case "$tag" in
   pytorch-linux-jammy-py3-clang18-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
-    VISION=yes
     ;;
   pytorch-linux-jammy-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
