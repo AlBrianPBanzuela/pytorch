@@ -270,7 +270,6 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
-import glob
 import importlib
 import itertools
 import json
