@@ -9,6 +9,6 @@ guard generation, and the `torch.compile` frontend.
 
 | Date | Title | Author |
 |------|-------|--------|
-<!-- | 2026-03-25 | [Example: How Dynamo bytecode hooks work](./2026-03-25-bytecode-hooks.md) | @author | -->
+
 
 *No posts yet — be the first to contribute! See [_template.md](../_template.md).*

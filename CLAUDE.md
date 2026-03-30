@@ -19,6 +19,12 @@ multiple posts cover the same topic, the newest one is authoritative.
 The devlog contains design rationale, migration history, and performance
 data written by the engineers who built these systems.
 
+When answering from devlog posts:
+- **Always cite the date** of the devlog entry used (e.g., "per the
+  2025-03-15 devlog entry").
+- **Prompt the user** at the end: ask whether the devlog answer is
+  sufficient or whether they'd like a code search to verify/supplement.
+
 # Scratch Space
 
 Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch files, and throwaway experiments. Do not commit files from this directory.
