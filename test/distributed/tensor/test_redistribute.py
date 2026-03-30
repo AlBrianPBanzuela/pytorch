@@ -1642,8 +1642,20 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
 
     def test_strided_shard_redistribution(self):
         torch.manual_seed(21)
-        with maybe_disable_local_tensor_mode():
-            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        # 1D mesh: _StridedShard -> Replicate uses the greedy path's 1D shortcut
+        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
+        input_1d = torch.randn((16, 13), device=self.device_type)
+        src_dt = distribute_tensor(
+            input_1d, mesh_1d, [_StridedShard(0, split_factor=2)]
+        )
+        # _StridedShard -> Replicate via redistribute
+        result_dt = src_dt.redistribute(mesh_1d, [Replicate()])
+        self.assertEqual(result_dt.to_local(), input_1d)
+        # Same code path as above, but exercises the user-facing API
+        self.assertEqual(src_dt.full_tensor(), input_1d)
+
+        # 3D mesh cases
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((31, 13, 11), device=self.device_type)
         sharding_src_dst_pairs_with_expected_trace = [
             (
