@@ -40,13 +40,13 @@ using namespace c10d::symmetric_memory;
 // "RS" means Reduce Scatter;
 // "slot" means which tensor block a CTA is assigned to.
 
-#define RS_MAX_BLOCKS 64           // max total blocks being scattered (N)
-#define RS_MAX_BLOCKS_PER_RANK 16  // max blocks owned by a single rank
-#define RS_MAX_CTAS_PER_BLOCK 16   // max CTAs assigned to one block
+constexpr int RS_MAX_BLOCKS = 64;           // max total blocks being scattered (N)
+constexpr int RS_MAX_BLOCKS_PER_RANK = 16;  // max blocks owned by a single rank
+constexpr int RS_MAX_CTAS_PER_BLOCK = 16;   // max CTAs assigned to one block
 // Threads per CTA; defaults to a medium value to fit medium-width blocks.
-#define RS_THREADS_PER_CTA 128
+constexpr int RS_THREADS_PER_CTA = 128;
 // Total LSA barrier slots needed: one per CTA across all owned blocks.
-#define RS_MAX_CTA_COUNT (RS_MAX_BLOCKS_PER_RANK * RS_MAX_CTAS_PER_BLOCK)
+constexpr int RS_MAX_CTA_COUNT = (RS_MAX_BLOCKS_PER_RANK * RS_MAX_CTAS_PER_BLOCK);
 
 // Per-slot data passed to the kernel in a single struct to avoid multiple
 // kernel arguments.  Indexed by owned slot (0..n_owned-1).
