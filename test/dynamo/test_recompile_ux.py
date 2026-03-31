@@ -911,7 +911,7 @@ class IsolatedRegionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt_a.frame_count, 2)
         self.assertEqual(cnt_b.frame_count, 2)
 
-    @torch._dynamo.config.patch(recompile_limit=2)
+    @torch._dynamo.config.patch(recompile_limit=3)
     def test_isolated_region_resume_function(self):
         """Resume functions from a graph break inside an isolated region
         inherit the region_id. Their cache entries land in the correct
@@ -925,8 +925,12 @@ class IsolatedRegionTests(torch._dynamo.test_case.TestCase):
             print("graph break")
             if mode["value"] == "a":
                 return a.cos()
-            else:
+            elif mode["value"] == "b":
                 return a.tan()
+            elif mode["value"] == "c":
+                return a.exp()
+            else:
+                return a + 1
 
         opt_f = torch.compile(f, backend=cnt, isolated_region=True)
 
@@ -938,11 +942,16 @@ class IsolatedRegionTests(torch._dynamo.test_case.TestCase):
         frame_count_after_2 = cnt.frame_count
         self.assertGreater(frame_count_after_2, frame_count_after_1)
 
-        # Resume function has 2 entries now (= recompile_limit).
-        # A third mode should NOT cause further recompilation.
         mode["value"] = "c"
         opt_f(torch.randn(4))
-        self.assertEqual(cnt.frame_count, frame_count_after_2)
+        frame_count_after_3 = cnt.frame_count
+        self.assertGreater(frame_count_after_3, frame_count_after_2)
+
+        # Resume function has 3 entries now (= recompile_limit).
+        # A fourth mode should NOT cause further recompilation.
+        mode["value"] = "d"
+        opt_f(torch.randn(4))
+        self.assertEqual(cnt.frame_count, frame_count_after_3)
 
 
 if __name__ == "__main__":

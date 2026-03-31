@@ -20,18 +20,37 @@ bool use_lru = true;
 
 Py_ssize_t extra_index = -1;
 
+CacheEntry* ExtraState::get_first_entry() {
+  if (this->cache_entry_list.empty()) {
+    return nullptr;
+  }
+  return &this->cache_entry_list.front();
+}
+
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
     : orig_code(orig_code_arg) {}
 
 std::list<CacheEntry>& ExtraState::get_or_create_region_list(
     int64_t region_id) {
-  return this->region_cache_map[region_id];
+  if (region_id < 0) {
+    return this->cache_entry_list;
+  }
+  if (!this->region_cache_map) {
+    this->region_cache_map =
+        std::make_unique<std::unordered_map<int64_t, std::list<CacheEntry>>>();
+  }
+  return (*this->region_cache_map)[region_id];
 }
 
 bool ExtraState::has_any_cache_entries() const {
-  for (const auto& kv : this->region_cache_map) {
-    if (!kv.second.empty()) {
-      return true;
+  if (!this->cache_entry_list.empty()) {
+    return true;
+  }
+  if (this->region_cache_map) {
+    for (const auto& kv : *this->region_cache_map) {
+      if (!kv.second.empty()) {
+        return true;
+      }
     }
   }
   return false;
@@ -85,9 +104,14 @@ CacheEntry* extract_cache_entry(ExtraState* extra_state, int64_t region_id) {
   if (extra_state == nullptr) {
     return nullptr;
   }
-  auto it = extra_state->region_cache_map.find(region_id);
-  if (it != extra_state->region_cache_map.end() && !it->second.empty()) {
-    return &it->second.front();
+  if (region_id < 0) {
+    return extra_state->get_first_entry();
+  }
+  if (extra_state->region_cache_map) {
+    auto it = extra_state->region_cache_map->find(region_id);
+    if (it != extra_state->region_cache_map->end() && !it->second.empty()) {
+      return &it->second.front();
+    }
   }
   return nullptr;
 }
@@ -220,11 +244,10 @@ void lookup(
     }
   }
 
-  // Look up in the specific region's list
-  auto it = extra_state->region_cache_map.find(region_id);
-  if (it != extra_state->region_cache_map.end()) {
+  if (region_id < 0) {
+    // Non-isolated: walk the default flat list (zero map overhead)
     found = lookup_in_list(
-        it->second,
+        extra_state->cache_entry_list,
         f_locals,
         backend,
         index,
@@ -234,19 +257,32 @@ void lookup(
     if (guard_error) {
       return;
     }
-  }
+  } else {
+    // Isolated region: look up in the region's bucket
+    if (extra_state->region_cache_map) {
+      auto it = extra_state->region_cache_map->find(region_id);
+      if (it != extra_state->region_cache_map->end()) {
+        found = lookup_in_list(
+            it->second,
+            f_locals,
+            backend,
+            index,
+            is_skip_guard_eval_unsafe,
+            &guard_error,
+            maybe_cached_code);
+        if (guard_error) {
+          return;
+        }
+      }
+    }
 
-  // Global fallback: when an isolated region (>= 0) has no hit in its own
-  // bucket, also check non-isolated entries (region -1). This allows isolated
-  // regions to reuse compilations from non-isolated torch.compile() calls on
-  // the same code object, provided the backend and guards match. The backend
-  // check inside lookup_in_list ensures we only reuse entries with a matching
-  // backend (or in run-only mode where the backend check is skipped).
-  if (found == nullptr && region_id >= 0) {
-    auto global_it = extra_state->region_cache_map.find(-1);
-    if (global_it != extra_state->region_cache_map.end()) {
+    // Global fallback: if no hit in the isolated bucket, also check the
+    // default cache_entry_list (non-isolated entries). This allows isolated
+    // regions to reuse compilations from non-isolated torch.compile() calls
+    // on the same code object, provided the backend and guards match.
+    if (found == nullptr) {
       found = lookup_in_list(
-          global_it->second,
+          extra_state->cache_entry_list,
           f_locals,
           backend,
           index,
@@ -305,9 +341,14 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
-    for (auto& kv : extra->region_cache_map) {
-      for (CacheEntry& e : kv.second) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+    for (CacheEntry& e : extra->cache_entry_list) {
+      result.append(py::cast(e, py::return_value_policy::reference));
+    }
+    if (extra->region_cache_map) {
+      for (auto& kv : *extra->region_cache_map) {
+        for (CacheEntry& e : kv.second) {
+          result.append(py::cast(e, py::return_value_policy::reference));
+        }
       }
     }
   }

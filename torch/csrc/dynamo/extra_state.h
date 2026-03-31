@@ -61,15 +61,21 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // function.
   PyCodeObject* orig_code;
   std::list<PrecompileEntry> precompile_entries;
-  // Per-region cache: region_id -> list of CacheEntry.
-  // region_id -1 is the global (non-isolated) region.
-  std::unordered_map<int64_t, std::list<CacheEntry>> region_cache_map;
+  // Default cache list for non-isolated compilations (region_id == -1).
+  // Used directly when no isolated regions exist on this code object.
+  std::list<CacheEntry> cache_entry_list;
+  // Lazily allocated per-region map for isolated_region support.
+  // Only created when the first isolated region (region_id >= 0) is used.
+  // Does NOT include region -1 entries — those stay in cache_entry_list.
+  std::unique_ptr<std::unordered_map<int64_t, std::list<CacheEntry>>>
+      region_cache_map;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
   // Actions to apply to all frames with this code object
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
 
   ExtraState(PyCodeObject* orig_code_arg);
+  CacheEntry* get_first_entry();
   std::list<CacheEntry>& get_or_create_region_list(int64_t region_id);
   bool has_any_cache_entries() const;
   void move_to_front(CacheEntry* cache_entry);
