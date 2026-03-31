@@ -548,20 +548,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def len_impl(self, tx: Any) -> "VariableTracker":
-        """
-        Implements sq_length / mp_length (tp_as_sequence/tp_as_mapping len slot).
-        Subclasses must override this to support len(). Reaching this base is a
-        bug — it means len_impl is missing for that VariableTracker subclass.
-        """
-        unimplemented(
-            gb_type="Missing len_impl",
-            context=f"len({type(self).__name__})",
-            explanation=(
-                f"Dynamo does not support len() on {type(self).__name__}."
-                " Add len_impl to this VariableTracker subclass."
-            ),
-            hints=[*graph_break_hints.SUPPORTABLE],
+    def sq_length(self, tx: Any) -> "VariableTracker":
+        """Called when sq_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
+        )
+
+    def mp_length(self, tx: Any) -> "VariableTracker":
+        """Called when mp_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
     def call_method(
