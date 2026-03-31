@@ -42,11 +42,16 @@ if not is_available():
 
 
 else:
-    from torch._C._distributed_c10d import Backend as C10dBackend
+    from torch._C._distributed_c10d import (
+        Backend as C10dBackend,
+        FakeProcessGroup,
+        HashStore,
+    )
     from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
+        destroy_process_group,
         get_backend,
         get_process_group_ranks,
         get_rank,
@@ -72,6 +77,26 @@ else:
 
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
     torch.serialization.add_safe_globals([_MeshLayout])
+
+    def _create_fake_pg(common_opts, backend_opts):
+        return FakeProcessGroup._create_internal(
+            common_opts.group_rank, common_opts.group_size, backend_opts
+        )
+
+    def _init_logical_mesh_pg(world_size: int) -> None:
+        """Initialize a fake distributed backend for logical meshes."""
+        from torch.distributed.distributed_c10d import Backend
+
+        # Avoid redundant re-registration (register_backend is idempotent
+        # for the name, but re-runs the device mapping loop each time).
+        if "FAKE" not in Backend._plugins:
+            Backend.register_backend(
+                "fake",
+                _create_fake_pg,
+                extended_api=True,
+                devices=["cpu", "cuda", "hpu", "xpu"],
+            )
+        init_process_group("fake", store=HashStore(), rank=0, world_size=world_size)
 
     def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
         """
@@ -1165,8 +1190,9 @@ else:
 
             The returned mesh carries enough metadata (shape, rank coordinates) for
             DTensor sharding propagation to determine output placements given input
-            placements. It has no process groups and cannot be used for actual
-            collective communication.
+            placements. It uses fake process groups so that explicit
+            ``redistribute()`` calls work (producing correctly-shaped meta
+            tensors), but no real collective communication is performed.
 
             Args:
                 mesh_shape: The shape of the mesh as a tuple of ints (e.g. ``(4,)``
@@ -1191,13 +1217,27 @@ else:
                 ).reshape(mesh_shape)
             else:
                 mesh_tensor = torch.tensor(mesh_shape, device="cpu", dtype=torch.int)
+                numel = mesh_tensor.numel()
+
+            # Initialize a fake distributed backend for redistribute() support.
+            # If already initialized with a smaller world, re-init with the
+            # larger size so that bigger meshes can be created.
+            if not is_initialized():
+                _init_logical_mesh_pg(numel)
+            elif get_backend() != "fake":
+                raise RuntimeError(
+                    "Cannot create a logical mesh: a non-fake process group "
+                    "is already active. Destroy it first with "
+                    "destroy_process_group()."
+                )
+            elif get_world_size() < numel:
+                destroy_process_group()
+                _init_logical_mesh_pg(numel)
 
             device_mesh = DeviceMesh(
                 "meta",
                 mesh_tensor,
                 mesh_dim_names=mesh_dim_names,
-                _init_backend=False,
-                _rank=0,
             )
             return device_mesh
 

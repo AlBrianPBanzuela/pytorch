@@ -1625,6 +1625,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 class LogicalMeshTest(TestCase):
     """Tests for DeviceMesh.from_logical() — no distributed init required."""
 
+    def tearDown(self):
+        super().tearDown()
+        if is_initialized():
+            dist.destroy_process_group()
+
     def test_from_logical_1d(self):
         mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
         self.assertEqual(mesh.size(0), 4)
@@ -1642,10 +1647,11 @@ class LogicalMeshTest(TestCase):
         self.assertEqual(mesh.shape, (2, 4))
         self.assertEqual(mesh.get_coordinate(), (0, 0))
 
-    def test_from_logical_no_process_groups(self):
+    def test_from_logical_has_fake_process_groups(self):
         mesh = DeviceMesh.from_logical((4,))
-        with self.assertRaises(RuntimeError):
-            mesh.get_group()
+        # Fake PG provides process groups for redistribute support
+        pg = mesh.get_group()
+        self.assertIsNotNone(pg)
 
     def test_propagation_elementwise(self):
         mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
