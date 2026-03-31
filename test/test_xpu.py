@@ -257,7 +257,7 @@ if __name__ == "__main__":
                 return _pvd()
 
         # Tokens with trailing non-numeric characters are invalid; entire list is rejected
-        self.assertEqual(_parse_visible_devices("1a,2b"), [])
+        self.assertEqual(_parse_visible_devices("1a, 2b"), [])
         # Negative indices are silently skipped; valid indices before and after are kept
         self.assertEqual(_parse_visible_devices("0, 1, 2, -1, 3"), [0, 1, 2, 3])
         # Duplicate indices are silently ignored; each ordinal appears at most once
@@ -265,7 +265,7 @@ if __name__ == "__main__":
         # Leading '+'/'-' on an integer are accepted; '-0' is treated as 0
         self.assertEqual(_parse_visible_devices("2, +3, -0, 5"), [2, 3, 0, 5])
         # Purely alphabetic tokens make the entire list invalid
-        self.assertEqual(_parse_visible_devices("one,two,3,4"), [])
+        self.assertEqual(_parse_visible_devices("one, two, 3, 4"), [])
 
     def test_device_count_respects_affinity_mask(self):
         try:
