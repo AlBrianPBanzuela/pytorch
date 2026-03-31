@@ -227,6 +227,14 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       }
       return false;
     };
+    auto matchList = [&](c10::TypeKind kind) {
+      const auto& t = arg.real_type();
+      if (auto list_t = t->cast<c10::ListType>()) {
+        if (list_t->getElementType()->kind() == kind)
+          return true;
+      }
+      return false;
+    };
     if (argument.isNone()) {
       return py::none();
     } else if (match(c10::ScalarTypeType::Kind)) {
@@ -239,6 +247,31 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
       return py::cast(static_cast<c10::MemoryFormat>(argument.toInt()));
+    } else if (matchList(c10::ScalarTypeType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPDtype(static_cast<c10::ScalarType>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::LayoutType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPLayout(static_cast<c10::Layout>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::MemoryFormatType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        result[i] = py::cast(static_cast<c10::MemoryFormat>(list[i].toInt()));
+      }
+      return result;
     } else {
       return torch::jit::toPyObject(argument);
     }
@@ -2411,13 +2444,7 @@ create_native_op_schema(
                 item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
               handle_exactly_tensor(item_py_tensor);
             } else { // non-tensor
-              // Use handle_non_dtensor_arg to respect static_argnum.
-              // Non-tensor items in lists (e.g., ScalarList args to
-              // foreach ops) should only be included in the cache key
-              // if the list's argument index is >= static_argnum.
-              // Otherwise, step-varying scalars (like AdamW bias
-              // corrections) cause unbounded cache growth.
-              handle_non_dtensor_arg(idx, item);
+              handle_non_tensor_or_undefined(item);
             }
           }
         } else {

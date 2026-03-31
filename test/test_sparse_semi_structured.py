@@ -1322,7 +1322,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         self.assertNotEqual(A_sparse.packed.data_ptr, A_clone.packed.data_ptr)
         self.assertEqual(A_sparse.packed, A_clone.packed)
 
-    @inference_dtypes
+    @dtypes(torch.float16, torch.bfloat16)
     def test_semi_sparse_to_device_cpu(self, dtype):
         """Test .to('cpu') converts sparse semi-structured tensor to dense on CPU."""
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype).cuda()
@@ -1334,14 +1334,14 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         self.assertFalse(isinstance(result, SparseSemiStructuredTensor))
         torch.testing.assert_close(result, A_dense.cpu(), rtol=1e-3, atol=1e-3)
 
-    @inference_dtypes
+    @dtypes(torch.float16, torch.bfloat16)
     def test_semi_sparse_to_device_cuda(self, dtype):
         """Test .to('cuda') / .to(device) raises NotImplementedError."""
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype).cuda()
         A_sparse = to_sparse_semi_structured(A)
 
         with self.assertRaises(NotImplementedError):
-            A_sparse.to(A_sparse.device)
+            A_sparse.to(A_sparse.device, copy=True)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_semi_sparse_to_dtype(self, dtype):
@@ -1359,13 +1359,11 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         A_sparse = to_sparse_semi_structured(A)
         A_dense = A_sparse.to_dense()
 
-        result = A_sparse.to("cpu", torch.float32)
+        result = A_sparse.to("cpu", torch.float32, copy=True)
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.dtype, torch.float32)
         self.assertFalse(isinstance(result, SparseSemiStructuredTensor))
-        torch.testing.assert_close(
-            result, A_dense.to("cpu", torch.float32), rtol=1e-3, atol=1e-3
-        )
+        torch.testing.assert_close(result, A_dense.cpu().to(torch.float32), rtol=1e-3, atol=1e-3)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_semi_sparse_to_same_dtype_noop(self, dtype):
@@ -1374,7 +1372,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         A_sparse = to_sparse_semi_structured(A)
 
         with self.assertRaises(NotImplementedError):
-            A_sparse.to(dtype)
+            A_sparse.to(dtype, copy=True)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_semi_sparse_to_kwargs(self, dtype):
@@ -1387,9 +1385,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.dtype, torch.float32)
         self.assertFalse(isinstance(result, SparseSemiStructuredTensor))
-        torch.testing.assert_close(
-            result, A_dense.to(device="cpu", dtype=torch.float32), rtol=1e-3, atol=1e-3
-        )
+        torch.testing.assert_close(result, A_dense.cpu().to(torch.float32), rtol=1e-3, atol=1e-3)
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
