@@ -62,6 +62,9 @@ def _make_script_builder_class():
             )
             return self
 
+        def add_debug_session(self) -> LumenScriptBuilder:
+            return self._add_script("debug_session", "debug_session")
+
     return LumenScriptBuilder
 
 
@@ -92,14 +95,14 @@ def submit_command(
         + bootstrap
         + ["run_script", "upload_outputs"]
     )
+    if idle_timeout:
+        modules_list.append("debug_session")
     seen: set[str] = set()
     modules = [m for m in modules_list if not (m in seen or seen.add(m))]
 
+    env = {"REPO_URL": resolved["repo"], "COMMIT_SHA": resolved["sha"]}
     if idle_timeout:
-        command = (
-            f"{command}; echo '\\n=== Job finished. Container idle for"
-            f" {idle_timeout}m. ==='; sleep {idle_timeout * 60}"
-        )
+        env["IDLE_TIMEOUT"] = str(idle_timeout * 60)
 
     step = StepConfig(
         name=name,
@@ -107,7 +110,7 @@ def submit_command(
         task_type="cpu-large",
         image=image,
         runner_modules=modules,
-        env_vars={"REPO_URL": resolved["repo"], "COMMIT_SHA": resolved["sha"]},
+        env_vars=env,
     )
 
     client = K8sClient(K8sConfig(namespace="remote-execution-system", timeout=60))
