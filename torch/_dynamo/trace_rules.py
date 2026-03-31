@@ -34,11 +34,12 @@ import random
 import re
 import sys
 import types
+import typing
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch._inductor.test_operators
@@ -1425,9 +1426,12 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.parse_ir",
         "torch._C.parse_schema",
         "torch._C.parse_type_comment",
+        "torch._C.read_vitals",
         "torch._C.set_autocast_cache_enabled",
         "torch._C.set_autocast_enabled",
+        "torch._C.set_vital",
         "torch._C.unify_type_list",
+        "torch._C.vitals_enabled",
         "torch._C.wait",
         "torch._cast_Byte",
         "torch._cast_Char",
@@ -3178,11 +3182,6 @@ def _builtin_function_ids() -> dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
-    rv.update(
-        {
-            id(cast): "typing.cast",
-        }
-    )
     return rv
 
 
@@ -3902,6 +3901,12 @@ def check_verbose(
         filename = getfile(obj)
         assert filename is not None
         fi = FunctionInfo(obj, None, filename, None)
+
+    # typing.cast is a polyfilled no-op, but unlike C builtins it has a code
+    # object that PEP 523 can intercept as a standalone frame after a graph
+    # break. Skip it at the top level to avoid installing unnecessary guards.
+    if fi.code is not None and fi.code is typing.cast.__code__:
+        return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
