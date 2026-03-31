@@ -1,109 +1,50 @@
-"""Example logging utilities using leaf_function's register_hook.
+"""Compile-safe backward gradient logging for multiple tensors.
 
-``debug_log`` and ``debug_log_rank`` log tensor norms during forward and
-gradients during backward. Both are leaf functions, so they are opaque to
-the compiler and work with eager, torch.compile with aot_eager backend, and make_fx.
+``debug_grad_log`` logs gradient norms during backward for one or more tensors.
+It is a leaf function with a ``register_multi_grad_hook`` that fires exactly
+once when all requires_grad tensor inputs have their gradients computed.
 
-Backward logging is implemented via ``register_hook`` on the leaf
-function, which fires exactly once when all requires_grad tensor inputs have
-their gradients computed.
+For **forward** logging, use ``torch._higher_order_ops.print`` directly —
+it already supports format strings, DTensor, and Inductor codegen.
 
 Works with eager, torch.compile's aot_eager backend, and make_fx tracing.
 
-Writing custom logging with the same pattern
-=============================================
-
-To create your own compile-safe logging function, follow this three-step
-pattern:
-
-1. Define the forward function with ``@leaf_function``. It receives the
-   tensor and any extra arguments, performs the logging, and returns ``None``.
-2. Register a fake implementation with ``@fn.register_fake`` that returns
-   ``None`` (no tensor output to trace).
-3. Register a backward hook with ``@fn.register_hook``. The hook has the
-   same signature, but each tensor argument receives the gradient instead
-   of the original value. The hook must return ``None``.
-
 Example::
 
-    from torch._dynamo.decorators import leaf_function
+    import torch
+    import torch._higher_order_ops
+    from torch.utils.debug_log import debug_grad_log
 
+    x = torch.randn(4, requires_grad=True)
+    y = torch.randn(4, requires_grad=True)
+    z = x * 2 + y * 3
 
-    @leaf_function
-    def my_log(t, label):
-        print(f"[{label}][fwd] mean={t.mean().item():.4f}")
-        return None
+    # Forward logging — use HOP print directly
+    torch._higher_order_ops.print("fwd: x_norm={} y_norm={}", x.norm(), y.norm())
 
+    # Backward gradient logging — fires once when all grads are ready
+    debug_grad_log("layer1", x, y)
 
-    @my_log.register_fake
-    def my_log_fake(t, label):
-        return None
-
-
-    @my_log.register_hook
-    def my_log_hook(t_grad, label):
-        print(f"[{label}][bwd] mean={t_grad.mean().item():.4f}")
-
-
-    # Usage (works in eager, torch.compile with aot_eager backend, and make_fx):
-    y = x * 2
-    my_log(y, "after_linear")  # logs fwd on call, bwd when y's grad is computed
-
-The tensor passed to the logging function must have its gradient computed
-during backward for the hook to fire. This means it must be on the path
-from the input to the loss.
+    z.sum().backward()
+    # Logs: [rank 0][layer1][bwd] t0_grad_norm=... t1_grad_norm=...
 """
 
 import logging
 
-import torch
-import torch._higher_order_ops
 import torch.distributed as dist
 from torch._dynamo.decorators import leaf_function
 
 
+__all__ = ["debug_grad_log"]
+
 log = logging.getLogger(__name__)
 
 
-@leaf_function
-def debug_log(t, tag):
-    """Log tensor norm to stdout during forward and backward.
-
-    Prints ``[tag][fwd] norm=...`` on the forward call and
-    ``[tag][bwd] norm=...`` when the tensor's gradient is computed.
-
-    Args:
-        t: Tensor to inspect. Must be on the path from input to loss
-            for the backward hook to fire.
-        tag: String label included in the log output.
-
-    Returns:
-        None. Call without assignment: ``debug_log(y, "my_tag")``.
-
-    Example::
-
-        >>> x = torch.randn(4, requires_grad=True)
-        >>> y = x * 2
-        >>> debug_log(y, "after_mul")
-        [after_mul][fwd] norm=...
-        >>> y.sum().backward()
-        [after_mul][bwd] norm=...
-    """
-    torch._higher_order_ops.print("[{}][fwd] norm={}", tag, t.norm())
-    return None
+def _get_rank() -> int:
+    return dist.get_rank() if dist.is_initialized() else 0
 
 
-@debug_log.register_fake  # pyrefly: ignore[missing-attribute]
-def debug_log_fake(t, tag):
-    return None
-
-
-@debug_log.register_hook  # pyrefly: ignore[missing-attribute]
-def debug_log_hook(t_grad, tag):
-    torch._higher_order_ops.print("[{}][bwd] norm={}", tag, t_grad.norm())
-
-
-def _should_log(ranks):
+def _should_log(ranks: int | list[int] | None) -> bool:
     if ranks is None:
         return True
     if not dist.is_initialized():
@@ -114,48 +55,49 @@ def _should_log(ranks):
     return current_rank in ranks
 
 
-def _get_rank():
-    return dist.get_rank() if dist.is_initialized() else 0
-
-
 @leaf_function
-def debug_log_rank(t, tag, ranks=None):
-    """Log tensor norm via Python logging with optional rank filtering.
+def debug_grad_log(tag, *tensors, ranks=None):
+    """Log gradient norms of multiple tensors during backward.
 
-    Logs ``[rank R][tag][fwd] norm=...`` on the forward call and
-    ``[rank R][tag][bwd] norm=...`` when the tensor's gradient is computed.
-    Uses the ``torch.utils.debug_log`` logger at INFO level.
+    This is a no-op in the forward pass. During backward, the hook fires
+    exactly once when all requires_grad tensor inputs have their gradients
+    computed, and logs ``[rank R][tag][bwd] t0_grad_norm=... t1_grad_norm=...``.
+
+    For forward logging, use ``torch._higher_order_ops.print`` directly.
 
     Args:
-        t: Tensor to inspect. Must be on the path from input to loss
-            for the backward hook to fire.
         tag: String label included in the log output.
+        *tensors: One or more tensors to monitor. Each must require grad and
+            be on the path from input to loss for its gradient to be available.
         ranks: Which distributed ranks should log. ``None`` logs on all
             ranks, an ``int`` logs on that rank only, and a collection of
             ints logs on those ranks. When ``torch.distributed`` is not
             initialized, logging always occurs.
 
     Returns:
-        None. Call without assignment: ``debug_log_rank(y, "fc1", ranks=0)``.
+        None. Call without assignment: ``debug_grad_log("fc1", x, y)``.
 
     Example::
 
         >>> x = torch.randn(4, requires_grad=True)
-        >>> y = x * 2
-        >>> debug_log_rank(y, "fc1", ranks=0)  # logs only on rank 0
-        >>> y.sum().backward()
+        >>> y = torch.randn(4, requires_grad=True)
+        >>> z = x * 2 + y * 3
+        >>> debug_grad_log("inputs", x, y)
+        >>> z.sum().backward()
+        [rank 0][inputs][bwd] t0_grad_norm=... t1_grad_norm=...
     """
-    if _should_log(ranks):
-        log.info("[rank %d][%s][fwd] norm=%s", _get_rank(), tag, t.norm().item())
     return None
 
 
-@debug_log_rank.register_fake  # pyrefly: ignore[missing-attribute]
-def debug_log_rank_fake(t, tag, ranks=None):
+@debug_grad_log.register_fake  # pyrefly: ignore[missing-attribute]
+def debug_grad_log_fake(tag, *tensors, ranks=None):
     return None
 
 
-@debug_log_rank.register_hook  # pyrefly: ignore[missing-attribute]
-def debug_log_rank_hook(t_grad, tag, ranks=None):
+@debug_grad_log.register_multi_grad_hook  # pyrefly: ignore[missing-attribute]
+def debug_grad_log_hook(tag, *grads, ranks=None):
     if _should_log(ranks):
-        log.info("[rank %d][%s][bwd] norm=%s", _get_rank(), tag, t_grad.norm().item())
+        norms = " ".join(
+            f"t{i}_grad_norm={g.norm().item():.4f}" for i, g in enumerate(grads)
+        )
+        log.info("[rank %d][%s][bwd] %s", _get_rank(), tag, norms)
