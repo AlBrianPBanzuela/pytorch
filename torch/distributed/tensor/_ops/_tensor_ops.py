@@ -1214,10 +1214,17 @@ def _index_dim_strategy(
 def index_fill_scalar_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # Scalar fill: avg/max/min work (reduce(v,v)=v), but sum does NOT (sum(v,v)=2v).
+    # index_fill(self, dim, index, value) — fills self[..., index, ...] with scalar value.
+    # Partial rules: each rank fills with the same scalar v, then reduces.
+    # Only idempotent reduces work: avg(v,v,...,v)=v, max(v,v,...,v)=v, min(v,v,...,v)=v.
+    # sum and product fail: sum(v,v,...,v)=nv, product(v,v,...,v)=v^n.
     return _index_dim_strategy(
         args_schema,
-        lambda d: [_ShardingPlaceholder(d), _ShardingPlaceholder(d), Replicate()],
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # value (scalar, same on all ranks)
+        ],
         [[Partial(op), Partial(op), Replicate()] for op in ("avg", "max", "min")],
     )
 
@@ -1229,19 +1236,21 @@ def index_fill_scalar_single_dim_strategy(
 def index_fill_tensor_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # Tensor fill: replacement op, all reduce types valid. Value tensor is Replicate
-    # in shard strategies because it's a 0-dim tensor that can't be sharded.
+    # index_fill(self, dim, index, value) — fills self[..., index, ...] with 0-d tensor value.
+    # Partial rules: each rank fills with its partial value v_i, then reduces.
+    # All reduce ops work because reduce(v_0, ..., v_{n-1}) = V (the global value)
+    # regardless of op, since fill is a pure replacement (no mixing with self).
     return _index_dim_strategy(
         args_schema,
         lambda d: [
-            _ShardingPlaceholder(d),
-            _ShardingPlaceholder(d),
-            Replicate(),
-            Replicate(),
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # index
+            Replicate(),  # value
         ],
         [
             [Partial(op), Partial(op), Replicate(), Partial(op)]
-            for op in ("sum", "avg", "max", "min")
+            for op in Partial.ALL_REDUCE_OPS
         ],
     )
 
@@ -1253,13 +1262,16 @@ def index_fill_tensor_single_dim_strategy(
 def index_reduce_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_reduce(self, dim, index, source, reduce) — reduces source into self at index positions.
+    # No partial rules: reduce ops are "mean"/"amax"/"amin"/"prod", which don't match
+    # any Partial reduce op names ("avg"/"max"/"min"/"product"/"sum").
     return _index_dim_strategy(
         args_schema,
         lambda d: [
-            _ShardingPlaceholder(d),
-            _ShardingPlaceholder(d),
-            Replicate(),
-            _ShardingPlaceholder(d),
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # index
+            _ShardingPlaceholder(d),  # source
         ],
     )
 
