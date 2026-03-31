@@ -4418,7 +4418,7 @@ class Scheduler:
                             fusion_log.debug(  # noqa: G200
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
-                                str(e),
+                                e,
                             )
                         continue
                     with multi_node.swap_as_triton_caller(choice):
@@ -4553,7 +4553,7 @@ class Scheduler:
                             fusion_log.debug(  # noqa: G200
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
-                                str(e),
+                                e,
                             )
                         continue
 
@@ -7514,6 +7514,12 @@ class Scheduler:
                     )
 
             self.enter_context(node)
+
+            # pyrefly: ignore [unbound-name]
+            if config.size_asserts:
+                V.graph.wrapper_code.codegen_deferred_input_asserts(
+                    dep.name for dep in node.read_writes.reads
+                )
 
             if device := node.get_device():
                 if (
