@@ -299,14 +299,14 @@ class BaseListVariable(VariableTracker):
             else:
                 value = args[0]
 
-            if value.python_type() not in (int, slice):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"indices must be integers or slices, not {value.python_type()}"
-                    ],
-                )
+            try:
+                value_type = value.python_type()
+            except NotImplementedError:
+                value_type = None
+            if value_type not in (int, bool, slice):
+                # CPython: list.__getitem__ calls PyNumber_AsSsize_t which
+                # invokes nb_index to convert the key to an int.
+                value = value.nb_index_impl(tx)
 
             return self.getitem_const(tx, value)
         elif name == "__contains__":
