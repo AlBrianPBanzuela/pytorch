@@ -3448,7 +3448,7 @@ class TestUtils(TestCase):
         with tempfile.TemporaryDirectory() as custom_dir:
             os.environ["TORCHINDUCTOR_CACHE_DIR"] = custom_dir
             try:
-                with fresh_cache(delete=False):
+                with fresh_cache(delete=False, reuse_cache_dir=True):
                     actual = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
                     self.assertEqual(
                         normalize_path_separator(actual),
@@ -3461,12 +3461,26 @@ class TestUtils(TestCase):
         with tempfile.TemporaryDirectory() as custom_dir:
             os.environ["TORCHINDUCTOR_CACHE_DIR"] = custom_dir
             try:
-                with fresh_cache():
+                with fresh_cache(reuse_cache_dir=True):
                     pass
                 self.assertTrue(
                     os.path.isdir(custom_dir),
                     "fresh_cache should not delete a user-provided cache dir",
                 )
+            finally:
+                os.environ.pop("TORCHINDUCTOR_CACHE_DIR", None)
+
+    def test_fresh_cache_ignores_env_by_default(self):
+        with tempfile.TemporaryDirectory() as custom_dir:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = custom_dir
+            try:
+                with fresh_cache(delete=False):
+                    actual = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+                    self.assertIsNotNone(actual)
+                    self.assertNotEqual(
+                        normalize_path_separator(actual),
+                        normalize_path_separator(custom_dir),
+                    )
             finally:
                 os.environ.pop("TORCHINDUCTOR_CACHE_DIR", None)
 

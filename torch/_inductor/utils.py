@@ -1329,18 +1329,23 @@ def fresh_cache(
     cache_entries: dict[str, Any] | None = None,
     dir: str | None = None,
     delete: bool = True,
+    reuse_cache_dir: bool = False,
 ) -> Iterator[None]:
     """
     Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
+
+    If reuse_cache_dir is True and TORCHINDUCTOR_CACHE_DIR is already set,
+    the existing directory is used instead of creating a new temporary one.
+    The caller is responsible for managing the lifecycle of that directory.
     """
     clear_caches()
 
     from torch._inductor.cpp_builder import normalize_path_separator
 
-    user_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    user_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR") if reuse_cache_dir else None
     if user_cache_dir is not None:
         inductor_cache_dir = normalize_path_separator(user_cache_dir)
         created_temp_dir = False
@@ -1384,9 +1389,7 @@ def fresh_cache(
             )
     except Exception:
         if created_temp_dir:
-            log.warning(
-                "on error, temporary cache dir kept at %s", inductor_cache_dir
-            )
+            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
     finally:
         clear_caches()
