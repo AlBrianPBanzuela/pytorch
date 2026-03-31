@@ -33,7 +33,13 @@ from functools import lru_cache, partial
 from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
-from types import BuiltinFunctionType, BuiltinMethodType, FunctionType, MethodType, ModuleType
+from types import (
+    BuiltinFunctionType,
+    BuiltinMethodType,
+    FunctionType,
+    MethodType,
+    ModuleType,
+)
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
@@ -491,13 +497,17 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
 # Types that pickle handles natively via GLOBAL/INST opcodes even though their
 # __reduce_ex__ may raise TypeError. We must not treat these as unpicklable in
 # reducer_override to avoid infinite recursion.
-_PICKLE_NATIVE_TYPES = frozenset({
-    FunctionType,
-    BuiltinFunctionType,
-    BuiltinMethodType,
-    MethodType,
-    type,
-})
+_PICKLE_NATIVE_TYPES = frozenset(
+    OrderedSet(
+        [
+            FunctionType,
+            BuiltinFunctionType,
+            BuiltinMethodType,
+            MethodType,
+            type,
+        ]
+    )
+)
 
 
 def _get_stable_obj_key(obj: object) -> str:
@@ -568,12 +578,13 @@ class FxGraphCachePickler(pickle.Pickler):
             )
 
         # Track types whose __reduce_ex__ raises TypeError so we only probe once per type.
-        self._unpicklable_types: set[type] = set()
+        self._unpicklable_types: OrderedSet[type] = OrderedSet()
 
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
         self.fast = True
 
+    # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
         """Fallback reducer for objects not registered in dispatch_table.
 
