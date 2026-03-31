@@ -375,7 +375,7 @@ jobs:
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]] || [[ $TEST_CONFIG == 'onnx' ]]; then
             TEST_COMMAND=.ci/onnx/test.sh
           else
             TEST_COMMAND=.ci/pytorch/test.sh
@@ -747,7 +747,7 @@ jobs:
 
           if [[ "${TEST_CONFIG}" == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ "${BUILD_ENVIRONMENT}" == *onnx* ]]; then
+          elif [[ "${BUILD_ENVIRONMENT}" == *onnx* ]] || [[ "${TEST_CONFIG}" == 'onnx' ]]; then
             TEST_COMMAND=.ci/onnx/test.sh
           else
             TEST_COMMAND=.ci/pytorch/test.sh
