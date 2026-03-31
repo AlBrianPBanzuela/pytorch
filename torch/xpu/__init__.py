@@ -47,15 +47,7 @@ _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _lazy_seed_tracker = _LazySeedTracker()
 default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 _cached_device_count: int | None = None
-_HAS_PYZES = False
-
-
-try:
-    import pyzes  # type: ignore[import]
-
-    _HAS_PYZES = True
-except ImportError:
-    pass
+_HAS_PYZES: bool | None = None  # None = not yet attempted; True/False after first call
 
 
 def _is_compiled() -> bool:
@@ -129,6 +121,14 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
     """
     from ctypes import byref, c_uint32
 
+    global _HAS_PYZES
+    if _HAS_PYZES is None:
+        try:
+            import pyzes  # type: ignore[import]
+
+            _HAS_PYZES = True
+        except ImportError:
+            _HAS_PYZES = False
     if not _HAS_PYZES:
         return -1
 
