@@ -258,6 +258,7 @@ dtensor_fails = {
 }
 
 dtensor_multi_threaded_fails = {
+    xfail("index_fill"),
     xfail("full_like"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
@@ -392,8 +393,6 @@ dtensor_fails_no_strategy = {
     xfail("grid_sampler_2d"),
     xfail("histogram"),
     xfail("histogramdd"),
-    xfail("index_add"),
-    xfail("index_copy"),
     xfail("isin"),
     xfail("linalg.matrix_power"),
     xfail("linalg.tensorsolve"),
