@@ -635,17 +635,23 @@ def _handle_call_function_node_with_lowering(
         _set_shape_types(outputs, node.meta["val"], complex_to_float=True)
         node_name_to_values[node.name] = outputs
         for i, output in enumerate(outputs):
-            output.name = f"{node.name}__{i}"
-            # Set the name of the producing node using the value name for correspondence
+            # Only rename if it's a newly produced value, not an existing input/placeholder.
+            # When an ONNX op returns an existing value (e.g. identity passthrough),
+            # renaming it would corrupt the original value's name.
             producer = output.producer()
             if producer is not None:
+                output.name = f"{node.name}__{i}"
                 producer.name = f"node_{output.name}"
     else:
         _set_shape_type(outputs, node.meta["val"], complex_to_float=True)
         node_name_to_values[node.name] = outputs
-        outputs.name = node.name
+        # Only rename if it's a newly produced value, not an existing input/placeholder.
+        # When an ONNX op returns an existing value (e.g. CastLike with same dtype
+        # returns the src value directly), renaming it would corrupt the original
+        # value's name and break initializer registration.
         producer = outputs.producer()
         if producer is not None:
+            outputs.name = node.name
             producer.name = f"node_{outputs.name}"
 
     for ir_node in onnx_nodes:

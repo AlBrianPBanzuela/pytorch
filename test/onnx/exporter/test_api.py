@@ -439,6 +439,26 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_register_buffer_with_inplace_copy_export(self):
+        # Regression test: ExportedProgram with register_buffer + in-place copy
+        # should not raise ValueError due to renaming of existing placeholder IR values.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("prompt_feat", torch.zeros(1, 4, 8))
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                out = torch.zeros(1, 4, 8)
+                out[:, :, :] = self.prompt_feat.to(x.device)
+                return self.linear(out + x)
+
+        model = Model().eval()
+        x = torch.randn(1, 4, 8)
+        ep = torch.export.export(model, (x,))
+        onnx_program = torch.onnx.export(ep, args=(x,), dynamo=True)
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 class TestCustomTranslationTable(common_utils.TestCase):
     def test_custom_translation_table_overrides_ops(self):
