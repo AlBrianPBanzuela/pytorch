@@ -481,6 +481,15 @@ class ViewAndMutationMeta:
 
     # Number of opaque objects saved for backward
     num_opaque_objects_saved_for_bw: int | None = None
+
+    # Number of DeviceMesh get_attr nodes hoisted to placeholders in the joint
+    # graph. These become extra primals whose values are derived at runtime from
+    # the parent DeviceMesh already present among the function args (via Dynamo
+    # hoisting + DTensor flatten). The wrapper uses hoisted_device_mesh_info to
+    # know which submeshes to derive.
+    num_hoisted_device_meshes: int = 0
+    hoisted_device_mesh_info: list[dict[str, Any]] = field(default_factory=list)
+
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
