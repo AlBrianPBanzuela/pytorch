@@ -678,6 +678,11 @@ class AutogradCompilerInstance:
                 opaque_object_indices,
             )
         else:
+            if getattr(ctx._forward_cls, "boxed_grads_call", False):  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    f"boxed_grads_call=True on {ctx._forward_cls.__name__} "  # type: ignore[attr-defined]
+                    "is not supported with compiled autograd. "
+                )
             proxies = self.fx_tracer.create_proxy(
                 kind="call_function",
                 target=call_backward,

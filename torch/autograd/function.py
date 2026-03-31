@@ -314,7 +314,11 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
                 "of them."
             )
         user_fn = vjp_fn if vjp_fn is not Function.vjp else backward_fn
-        # When boxed_grads_call is True, backward expects args boxed into list
+        # When boxed_grads_call is True, backward expects grads as a single
+        # mutable list. The C++ engine path already boxes grads
+        # before calling apply. The direct .apply() path (e.g.
+        # grad_fn.apply(None, tensor)) does not, so we box here.
+        # The isinstance guard prevents double-boxing when C++ already boxed.
         fwd_cls = self._forward_cls  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
         if getattr(fwd_cls, "boxed_grads_call", False):
             if not (len(args) == 1 and isinstance(args[0], list)):
