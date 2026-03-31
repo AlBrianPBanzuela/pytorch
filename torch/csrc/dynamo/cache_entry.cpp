@@ -16,9 +16,6 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   } else {
     this->trace_annotation = "Unknown";
   }
-  if (py::hasattr(guarded_code, "region_id")) {
-    this->region_id = guarded_code.attr("region_id").cast<int64_t>();
-  }
   this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
       this->guard_manager.attr("root"));
   this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
@@ -38,10 +35,10 @@ C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 py::object CacheEntry::next() {
-  NULL_CHECK(this->_owner);
+  NULL_CHECK(this->_owner_list);
   auto it = this->_owner_loc;
   ++it;
-  if (it == this->_owner->cache_entry_list.end()) {
+  if (it == this->_owner_list->end()) {
     return py::none();
   }
   return py::cast(*it, py::return_value_policy::reference);

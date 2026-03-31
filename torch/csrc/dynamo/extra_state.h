@@ -9,6 +9,7 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <unordered_map>
 
 namespace py = pybind11;
 
@@ -60,15 +61,17 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // function.
   PyCodeObject* orig_code;
   std::list<PrecompileEntry> precompile_entries;
-  // List of cache entries for compiled code objects
-  std::list<CacheEntry> cache_entry_list;
+  // Per-region cache: region_id -> list of CacheEntry.
+  // region_id -1 is the global (non-isolated) region.
+  std::unordered_map<int64_t, std::list<CacheEntry>> region_cache_map;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
   // Actions to apply to all frames with this code object
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
 
   ExtraState(PyCodeObject* orig_code_arg);
-  CacheEntry* get_first_entry();
+  std::list<CacheEntry>& get_or_create_region_list(int64_t region_id);
+  bool has_any_cache_entries() const;
   void move_to_front(CacheEntry* cache_entry);
   void move_to_back(CacheEntry* cache_entry);
   void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
@@ -81,13 +84,14 @@ typedef struct PrecompileEntry PrecompileEntry;
 
 #endif
 
-// Helper to extra the cache_entry from the extra state.
+// Helper to extract the first cache_entry for a given region.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
+//  - region_id: The region to extract from
 // return
 //  - CacheEntry: Borrowed.
-CacheEntry* extract_cache_entry(ExtraState* extra_state);
+CacheEntry* extract_cache_entry(ExtraState* extra_state, int64_t region_id);
 
 // Returns either the previously stored frame state or an empty dict.
 // Ownership contract

@@ -519,8 +519,8 @@ PyObject* dynamo__custom_eval_frame(
   // at all; these reduces overtriggering and we don't need to do guard
   // collectives the very first time we've seen a frame
   // TODO: We could also check if we had just created extra for the first
-  // time?  Not too sure the best condition for extra->cache_entry_list
-  if (guard_complete_hook != nullptr && !extra->cache_entry_list.empty()) {
+  // time?  Not too sure the best condition for extra->region_cache_map
+  if (guard_complete_hook != nullptr && extra->has_any_cache_entries()) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
     py::object res = guard_complete_hook_handle(maybe_cached_code != Py_None);
@@ -555,7 +555,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // call callback
-  CacheEntry* cache_entry = extract_cache_entry(extra);
+  CacheEntry* cache_entry = extract_cache_entry(extra, region_id);
   FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
   FrameExecStrategy new_strategy;
