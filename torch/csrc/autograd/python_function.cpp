@@ -163,18 +163,31 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   inputs.clear();
 
   if (py_fn->boxed_grads_call) {
-    // Move grad tensors from the immutable args tuple into a mutable Python
-    // list and pass it as a single argument. This lets backward pop/clear
-    // individual grads to free memory mid-execution.
+    // Move grad tensors from the immutable args tuple into a mutable
+    // _BoxedGradList (a list subclass marker type) and pass it as a single
+    // argument. This lets backward pop/clear individual grads to free memory
+    // mid-execution. _BoxedGradList is used so BackwardCFunction.apply can
+    // distinguish C++-boxed grads from user-provided plain lists.
     Py_ssize_t n = PyTuple_GET_SIZE(pyInputs.get());
-    THPObjectPtr gradsList(PyList_New(n));
+
+    // Get _BoxedGradList type from torch.autograd.function
+    static PyObject* boxed_grad_list_cls = nullptr;
+    if (!boxed_grad_list_cls) {
+      THPObjectPtr module(PyImport_ImportModule("torch.autograd.function"));
+      if (!module)
+        throw_python_error();
+      boxed_grad_list_cls =
+          PyObject_GetAttrString(module.get(), "_BoxedGradList");
+      if (!boxed_grad_list_cls)
+        throw_python_error();
+    }
+
+    // Create _BoxedGradList from the args tuple items
+    THPObjectPtr gradsList(
+        PyObject_CallOneArg(boxed_grad_list_cls, pyInputs.get()));
     if (!gradsList)
       throw_python_error();
-    for (Py_ssize_t i = 0; i < n; i++) {
-      PyObject* item = PyTuple_GET_ITEM(pyInputs.get(), i);
-      Py_INCREF(item);
-      PyList_SET_ITEM(gradsList.get(), i, item);
-    }
+
     // Replace pyInputs with a single-element tuple containing the grads list
     THPObjectPtr boxedArgs(PyTuple_New(1));
     if (!boxedArgs)
