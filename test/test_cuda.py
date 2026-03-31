@@ -47,6 +47,8 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
+    has_cusolver,
+    has_hipsolver,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCUDA,
@@ -744,12 +746,16 @@ print(t.is_pinned())
             _check_default()
 
     def test_current_solver_handle(self):
+        if not has_cusolver() and not has_hipsolver():
+            self.skipTest("cuSOLVER/hipSOLVER not available")
         try:
             handle = torch.cuda.current_solver_handle()
         except RuntimeError as err:
+            msg = str(err)
             if (
-                "at_cuda_getCurrentCUDASolverDnHandle" in str(err)
-                or "libtorch_cuda_linalg.so" in str(err)
+                "CurrentCUDASolverDnHandle" in msg
+                or "libtorch_cuda_linalg.so" in msg
+                or "libtorch_hip_linalg.so" in msg
             ):
                 self.skipTest(f"cuSOLVER handle is unavailable in this build: {err}")
             raise
