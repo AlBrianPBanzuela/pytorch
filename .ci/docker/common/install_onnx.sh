@@ -14,7 +14,7 @@ retry () {
 # Note: parameterized, pytest-subtests, tabulate, packaging are already
 # installed via requirements-ci.txt
 pip_install \
-  transformers==5.2.0 \
+  transformers==4.36.2 \
   onnxruntime==1.23.1
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
