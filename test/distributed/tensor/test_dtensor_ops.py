@@ -326,7 +326,6 @@ dtensor_compiled_fails = {
     xfail("nn.functional.batch_norm"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
-    xfail("nn.functional.margin_ranking_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
 }
 
@@ -848,6 +847,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.linear"),
     xfail("nn.functional.logsigmoid"),
+    xfail("nn.functional.margin_ranking_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.poisson_nll_loss"),
