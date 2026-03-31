@@ -90,12 +90,12 @@ def debug_grad_log(tag, *tensors, ranks=None):
 
 
 @debug_grad_log.register_fake  # pyrefly: ignore[missing-attribute]
-def debug_grad_log_fake(tag, *tensors, ranks=None):
+def _debug_grad_log_fake(tag, *tensors, ranks=None):
     return None
 
 
 @debug_grad_log.register_multi_grad_hook  # pyrefly: ignore[missing-attribute]
-def debug_grad_log_hook(tag, *grads, ranks=None):
+def _debug_grad_log_hook(tag, *grads, ranks=None):
     if _should_log(ranks):
         norms = " ".join(
             f"t{i}_grad_norm={g.norm().item():.4f}" for i, g in enumerate(grads)
