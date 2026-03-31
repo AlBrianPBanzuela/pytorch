@@ -8665,6 +8665,195 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    def test_custom_function_boxed_grads(self):
+        """Test boxed_grads_call mechanism without torch.compile.
+
+        With boxed_grads_call, backward receives a single mutable list
+        of grads instead of individual grad arguments."""
+
+        class BoxedFunc(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grads):
+                self.assertIsInstance(grads, list)
+                self.assertEqual(len(grads), 1)
+                grad = grads[0]
+                grads.clear()
+                (x,) = ctx.saved_tensors
+                return grad * 2
+
+        x = torch.randn(4, requires_grad=True)
+        out = BoxedFunc.apply(x)
+        out.sum().backward()
+        # d/dx (2x).sum() = 2
+        self.assertEqual(x.grad, torch.full_like(x, 2.0))
+
+    def test_custom_function_boxed_grads_multi_output(self):
+        """Boxed grads with multiple outputs — grads list has one
+        entry per output."""
+
+        class MultiOut(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, grads):
+                self.assertIsInstance(grads, list)
+                self.assertEqual(len(grads), 2)
+                (x,) = ctx.saved_tensors
+                g1, g2 = grads
+                grads.clear()
+                return g1 * 2 + g2 * 3
+
+        x = torch.randn(4, requires_grad=True)
+        a, b = MultiOut.apply(x)
+        (a.sum() + b.sum()).backward()
+        # forward: a=2x, b=3x; backward: grad_a=1, grad_b=1
+        # return grad_a*2 + grad_b*3 = 2+3 = 5
+        self.assertEqual(x.grad, torch.full_like(x, 5.0))
+
+    def test_custom_function_boxed_grads_no_extra_refs(self):
+        """Framework holds no extra refs to grads with boxed calling convention.
+
+        After removing the grad from the boxed list, a weakref to it should
+        become dead — proving the framework released all its refs."""
+
+        result_box = {}
+
+        class CheckRefs(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grads):
+                grad = grads[0]
+                grad_for_compute = grad.clone()
+                ref = weakref.ref(grad)
+                grads.clear()
+                del grad
+                result_box["ref_dead"] = ref() is None
+                (x,) = ctx.saved_tensors
+                return grad_for_compute * 2
+
+        x = torch.randn(4, requires_grad=True)
+        out = CheckRefs.apply(x)
+        out.sum().backward()
+        self.assertEqual(x.grad, torch.full_like(x, 2.0))
+        self.assertTrue(result_box["ref_dead"])
+
+    def test_custom_function_boxed_grads_cleanup_on_error(self):
+        """Grads list is not leaked when backward raises."""
+
+        class FailingBwd(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grads):
+                raise RuntimeError("intentional failure")
+
+        x = torch.randn(4, requires_grad=True)
+        out = FailingBwd.apply(x)
+        with self.assertRaisesRegex(RuntimeError, "intentional failure"):
+            out.sum().backward()
+
+    def test_custom_function_boxed_grads_chain(self):
+        """Two boxed-grads functions chained — each gets its own grads list."""
+
+        call_order = []
+
+        class Mul2(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grads):
+                call_order.append("Mul2")
+                grad = grads[0]
+                grads.clear()
+                (x,) = ctx.saved_tensors
+                return grad * 2
+
+        class Mul3(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 3
+
+            @staticmethod
+            def backward(ctx, grads):
+                call_order.append("Mul3")
+                grad = grads[0]
+                grads.clear()
+                (x,) = ctx.saved_tensors
+                return grad * 3
+
+        x = torch.randn(4, requires_grad=True)
+        out = Mul3.apply(Mul2.apply(x))
+        out.sum().backward()
+        # backward order: Mul3 then Mul2
+        self.assertEqual(call_order, ["Mul3", "Mul2"])
+        # d/dx (3 * 2 * x).sum() = grad 1 → Mul3 bwd: 1*3=3 → Mul2 bwd: 3*2=6
+        self.assertEqual(x.grad, torch.full_like(x, 6.0))
+
+    def test_custom_function_boxed_grads_none_grads(self):
+        """Boxed grads with materialize_grads=False and partial None grads.
+
+        When only some outputs are used in the loss and materialize_grads
+        is False, the grads list contains None for unused outputs. Verify
+        that boxed_grads_call handles this correctly."""
+
+        class TwoOutput(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                ctx.set_materialize_grads(False)
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, grads):
+                self.assertIsInstance(grads, list)
+                self.assertEqual(len(grads), 2)
+                # Only second output is used in loss, first grad is None
+                self.assertIsNone(grads[0])
+                self.assertIsNotNone(grads[1])
+                (x,) = ctx.saved_tensors
+                g2 = grads[1]
+                grads[1] = None
+                return g2 * 3
+
+        x = torch.randn(4, requires_grad=True)
+        a, b = TwoOutput.apply(x)
+        # Only use b in the loss — a gets no gradient
+        b.sum().backward()
+        # forward: b=3x; backward: grad_b=1, return 1*3=3
+        self.assertEqual(x.grad, torch.full_like(x, 3.0))
+
     @skipIfTorchDynamo("dynamo accesses saved_tensors multiple times")
     def test_clear_saved_tensors_on_access(self):
         class MyFn(Function):

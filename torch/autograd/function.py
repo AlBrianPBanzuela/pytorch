@@ -314,6 +314,15 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
                 "of them."
             )
         user_fn = vjp_fn if vjp_fn is not Function.vjp else backward_fn
+        # When boxed_grads_call is True, backward expects grads as a single
+        # mutable list. The C++ engine path already boxes grads
+        # before calling apply. The direct .apply() path (e.g.
+        # grad_fn.apply(None, tensor)) does not, so we box here.
+        # The isinstance guard prevents double-boxing when C++ already boxed.
+        fwd_cls = self._forward_cls  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
+        if getattr(fwd_cls, "boxed_grads_call", False):
+            if not (len(args) == 1 and isinstance(args[0], list)):
+                args = (list(args),)
         return user_fn(self, *args)
 
     def apply_jvp(self, *args):
@@ -457,6 +466,19 @@ class _SingleLevelFunction(
     Default is False.
     """
     clear_saved_tensors_on_access = False
+
+    """
+    Bool that specifies if backward should receive grads as a single mutable
+    list argument instead of individual args in an immutable tuple. This allows
+    backward to free individual grads mid-execution by removing them from the
+    list, reducing peak memory.
+
+    When True, ``backward(ctx, grads)`` receives a single list instead of
+    ``backward(ctx, *grads)``.
+
+    Default is False.
+    """
+    boxed_grads_call = False
 
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
