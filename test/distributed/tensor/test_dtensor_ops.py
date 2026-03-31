@@ -164,6 +164,10 @@ dtensor_fails = {
     # random/stochastic ops: different RNG states between DTensor and reference
     xfail("bernoulli"),
     xfail("cauchy"),
+    xfail("exponential"),
+    xfail("geometric"),
+    xfail("log_normal"),
+    xfail("multinomial"),
     xfail("nn.functional.alpha_dropout"),
     xfail("nn.functional.dropout"),
     xfail("normal"),
@@ -1041,7 +1045,27 @@ class TestUnbackedDTensorOps(TestDTensorOps):
         )
 
 
+# random/stochastic ops: validate_sharding_rule_sample compares values with
+# allclose, which cannot work for ops that produce different random numbers
+# on each shard.
+single_dim_strategy_random_skips = {
+    xfail("bernoulli"),
+    xfail("exponential"),
+    xfail("geometric"),
+    xfail("log_normal"),
+    xfail("multinomial"),
+    xfail("nn.functional.alpha_dropout"),
+    xfail("nn.functional.dropout"),
+    xfail("normal"),
+    xfail("normal", "in_place"),
+    xfail("normal", "number_mean"),
+    xfail("uniform"),
+}
+
+
 class TestSingleDimStrategies(DTensorOpTestBase):
+    _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestSingleDimStrategies")
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1060,7 +1084,13 @@ class TestSingleDimStrategies(DTensorOpTestBase):
         self.skipTest(f"Op {torch_op} failed to extract aten op")
 
     @suppress_warnings
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(_op_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        _op_db,
+        "TestSingleDimStrategies",
+        "test_single_dim_strategy",
+        single_dim_strategy_random_skips,
+    )
     def test_single_dim_strategy(self, dtype, op):
         torch.manual_seed(42)
         mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
