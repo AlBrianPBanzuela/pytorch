@@ -1340,7 +1340,13 @@ def fresh_cache(
 
     from torch._inductor.cpp_builder import normalize_path_separator
 
-    inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
+    user_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if user_cache_dir is not None:
+        inductor_cache_dir = normalize_path_separator(user_cache_dir)
+        created_temp_dir = False
+    else:
+        inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
+        created_temp_dir = True
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
@@ -1360,7 +1366,7 @@ def fresh_cache(
                                 if ".lock" not in f
                             }
                         )
-        if delete:
+        if delete and created_temp_dir:
             if is_windows() and torch.xpu.is_available():
                 unload_xpu_triton_pyds()
 
@@ -1377,7 +1383,10 @@ def fresh_cache(
                 ),
             )
     except Exception:
-        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        if created_temp_dir:
+            log.warning(
+                "on error, temporary cache dir kept at %s", inductor_cache_dir
+            )
         raise
     finally:
         clear_caches()

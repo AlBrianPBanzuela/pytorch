@@ -3444,6 +3444,47 @@ class TestUtils(TestCase):
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
 
+    def test_fresh_cache_respects_user_cache_dir(self):
+        with tempfile.TemporaryDirectory() as custom_dir:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = custom_dir
+            try:
+                with fresh_cache(delete=False):
+                    actual = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+                    self.assertEqual(
+                        normalize_path_separator(actual),
+                        normalize_path_separator(custom_dir),
+                    )
+            finally:
+                os.environ.pop("TORCHINDUCTOR_CACHE_DIR", None)
+
+    def test_fresh_cache_does_not_delete_user_cache_dir(self):
+        with tempfile.TemporaryDirectory() as custom_dir:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = custom_dir
+            try:
+                with fresh_cache():
+                    pass
+                self.assertTrue(
+                    os.path.isdir(custom_dir),
+                    "fresh_cache should not delete a user-provided cache dir",
+                )
+            finally:
+                os.environ.pop("TORCHINDUCTOR_CACHE_DIR", None)
+
+    def test_fresh_cache_creates_temp_dir_when_no_user_setting(self):
+        old = os.environ.pop("TORCHINDUCTOR_CACHE_DIR", None)
+        try:
+            with fresh_cache(delete=False):
+                actual = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+                self.assertIsNotNone(actual)
+                if old is not None:
+                    self.assertNotEqual(
+                        normalize_path_separator(actual),
+                        normalize_path_separator(old),
+                    )
+        finally:
+            if old is not None:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = old
+
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
     @requires_gpu_and_triton
