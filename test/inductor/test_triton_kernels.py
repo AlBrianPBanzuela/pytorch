@@ -29,12 +29,7 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import (
-    parametrize,
-    skipIfRocm,
-    skipIfWindows,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
@@ -1189,7 +1184,7 @@ def forward(self, x_1, output_1):
         num_bufs_allocated = code.count(code_string)
         if (
             inductor_config.cpp_wrapper
-            and inductor_config.triton.autotune_at_compile_time is False
+            and inductor_config.triton.autotune_at_compile_time is not True
         ):
             # Lazy compile emits aoti_torch_empty_strided for scratch space
             # allocation (global_scratch + profile_scratch) per unique kernel wrapper
@@ -3588,7 +3583,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @make_mutation_test
     def test_for_loop_arg_2():
         @triton.jit
@@ -3650,7 +3644,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @make_mutation_test
     def test_while_loop():
         @triton.jit
