@@ -2843,8 +2843,8 @@ class _AOTDispatchAutogradFunctionFactory:
                         )
                     grad_args = flat_args[0]
                 else:
-                    # Non-boxed path that is used by subclasses of CompiledFunction that
-                    # overrides boxed_grads_call to False.
+                    # Non-boxed path: used by subclasses of CompiledFunction
+                    # that override boxed_grads_call to False.
                     grad_args = list(flat_args)
                 del flat_args
                 all_args = _backward_prologue_functional(
