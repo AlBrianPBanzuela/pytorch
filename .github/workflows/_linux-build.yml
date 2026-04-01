@@ -164,7 +164,6 @@ jobs:
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           python-version: ${{ inputs.python-version }}
           compiler: ${{ inputs.compiler }}
@@ -474,10 +473,10 @@ jobs:
     if: github.repository_owner == 'pytorch' && inputs.use-arc
     runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
     container:
-      image: ${{ inputs.docker-image-name }}
+      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
     timeout-minutes: 480
     outputs:
-      docker-image: ${{ inputs.docker-image-name }}
+      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
@@ -552,7 +551,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/build-external-packages@main
         with:
           build-targets: ${{ inputs.build-external-packages }}
-          docker-image: ${{ inputs.docker-image-name }}
+          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 
