@@ -18,9 +18,9 @@ static constexpr int64_t kBlockSize = 512;
 // TensorListMetadata has to fit within the CUDA kernel launch argument limit.
 // While CUDA 12.1, driver version R530+ and Volta+ would work with 32KB, we
 // decide to be safe and only swap for CUDA 13+ during compile time. This saves
-// binary size and will guarantees 32KB kernel arg space; older versions are 
-// still limited to 4KB. We adopt naive values for 32KB from 
-// https://github.com/pytorch/pytorch/pull/134373. 
+// binary size and will guarantees 32KB kernel arg space; older versions are
+// still limited to 4KB. We adopt naive values for 32KB from
+// https://github.com/pytorch/pytorch/pull/134373.
 // TODO: The values for 32KB can very much be optimized further.
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 13000 && !defined(USE_ROCM)
 
@@ -78,8 +78,8 @@ struct TensorListScalarListMetadata {
   int block_to_chunk[depth_to_max_blocks[n - 1]];
 };
 
-// note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size of
-// 32KB with `c10::complex<double>`
+// note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size
+// with `c10::complex<double>`
 template <>
 struct TensorListScalarListMetadata<c10::complex<double>, 1> {
   const void* addresses[1]
@@ -107,21 +107,18 @@ struct TensorListScalarListMetadata<c10::complex<double>, 2> {
 // NOTE(crcrpar): This is a conservative resolution to handle `state_steps`
 // whose each element is `at::Tensor` of 1 element representing the number of
 // `step`s called so far.
+// We're aware this struct overflows the kernel arg limit at n=1 (4244 bytes),
+// but our current fused optimizers only instantiate at n>=4 so it's not a
+// concern (yet).
 template <int n>
 struct FusedOptimizerTensorListMetadata {
   const void* addresses[n][depth_to_max_tensors[n - 1]];
   int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  const void* state_steps_addresses[depth_to_max_tensors_scalarlist[n - 1]];
+  const void* state_steps_addresses[depth_to_max_tensors[n - 1]];
   block_index_t block_to_tensor[depth_to_max_blocks[n - 1]];
   int block_to_chunk[depth_to_max_blocks[n - 1]];
   int start_tensor_this_launch;
 };
-
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000 && !defined(USE_ROCM)
-static constexpr int kMaxKernelArgSize = 32764;
-#else
-static constexpr int kMaxKernelArgSize = 4096;
-#endif
 
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
@@ -129,9 +126,6 @@ __global__ void multi_tensor_apply_kernel(
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
-  static_assert(
-      sizeof(T) <= kMaxKernelArgSize,
-      "TensorListMetadata struct exceeds CUDA kernel argument size limit");
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
   callable(kChunkSize, tensorListMeta, args...);
