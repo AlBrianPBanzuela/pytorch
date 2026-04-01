@@ -30,7 +30,7 @@
 #     - org2/downstream-repo2
 #
 # L3:
-#     - org3/downstream-repo3:@oncall1,oncall2
+#     - org3/downstream-repo3: @oncall1,oncall2
 #
 # L4:
-#     - org4/downstream-repo4:@oncall1,oncall2
+#     - org4/downstream-repo4: @oncall1,oncall2
