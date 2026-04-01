@@ -2022,7 +2022,7 @@ class TestCutlassBackend(TestCase):
         ):
             _ = torch.compile(model)(B)
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @use_evt_config
@@ -2124,7 +2124,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
         self.assertTrue(time.time() - start_time < expected_time)
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2137,7 +2137,7 @@ class TestCutlassBackend(TestCase):
 
         self.run_evt_test(TestModel(), op, shape)
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_bin_ops
@@ -2163,7 +2163,7 @@ class TestCutlassBackend(TestCase):
         )
         torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_un_ops
@@ -2189,7 +2189,7 @@ class TestCutlassBackend(TestCase):
         )
         torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2231,7 +2231,7 @@ class TestCutlassBackend(TestCase):
 
         torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2243,7 +2243,7 @@ class TestCutlassBackend(TestCase):
 
         self.run_evt_test(TestModel(), op, (1024, 512))
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2255,7 +2255,7 @@ class TestCutlassBackend(TestCase):
 
         self.run_evt_test(TestModel(), op, (1024, 1024))  # shape needs to be square
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2292,7 +2292,7 @@ class TestCutlassBackend(TestCase):
             )
             torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     def test_evt_return_accumulator(self):
