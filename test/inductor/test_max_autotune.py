@@ -2956,11 +2956,9 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": r"^triton_mm_",
             }
         ):
-            compiled_mm = torch.compile(mm)
-            result = compiled_mm(a, b)
+            result = torch.compile(mm)(a, b)
 
-        expected = torch.mm(a, b)
-        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(result, torch.mm(a, b), rtol=1e-2, atol=1e-2)
 
     @fresh_cache()
     @skipIfXpu
@@ -2997,11 +2995,9 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": r"^triton_mm_",
             }
         ):
-            compiled_mm = torch.compile(mm)
-            result = compiled_mm(a, b)
+            result = torch.compile(mm)(a, b)
 
-        expected = torch.mm(a, b)
-        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(result, torch.mm(a, b), rtol=1e-2, atol=1e-2)
 
     @fresh_cache()
     @skipIfXpu
