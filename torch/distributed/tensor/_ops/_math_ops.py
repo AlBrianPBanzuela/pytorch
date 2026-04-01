@@ -246,8 +246,14 @@ def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
 # ---------------------------------------------------------------------------
 
 
-class _ShardExceptDimStrategy:
-    """Single-dim strategy that shards on every dim except an active dim.
+def _shard_except_dim_strategy(
+    n_placements: int,
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+    active_dim: int,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Build single-dim strategies that shard on every dim except an active dim.
 
     Used by sort-like ops (sort, topk, cummax, cummin), scan ops (cumsum, cumprod,
     logcumsumexp), and softmax-like ops. All outputs and inputs get the same sharding
@@ -255,28 +261,18 @@ class _ShardExceptDimStrategy:
 
     Args:
         n_placements: Total number of placements per rule (outputs + inputs).
+        active_dim: The dim to exclude from sharding (e.g. sort dim, softmax dim).
     """
-
-    def __init__(self, n_placements: int) -> None:
-        self.n_placements = n_placements
-
-    def __call__(
-        self,
-        op: torch._ops.OpOverload,
-        args_schema: tuple[Any, ...],
-        kwargs_schema: dict[str, Any],
-        active_dim: int,
-    ) -> list[list[Placement | _ShardingPlaceholder]]:
-        input_meta = args_schema[0]
-        if not isinstance(input_meta, TensorMeta):
-            raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
-        ndim = len(input_meta.shape)
-        active_dim = normalize_dim(active_dim, ndim)
-        strategies: list[list[Placement | _ShardingPlaceholder]] = []
-        for d in range(ndim):
-            if d != active_dim:
-                strategies.append([_ShardingPlaceholder(d)] * self.n_placements)
-        return strategies
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+    active_dim = normalize_dim(active_dim, ndim)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d != active_dim:
+            strategies.append([_ShardingPlaceholder(d)] * n_placements)
+    return strategies
 
 
 def _shard_non_reduction_dim(
