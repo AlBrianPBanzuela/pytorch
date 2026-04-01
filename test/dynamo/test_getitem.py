@@ -144,6 +144,111 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
+    # --- UserDefinedObjectVariable ---
+
+    def test_user_defined_object_getitem(self):
+        class Container:
+            def __init__(self, items):
+                self.items = items
+
+            def __getitem__(self, key):
+                return self.items[key]
+
+        def fn(x):
+            c = Container([x, x + 1])
+            return operator.getitem(c, 0)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # --- UserDefinedListVariable ---
+
+    def test_user_defined_list_getitem(self):
+        class MyList(list):
+            pass
+
+        def fn(x):
+            items = MyList([x, x + 1, x + 2])
+            return operator.getitem(items, 1)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # --- UserDefinedDictVariable ---
+
+    def test_user_defined_dict_getitem(self):
+        class MyDict(dict):
+            pass
+
+        def fn(x):
+            d = MyDict(a=x, b=x + 1)
+            return operator.getitem(d, "a")
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_user_defined_dict_missing(self):
+        class MyDict(dict):
+            def __missing__(self, key):
+                return 42
+
+        def fn(x):
+            d = MyDict(a=1)
+            return x + operator.getitem(d, "b")
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_user_defined_dict_custom_missing(self):
+        class DefaultDict(dict):
+            def __missing__(self, key):
+                self[key] = len(self)
+                return self[key]
+
+        def fn(x):
+            d = DefaultDict()
+            d["a"] = 1
+            val = operator.getitem(d, "b")
+            return x + val
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_collections_counter_getitem(self):
+        def fn(x):
+            c = collections.Counter({"a": 1, "b": 2})
+            return x + operator.getitem(c, "a")
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # --- GetAttrVariable (__dict__ access) ---
+
+    def test_getattr_dict_getitem(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                layer = operator.getitem(self.__dict__["_modules"], "linear")
+                return layer(x)
+
+        model = Model()
+        x = torch.randn(4)
+        compiled = torch.compile(model, backend="eager", fullgraph=True)
+        self.assertEqual(model(x), compiled(x))
+
+    # --- TypingVariable ---
+
+    def test_typing_subscript(self):
+        def fn(x):
+            operator.getitem(list, int)
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
