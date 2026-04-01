@@ -3,12 +3,11 @@ from __future__ import annotations
 import heapq
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
 from torch._dynamo.graph_deduplication import _stable_topological_sort
-from torch._inductor import config
 from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
     BucketMode,
@@ -295,7 +294,7 @@ class ManualOverlapScheduler(OverlapScheduler):
 
         self.scheduled = OrderedSet(reversed(list(self.scheduled)))
         picked_ag: list[fx.Node] = []
-        last_compute: Optional[fx.Node] = None
+        last_compute: fx.Node | None = None
 
         for node in self.scheduled:
             node_type = node.meta.get("manual_bucket_node_type", "")
@@ -320,25 +319,6 @@ class ManualOverlapScheduler(OverlapScheduler):
 
         _stable_topological_sort(self.graph, overlap_deps)
         self.graph.lint()
-
-        if config.aten_distributed_optimizations.manual_bucketing_comm_streams:
-            _tag = {
-                "bucketed_all_gather": "ag",
-                "bucketed_all_gather_wait": "ag",
-                "bucketed_reduce_scatter": "rs",
-                "bucketed_reduce_scatter_wait": "rs",
-            }
-            for node in self.graph.nodes:
-                stream = _tag.get(node.meta.get("manual_bucket_node_type", ""))
-                if stream is not None:
-                    node.meta["use_comm_stream"] = stream
-        elif config.aten_distributed_optimizations.manual_bucketing_rs_stream:
-            for node in self.graph.nodes:
-                if (
-                    node.meta.get("manual_bucket_node_type")
-                    == "bucketed_reduce_scatter_wait"
-                ):
-                    node.meta["use_rs_stream"] = True
 
         if self.insert_overlap_deps:
             from torch._inductor.fx_passes.control_dependencies import (
