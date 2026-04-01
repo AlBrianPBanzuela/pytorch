@@ -2712,9 +2712,7 @@ def forward(self, arg0_1, arg1_1):
                 def fn(x):
                     return torch.sin(x @ self.w)
 
-                return checkpoint(
-                    fn, x, use_reentrant=False, context_fn=context_fn
-                )
+                return checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
 
         gm = self._trace_train_step(Model(), torch.randn(2, 4))
 
