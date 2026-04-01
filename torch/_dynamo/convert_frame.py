@@ -577,7 +577,7 @@ def get_compile_id(
     )
 
 
-_next_region_id = itertools.count()
+_next_isolate_recompiles_id = itertools.count()
 
 
 class ConvertFrameAssert:
@@ -589,7 +589,7 @@ class ConvertFrameAssert:
         export_constraints: Any | None = None,
         package: CompilePackage | None = None,
         recompile_limit: int | None = None,
-        isolated_region: bool = False,
+        isolate_recompiles: bool = False,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -599,12 +599,11 @@ class ConvertFrameAssert:
         self._export_constraints = export_constraints
         self._package = package
         self._recompile_limit = recompile_limit
-        self._isolated_region = isolated_region
-        self._region_compilation_counts: dict[int, int] = {}
-        if isolated_region:
-            self._region_id = next(_next_region_id)
+        self._isolate_recompiles = isolate_recompiles
+        if isolate_recompiles:
+            self._isolate_recompiles_id = next(_next_isolate_recompiles_id)
         else:
-            self._region_id = -1
+            self._isolate_recompiles_id = -1
         self._box = ConvertFrameBox()
 
     @property
@@ -615,7 +614,7 @@ class ConvertFrameAssert:
             self._export,
             self._export_constraints,
             recompile_limit=self._recompile_limit,
-            isolated_region=self._isolated_region,
+            isolate_recompiles=self._isolate_recompiles,
         )
 
     def __call__(
@@ -631,10 +630,7 @@ class ConvertFrameAssert:
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
-        cache_size.isolated_region = self._isolated_region
-        cache_size.region_num_compilations = max(
-            self._region_compilation_counts.values(), default=0
-        )
+        cache_size.isolate_recompiles = self._isolate_recompiles
         input_codes.add(code)
         if code in output_codes:
             return ConvertFrameReturn()
@@ -766,16 +762,10 @@ class ConvertFrameAssert:
                     skip=skip + 1,
                     package=self._package,
                     convert_frame_box=self._box,
-                    region_id=self._region_id,
                 )
         finally:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
-
-        if result.guarded_code is not None:
-            self._region_compilation_counts[id(code)] = (
-                self._region_compilation_counts.get(id(code), 0) + 1
-            )
 
         if config.caching_precompile and self._package is not None:
             from .package import DynamoCache
@@ -792,7 +782,7 @@ def convert_frame_assert(
     export_constraints: Any | None = None,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
-    isolated_region: bool = False,
+    isolate_recompiles: bool = False,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
     return ConvertFrameAssert(
@@ -802,7 +792,7 @@ def convert_frame_assert(
         export_constraints,
         package,
         recompile_limit,
-        isolated_region,
+        isolate_recompiles,
     )
 
 
@@ -1533,7 +1523,6 @@ def _compile(
     # Can be used to record things for the caller, both
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
-    region_id: int = -1,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         BisectValidationException,
@@ -1762,7 +1751,6 @@ def _compile(
             check_fn.guard_manager,  # type: ignore[arg-type]
             compile_id,
             annotation_str,
-            region_id=region_id,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -1825,18 +1813,7 @@ def _compile(
             }
             metrics_context.set("recompile_user_contexts", user_contexts_msg)
 
-        if cache_size.isolated_region:
-            # With isolated_region, use per-region compilation count instead
-            # of global num_cache_entries. The C++ region_id isolates cache
-            # lookup; this isolates the limit check.
-            if cache_size.will_compilation_exceed_accumulated_limit():
-                exceeded, limit_type = True, "accumulated_recompile_limit"
-            elif cache_size.region_num_compilations >= config.recompile_limit:
-                exceeded, limit_type = True, "recompile_limit"
-            else:
-                exceeded, limit_type = False, ""
-        else:
-            exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
+        exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
@@ -2153,7 +2130,7 @@ class ConvertFrame:
         hooks: Hooks,
         package: CompilePackage | None = None,
         recompile_limit: int | None = None,
-        isolated_region: bool = False,
+        isolate_recompiles: bool = False,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
@@ -2161,12 +2138,12 @@ class ConvertFrame:
             one_graph=False,
             package=package,
             recompile_limit=recompile_limit,
-            isolated_region=isolated_region,
+            isolate_recompiles=isolate_recompiles,
         )
         self._hooks = hooks
         self._recompile_limit = recompile_limit
-        self._isolated_region = isolated_region
-        self._region_id = self._inner_convert._region_id
+        self._isolate_recompiles = isolate_recompiles
+        self._isolate_recompiles_id = self._inner_convert._isolate_recompiles_id
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
@@ -2174,7 +2151,7 @@ class ConvertFrame:
             backend,
             self._hooks,
             recompile_limit=self._recompile_limit,
-            isolated_region=self._isolated_region,
+            isolate_recompiles=self._isolate_recompiles,
         )
 
     def __call__(
@@ -2293,9 +2270,9 @@ class ConvertFrame:
                 return ConvertFrameReturn(
                     frame_exec_strategy=e.frame_exec_strategy,
                     # Don't apply strategy to the code object when
-                    # isolated_region is set — other regions sharing
+                    # isolate_recompiles is set — other compile calls sharing
                     # this code object should still be able to compile.
-                    apply_to_code=not self._isolated_region,
+                    apply_to_code=not self._isolate_recompiles,
                 )
 
         return ConvertFrameReturn()
@@ -2306,7 +2283,7 @@ def convert_frame(
     hooks: Hooks,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
-    isolated_region: bool = False,
+    isolate_recompiles: bool = False,
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(
@@ -2314,7 +2291,7 @@ def convert_frame(
         hooks,
         package=package,
         recompile_limit=recompile_limit,
-        isolated_region=isolated_region,
+        isolate_recompiles=isolate_recompiles,
     )
 
 

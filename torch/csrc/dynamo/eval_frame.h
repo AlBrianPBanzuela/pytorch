@@ -40,7 +40,7 @@ void clear_old_frame_if_python_312_plus(
 
 void eval_frame_callback_set(PyObject* obj);
 
-int64_t get_current_region_id(void);
+int64_t get_current_isolate_recompiles_id(void);
 
 const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame);
 

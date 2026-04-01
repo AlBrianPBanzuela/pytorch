@@ -28,7 +28,7 @@ typedef struct {
 // static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-static Py_tss_t eval_frame_region_id_key = Py_tss_NEEDS_INIT;
+static Py_tss_t eval_frame_isolate_recompiles_id_key = Py_tss_NEEDS_INIT;
 
 static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -43,21 +43,21 @@ void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-// Store region_id + 1 so NULL (unset) maps to -1.
-int64_t get_current_region_id(void) {
-  void* raw = PyThread_tss_get(&eval_frame_region_id_key);
+// Store isolate_recompiles_id + 1 so NULL (unset) maps to -1.
+int64_t get_current_isolate_recompiles_id(void) {
+  void* raw = PyThread_tss_get(&eval_frame_isolate_recompiles_id_key);
   if (raw == NULL) {
     return -1;
   }
   return (int64_t)((intptr_t)raw) - 1;
 }
 
-static void set_current_region_id(int64_t region_id) {
+static void set_current_isolate_recompiles_id(int64_t id) {
   PyThread_tss_set(
-      &eval_frame_region_id_key, (void*)((intptr_t)(region_id + 1)));
+      &eval_frame_isolate_recompiles_id_key, (void*)((intptr_t)(id + 1)));
 }
 
-static PyObject* set_eval_frame_region_id_py(
+static PyObject* set_eval_frame_isolate_recompiles_id_py(
     PyObject* dummy,
     PyObject* arg) {
   if (!PyLong_Check(arg)) {
@@ -68,8 +68,8 @@ static PyObject* set_eval_frame_region_id_py(
   if (new_id == -1 && PyErr_Occurred()) {
     return NULL;
   }
-  int64_t old_id = get_current_region_id();
-  set_current_region_id(new_id);
+  int64_t old_id = get_current_isolate_recompiles_id();
+  set_current_isolate_recompiles_id(new_id);
   return PyLong_FromLongLong(old_id);
 }
 
@@ -771,7 +771,7 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
-    {"set_eval_frame_region_id", set_eval_frame_region_id_py, METH_O, NULL},
+    {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -797,7 +797,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   int result = PyThread_tss_create(&eval_frame_callback_key);
   CHECK(result == 0);
 
-  result = PyThread_tss_create(&eval_frame_region_id_key);
+  result = PyThread_tss_create(&eval_frame_isolate_recompiles_id_key);
   CHECK(result == 0);
 
   Py_INCREF(Py_None);

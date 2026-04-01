@@ -69,8 +69,6 @@ class GuardedCode:
     guard_manager: GuardFn
     compile_id: CompileId
     trace_annotation: str = "Unknown"
-    # Per-region ID for cache isolation (-1 = no region, shared cache)
-    region_id: int = -1
 
 
 @dataclasses.dataclass

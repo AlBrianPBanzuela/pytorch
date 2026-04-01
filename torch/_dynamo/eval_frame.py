@@ -60,8 +60,8 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
+    set_eval_frame_isolate_recompiles_id,
     set_eval_frame_override,
-    set_eval_frame_region_id,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -762,7 +762,7 @@ class _TorchDynamoContext:
         self.enter_exit_hooks = []
         self._package = package
         self._hooks = hooks
-        self._region_id = getattr(callback, "_region_id", -1)
+        self._isolate_recompiles_id = getattr(callback, "_isolate_recompiles_id", -1)
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -801,7 +801,9 @@ class _TorchDynamoContext:
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
-        self._prior_region_id = set_eval_frame_region_id(self._region_id)
+        self._prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
+            self._isolate_recompiles_id
+        )
         _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(
@@ -813,7 +815,7 @@ class _TorchDynamoContext:
         assert self.prior is not unset
         set_eval_frame(None)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        set_eval_frame_region_id(self._prior_region_id)
+        set_eval_frame_isolate_recompiles_id(self._prior_isolate_recompiles_id)
         for cleanup in self.cleanup_fns:
             cleanup()
         self.cleanup_fns.clear()
@@ -1019,7 +1021,9 @@ class _TorchDynamoContext:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
-                prior_region_id = set_eval_frame_region_id(self._region_id)
+                prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
+                    self._isolate_recompiles_id
+                )
                 prior_error_on_graph_break = None
                 if not self.fullgraph and self.error_on_graph_break is not None:
                     prior_error_on_graph_break = _get_error_on_graph_break()
@@ -1065,7 +1069,7 @@ class _TorchDynamoContext:
                     )
 
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                    set_eval_frame_region_id(prior_region_id)
+                    set_eval_frame_isolate_recompiles_id(prior_isolate_recompiles_id)
                     for cleanup in cleanups:
                         cleanup()
             finally:
@@ -1517,7 +1521,7 @@ def _optimize(
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
-    isolated_region: bool = False,
+    isolate_recompiles: bool = False,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1577,7 +1581,7 @@ def _optimize(
             rebuild_ctx=rebuild_ctx,
             package=package,
             recompile_limit=recompile_limit,
-            isolated_region=isolated_region,
+            isolate_recompiles=isolate_recompiles,
         )
 
     backend = get_compiler_fn(backend)
@@ -1602,7 +1606,7 @@ def _optimize(
             hooks,
             package=package,
             recompile_limit=recompile_limit,
-            isolated_region=isolated_region,
+            isolate_recompiles=isolate_recompiles,
         ),
         hooks,
         backend_ctx_ctor,
@@ -2456,7 +2460,7 @@ def _optimize_assert(
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
-    isolated_region: bool = False,
+    isolate_recompiles: bool = False,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
@@ -2488,7 +2492,7 @@ def _optimize_assert(
             export_constraints=export_constraints,
             package=package,
             recompile_limit=recompile_limit,
-            isolated_region=isolated_region,
+            isolate_recompiles=isolate_recompiles,
         ),
         hooks,
         backend_ctx_ctor,

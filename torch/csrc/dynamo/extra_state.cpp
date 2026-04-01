@@ -30,16 +30,16 @@ CacheEntry* ExtraState::get_first_entry() {
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
     : orig_code(orig_code_arg) {}
 
-std::list<CacheEntry>& ExtraState::get_or_create_region_list(
-    int64_t region_id) {
-  if (region_id < 0) {
+std::list<CacheEntry>& ExtraState::get_or_create_isolate_recompiles_list(
+    int64_t id) {
+  if (id < 0) {
     return this->cache_entry_list;
   }
-  if (!this->region_cache_map) {
-    this->region_cache_map =
+  if (!this->isolate_recompiles_cache_map) {
+    this->isolate_recompiles_cache_map =
         std::make_unique<std::unordered_map<int64_t, std::list<CacheEntry>>>();
   }
-  return (*this->region_cache_map)[region_id];
+  return (*this->isolate_recompiles_cache_map)[id];
 }
 
 bool ExtraState::has_any_cache_entries() const {
@@ -90,16 +90,20 @@ void ExtraState::invalidate(
   Py_DECREF(this->orig_code);
 }
 
-CacheEntry* extract_cache_entry(ExtraState* extra_state, int64_t region_id) {
+CacheEntry* extract_cache_entry(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id) {
   if (extra_state == nullptr) {
     return nullptr;
   }
-  if (region_id < 0) {
+  if (isolate_recompiles_id < 0) {
     return extra_state->get_first_entry();
   }
-  if (extra_state->region_cache_map) {
-    auto it = extra_state->region_cache_map->find(region_id);
-    if (it != extra_state->region_cache_map->end() && !it->second.empty()) {
+  if (extra_state->isolate_recompiles_cache_map) {
+    auto it =
+        extra_state->isolate_recompiles_cache_map->find(isolate_recompiles_id);
+    if (it != extra_state->isolate_recompiles_cache_map->end() &&
+        !it->second.empty()) {
       return &it->second.front();
     }
   }
@@ -219,7 +223,7 @@ void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
-    int64_t region_id,
+    int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
@@ -234,7 +238,7 @@ void lookup(
     }
   }
 
-  if (region_id < 0) {
+  if (isolate_recompiles_id < 0) {
     // Non-isolated: walk the default flat list (zero map overhead)
     found = lookup_in_list(
         extra_state->cache_entry_list,
@@ -248,10 +252,11 @@ void lookup(
       return;
     }
   } else {
-    // Isolated region: look up in the region's bucket
-    if (extra_state->region_cache_map) {
-      auto it = extra_state->region_cache_map->find(region_id);
-      if (it != extra_state->region_cache_map->end()) {
+    // Isolated compile: look up in the isolate_recompiles bucket
+    if (extra_state->isolate_recompiles_cache_map) {
+      auto it = extra_state->isolate_recompiles_cache_map->find(
+          isolate_recompiles_id);
+      if (it != extra_state->isolate_recompiles_cache_map->end()) {
         found = lookup_in_list(
             it->second,
             f_locals,
@@ -268,7 +273,7 @@ void lookup(
 
     // Global fallback: if no hit in the isolated bucket, also check the
     // default cache_entry_list (non-isolated entries). This allows isolated
-    // regions to reuse compilations from non-isolated torch.compile() calls
+    // compiles to reuse compilations from non-isolated torch.compile() calls
     // on the same code object, provided the backend and guards match.
     if (found == nullptr) {
       found = lookup_in_list(
@@ -300,8 +305,8 @@ CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend) {
-  int64_t region_id = get_current_region_id();
-  auto& region_list = extra_state->get_or_create_region_list(region_id);
+  int64_t id = get_current_isolate_recompiles_id();
+  auto& region_list = extra_state->get_or_create_isolate_recompiles_list(id);
   std::list<CacheEntry>::iterator new_iter;
   if (use_lru) {
     region_list.emplace_front(guarded_code, backend);
@@ -335,8 +340,8 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     for (CacheEntry& e : extra->cache_entry_list) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
-    if (extra->region_cache_map) {
-      for (auto& kv : *extra->region_cache_map) {
+    if (extra->isolate_recompiles_cache_map) {
+      for (auto& kv : *extra->isolate_recompiles_cache_map) {
         for (CacheEntry& e : kv.second) {
           result.append(py::cast(e, py::return_value_policy::reference));
         }

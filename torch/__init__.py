@@ -2595,7 +2595,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
-    isolated_region: builtins.bool = False,
+    isolate_recompiles: builtins.bool = False,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2724,7 +2724,7 @@ def compile(
                 options=options,
                 disable=disable,
                 recompile_limit=recompile_limit,
-                isolated_region=isolated_region,
+                isolate_recompiles=isolate_recompiles,
             )
 
         return fn
@@ -2782,7 +2782,7 @@ def compile(
         disable=disable,
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
-        isolated_region=isolated_region,
+        isolate_recompiles=isolate_recompiles,
     )(model)  # type: ignore[return-value]
 
 
