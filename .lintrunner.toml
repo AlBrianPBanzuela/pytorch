@@ -1806,3 +1806,31 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+
+# ── Claude AI PR Review (auto-gated: local only) ─────────────────────────
+# Runs by default when:
+#   1. NOT in CI (adapter checks CI env vars and exits silently)
+#   2. The `claude` CLI is installed (adapter checks and exits silently)
+# To skip: lintrunner --skip CLAUDE_REVIEW
+[[linter]]
+code = 'CLAUDE_REVIEW'
+include_patterns = [
+    '**/*.py',
+    '**/*.cpp',
+    '**/*.h',
+    '**/*.cu',
+    '**/*.cuh',
+]
+exclude_patterns = [
+    'third_party/**',
+    'torch/csrc/jit/generated/**',
+    'caffe2/**',
+    'build/**',
+]
+command = [
+    'python',
+    'tools/linter/adapters/claude_review_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
