@@ -553,11 +553,10 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
-                elif self.reduce_scatter_unused_params:
+                elif self.reduce_scatter_unused_params and fsdp_param.unsharded_param.requires_grad:
                     fsdp_params_with_grad.append(fsdp_param)
-                    grad_dtype = self._reduce_dtype or fsdp_param.unsharded_param.dtype
                     unsharded_grads.append(
-                        torch.zeros_like(fsdp_param.unsharded_param, dtype=grad_dtype)
+                        torch.zeros_like(fsdp_param.unsharded_param)
                     )
             if self.reshard_after_backward:
                 self.reshard()
