@@ -2097,12 +2097,22 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     cfg,
                     grid,
                 )
+                tile_area = cfg.mt.m * cfg.mt.n
+                warp_size = torch.cuda.get_device_properties(
+                    device
+                ).warp_size
+                mfma_dim = 16
+                max_warps = 2 * selector._hardware.parallel_mi_cu
+                num_warps = min(
+                    max_warps,
+                    max(1, tile_area // (mfma_dim * warp_size)),
+                )
                 yield {
                     "EVEN_K": math.gcd(k, cfg.mt.k) == cfg.mt.k,
                     "USE_FAST_ACCUM": False,
                     "ACC_TYPE": "tl.float32",
                     "num_stages": 2,
-                    "num_warps": 8,
+                    "num_warps": num_warps,
                     "BLOCK_M": cfg.mt.m,
                     "BLOCK_N": cfg.mt.n,
                     "BLOCK_K": cfg.mt.k,
