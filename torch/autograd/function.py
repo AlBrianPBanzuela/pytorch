@@ -312,11 +312,17 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
 
     def apply(self, *args):
         r"""
-        Apply method used when executing this Node during the backward
+        Apply method used when executing this Node during the backward.
+
+        Called by the autograd engine (non-boxed path) and by direct
+        grad_fn.apply() calls. When boxed_grads_call is True, boxes
+        grads into a mutable list before calling user's backward.
         """
-        # _forward_cls is defined by derived class
-        # The user should define either backward or vjp but never both.
-        return self._get_user_fn()(self, *args)
+        user_fn = self._get_user_fn()
+        fwd_cls = self._forward_cls  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
+        if getattr(fwd_cls, "boxed_grads_call", False):
+            args = (list(args),)
+        return user_fn(self, *args)
 
     def apply_boxed(self, *args):
         r"""
