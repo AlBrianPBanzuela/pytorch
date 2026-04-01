@@ -1424,8 +1424,7 @@ def _defer_recv_ops(
 
             new_actions.append(action)
 
-        for recv in deferred.values():
-            new_actions.append(recv)
+        new_actions.extend(deferred.values())
 
         result[rank] = new_actions
     return result
@@ -2204,15 +2203,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # safe to use instead.
             # However, I was wondering if I should avoid calling batched operators at all in the case that there is
             # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
-            if comp_type in (SEND_F, SEND_B):
-                if comp_type == SEND_F:
-                    send_ops.append(
-                        _batch_p2p(stage.get_fwd_send_ops(mb_index))
-                    )
-                else:
-                    send_ops.append(
-                        _batch_p2p(stage.get_bwd_send_ops(mb_index))
-                    )
+            if comp_type == SEND_F:
+                send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+            elif comp_type == SEND_B:
+                send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
             elif comp_type == RECV_F:
                 if (stage_idx, mb_index) in self.fwd_recv_ops:
                     raise AssertionError(

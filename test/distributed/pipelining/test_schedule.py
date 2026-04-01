@@ -42,7 +42,6 @@ from torch.distributed.pipelining.schedules import (
     RECV_F,
     RESHARD,
     SEND_B,
-    SEND_F,
     UNSHARD,
     W,
 )
@@ -1057,7 +1056,6 @@ class TestScheduleLowering(TestCase):
         # RECVs are flushed before SENDs to the same peer, but still
         # deferred to right before their consumers.
         recv_f0_pos_no_overlap = find_action(rank0_no_overlap, 2, RECV_F, 0)
-        f1_pos_no_overlap = find_action(rank0_no_overlap, 0, F, 1)
         # On rank 0 (lower rank), 2RECV_F0 may still appear before 0F1
         # due to the flush-before-SEND constraint. That's expected.
         self.assertGreaterEqual(recv_f0_pos_no_overlap, 0)
