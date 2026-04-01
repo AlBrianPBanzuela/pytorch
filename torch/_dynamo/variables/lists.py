@@ -268,8 +268,6 @@ class BaseListVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # list_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L3689-L3710
-        from .builder import SourcelessBuilder
-
         if key.is_tensor():
             value = get_fake_value(key.as_proxy().node, tx)
             if value.constant is not None and value.constant.numel() == 1:
@@ -285,16 +283,24 @@ class BaseListVariable(VariableTracker):
                 )
 
         # _PyIndex_Check: https://github.com/python/cpython/blob/62a6e898e01/Include/internal/pycore_abstract.h#L13-L17
-        # Accept int, bool, SymInt (have nb_index), and slice.
-        # TODO: support user classes with __index__
-        if not (issubclass(key.python_type(), int) or key.python_type() is slice):
-            from .tensor import SymNodeVariable
-
-            if not isinstance(key, SymNodeVariable):
-                msg = f"indices must be integers or slices, not {key.python_type()}"
+        # CPython: list_subscript checks _PyIndex_Check first, and
+        # raises its own error if the type doesn't have nb_index.
+        # Only if the type has __index__ does it call PyNumber_AsSsize_t.
+        try:
+            key_type = key.python_type()
+        except NotImplementedError:
+            key_type = None
+        if key_type not in (int, bool, slice):
+            if key_type is not None and not hasattr(key_type, "__index__"):
+                container_name = self.python_type_name()
                 raise_observed_exception(
-                    TypeError, tx, args=[SourcelessBuilder.create(tx, msg)]
+                    TypeError,
+                    tx,
+                    args=[
+                        f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
+                    ],
                 )
+            key = key.nb_index_impl(tx)
 
         return self.getitem_const(tx, key)
 

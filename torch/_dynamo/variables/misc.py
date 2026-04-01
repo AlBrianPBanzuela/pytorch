@@ -51,6 +51,7 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
     TypeMROSource,
@@ -1357,7 +1358,7 @@ class GetAttrVariable(VariableTracker):
         ):
             obj = self.obj
             k = key.as_python_constant()
-            if obj.has_key_in_generic_dict(tx, k):
+            if obj.has_key_in_generic_dict(tx, k):  # type: ignore[union-attr]
                 if tx.output.side_effects.has_pending_mutation_of_attr(obj, k):
                     return tx.output.side_effects.load_attr(obj, k)
 
@@ -1430,7 +1431,7 @@ class GetAttrVariable(VariableTracker):
         ):
             obj = self.obj
             key = args[0].as_python_constant()
-            if obj.has_key_in_generic_dict(tx, key):
+            if obj.has_key_in_generic_dict(tx, key):  # type: ignore[union-attr]
                 return variables.CONSTANT_VARIABLE_TRUE
             else:
                 return variables.CONSTANT_VARIABLE_FALSE
@@ -1450,6 +1451,7 @@ class GetAttrVariable(VariableTracker):
         )
         self.obj.ban_mutation = True
         return VariableTracker.build(tx, self.obj.value.__dict__, self.source)
+
 
 class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
