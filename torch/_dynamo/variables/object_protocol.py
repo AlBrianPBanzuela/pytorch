@@ -138,7 +138,6 @@ def vt_sequence_check(obj: "VariableTracker") -> bool:
 
     # needs generic_getitem to be implemented in Dynamo
     return True
-    # return vt_implements_method(obj, " getitem_impl")
 
 
 def generic_len(
@@ -165,7 +164,6 @@ def generic_getitem(
     return obj.getitem_impl(tx, item)
 
 
-# TODO(guilhermeleobas): should we narrow the return type to IteratorVariable?
 def generic_getiter(
     tx: "InstructionTranslator", obj: "VariableTracker"
 ) -> "VariableTracker":
