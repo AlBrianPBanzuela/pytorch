@@ -17,7 +17,7 @@ trap_add cleanup_workspace EXIT
 sudo chown -R jenkins /var/lib/jenkins/workspace
 git config --global --add safe.directory /var/lib/jenkins/workspace
 
-if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
+if [[ "$TEST_CONFIG" == *onnx* ]]; then
   # TODO: This can be removed later once vision is also part of the Docker image
   install_torchvision
   # JIT C++ extensions require ninja, so put it into PATH.
