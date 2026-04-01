@@ -1622,8 +1622,15 @@ def redistribute_local_tensor(
                             target_placement.dim,
                         )
                 elif isinstance(current, _StridedShard):
-                    raise NotImplementedError(
-                        "Redistribute from _StridedShard to Shard is not implemented yet"
+                    # _StridedShard -> Shard: go via Replicate as intermediate
+                    replicated = current._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
+                    new_local_tensor = target_placement._replicate_to_shard(
+                        replicated,
+                        mesh_to_use,
+                        i,
+                        mesh_to_use._sym_get_coordinate(i),
                     )
                 else:
                     raise ValueError(
@@ -1649,8 +1656,13 @@ def redistribute_local_tensor(
             elif isinstance(target, _StridedShard):
                 # Case 4: target is _StridedShard
                 if current.is_partial():
-                    raise NotImplementedError(
-                        "Redistribute from Partial to _StridedShard is not implemented yet"
+                    # Partial -> _StridedShard: reduce to Replicate, then strided shard
+                    partial_spec = cast(Partial, current)
+                    replicated = partial_spec._reduce_value(
+                        local_tensor, mesh_to_use, i
+                    )
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif current.is_replicate():
                     # split the tensor and return the corresponding local strided shard
@@ -1658,9 +1670,13 @@ def redistribute_local_tensor(
                         local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif current.is_shard():
-                    # Shard -> _StridedShard on potentially different dimensions
-                    raise NotImplementedError(
-                        "Redistribute from Shard to _StridedShard is not implemented yet"
+                    # Shard -> _StridedShard: all-gather to Replicate, then strided shard
+                    current_placement = cast(Shard, current)
+                    replicated = current_placement._to_replicate_tensor(
+                        local_tensor, mesh_to_use, i, transform_info.logical_shape
+                    )
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif isinstance(current, _StridedShard):
                     # _StridedShard -> _StridedShard: go through Replicate
