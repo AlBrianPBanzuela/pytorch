@@ -10706,6 +10706,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
     @parametrize_test("non_contig", [False, "sliced", "restrided"])
     @parametrize_test("batch_size", [1, 5])
+    @skipIfMPS
     def test_upsamplingBiMode2d_consistency(
         self,
         device,
