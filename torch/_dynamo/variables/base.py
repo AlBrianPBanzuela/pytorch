@@ -550,16 +550,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: Any,
         key: "VariableTracker",
     ) -> "VariableTracker":
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        unimplemented(
-            gb_type="unsupported __getitem__",
-            context=f"mp_subscript_impl {self} {key}",
-            explanation=f"Dynamo does not know how to handle __getitem__ on {self}",
-            hints=[],
-        )
+        # Default: delegate to call_method. Subclasses override with direct
+        # slot logic and remove __getitem__ from their call_method.
+        return self.call_method(tx, "__getitem__", [key], {})
 
     def call_method(
         self,
@@ -568,18 +565,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        if name == "__getitem__":
-            if len(args) == 1 and not kwargs:
-                return self.mp_subscript_impl(tx, args[0])
-            from ..utils import raise_args_mismatch
-
-            raise_args_mismatch(
-                tx,
-                name,
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
-        elif name == "__len__" and self.has_unpack_var_sequence(tx):
+        if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
             return variables.ConstantVariable.create(len(self.unpack_var_sequence(tx)))
         elif (
