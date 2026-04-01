@@ -112,6 +112,14 @@ def vt_implements_mp_length(obj: "VariableTracker") -> bool:
     return vt_implements_slot(obj, "__len__", "mp_length")
 
 
+def vt_implements_tp_iter(obj: "VariableTracker") -> bool:
+    return vt_implements_slot(obj, "__iter__", "iter_impl")
+
+
+def vt_implements_tp_iternext(obj: "VariableTracker") -> bool:
+    return vt_implements_slot(obj, "__next__", "iternext_impl")
+
+
 def vt_mapping_size(
     tx: "InstructionTranslator", obj: "VariableTracker"
 ) -> "VariableTracker":
@@ -125,10 +133,6 @@ def vt_mapping_size(
     type_error(tx, f"object of type {obj.python_type_name()} has no len()")
 
 
-def vt_implements_tp_iter(obj: "VariableTracker") -> bool:
-    return vt_implements_slot(obj, "__iter__", "iter_impl")
-
-
 def vt_sequence_check(obj: "VariableTracker") -> bool:
     """Implements PySequence_Check semantics for VariableTracker objects."""
     from .dicts import ConstDictVariable
@@ -138,7 +142,6 @@ def vt_sequence_check(obj: "VariableTracker") -> bool:
 
     # needs generic_getitem to be implemented in Dynamo
     return True
-    # return vt_implements_method(obj, " getitem_impl")
 
 
 def generic_len(
@@ -163,19 +166,6 @@ def generic_getitem(
     Routes to obj.getitem_impl(tx, item)
     """
     return obj.getitem_impl(tx, item)
-
-
-def vt_implements_tp_iternext(obj: "VariableTracker") -> bool:
-    """Helper function to check if a VariableTracker implements the tp_iternext slot."""
-    from .constant import ConstantVariable
-    from .user_defined import UserDefinedObjectVariable
-
-    if istype(obj, UserDefinedObjectVariable):
-        return obj._maybe_get_baseclass_method("__next__") is not None
-    elif istype(obj, ConstantVariable):
-        return hasattr(obj.value, "__next__")
-    else:
-        return vt_implements_method(obj, "iternext_impl")
 
 
 def generic_iternext(
