@@ -16247,7 +16247,7 @@ op_db: list[OpInfo] = [
            aliases=('group_norm',),
            ref=reference_group_norm,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16),
+           dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -25882,11 +25882,11 @@ python_ref_db = [
         skips=(
             # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.int32, torch.int16)
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.int32, torch.int16)
+                dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
             ),
         )
     ),

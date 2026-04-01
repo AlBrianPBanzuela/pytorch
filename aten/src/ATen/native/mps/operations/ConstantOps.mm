@@ -44,21 +44,9 @@ static void fill_mps_kernel(TensorIterator& iter, const Scalar& value) {
       stream->fill(getMTLBufferStorage(self), 0, self.nbytes(), self.storage_offset() * self.itemsize());
       return;
     }
-    if (dtype == kBool) {
+    if (dtype == kBool || dtype == kByte || dtype == kChar) {
       stream->fill(
-          getMTLBufferStorage(self), (uint8_t)value.toBool(), self.nbytes(), self.storage_offset() * self.itemsize());
-      return;
-    }
-    if (dtype == kByte) {
-      stream->fill(
-          getMTLBufferStorage(self), (uint8_t)value.toByte(), self.nbytes(), self.storage_offset() * self.itemsize());
-      return;
-    }
-    if (dtype == kChar) {
-      stream->fill(getMTLBufferStorage(self),
-                   (uint8_t)(int8_t)value.toChar(),
-                   self.nbytes(),
-                   self.storage_offset() * self.itemsize());
+          getMTLBufferStorage(self), value.toChar(), self.nbytes(), self.storage_offset());
       return;
     }
   }
