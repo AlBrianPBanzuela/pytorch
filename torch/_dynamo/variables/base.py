@@ -602,7 +602,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 raise_observed_exception(
                     type(e),
                     tx,
-                    args=list(e.args),
+                    args=list(map(variables.ConstantVariable.create, e.args)),
                 )
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
@@ -1005,7 +1005,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
 
 def raise_type_error_exc(tx: Any, msg_str: str) -> NoReturn:
-    raise_observed_exception(TypeError, tx, args=[msg_str])
+    msg = variables.ConstantVariable.create(msg_str)
+    raise_observed_exception(TypeError, tx, args=[msg])
 
 
 def typestr(*objs: object) -> str:

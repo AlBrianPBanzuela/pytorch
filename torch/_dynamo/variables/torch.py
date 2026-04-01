@@ -2366,7 +2366,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 raise_observed_exception(
                     type(exc),
                     tx,
-                    args=list(exc.args),
+                    args=[VariableTracker.build(tx, a) for a in exc.args],
                 )
 
         if self.is_tensor_method():
