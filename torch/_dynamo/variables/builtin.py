@@ -78,6 +78,7 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     set_methods,
+    specialize_symnode,
     str_methods,
     tensortype_to_dtype,
 )
@@ -1867,17 +1868,10 @@ class BuiltinVariable(VariableTracker):
     def call_index(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        if arg.is_tensor():
-            unimplemented(
-                gb_type="unsupported index(Tensor)",
-                context="",
-                explanation="Dynamo does not support tracing builtin index() on a Tensor",
-                hints=[],
-            )
-
-        arg = guard_if_dyn(arg)
-        constant_value = operator.index(arg)
-        return VariableTracker.build(tx, constant_value)
+        # Specialize SymNodeVariable to a constant first, matching CPython's
+        # PyNumber_Index which forces a concrete int.
+        arg = specialize_symnode(arg)
+        return arg.nb_index_impl(tx)
 
     def call_round(
         self,
