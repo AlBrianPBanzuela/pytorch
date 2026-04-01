@@ -10,9 +10,9 @@ kernel void fill_scalar_dense(
   out[index] = fill_val;
 }
 
-#define REGISTER_FILL_OP(T)                                       \
-  template [[host_name("fill_scalar_dense_" #T)]] kernel void     \
-      fill_scalar_dense<T>(device T*, constant T&, uint)
+#define REGISTER_FILL_OP(T)                                   \
+  template [[host_name("fill_scalar_dense_" #T)]] kernel void \
+  fill_scalar_dense<T>(device T*, constant T&, uint)
 
 REGISTER_FILL_OP(float);
 REGISTER_FILL_OP(half);
@@ -26,9 +26,10 @@ REGISTER_FILL_OP(bool);
 REGISTER_FILL_OP(float2);
 REGISTER_FILL_OP(half2);
 
-// 2D dispatch: tid.y = dim-0 index (no division), tid.x = linear index for dims 1..ndim-1.
-// For an N-dim tensor this requires N-1 divisions instead of N, and consecutive threads
-// in x access consecutive addresses in the innermost dimension (coalesced writes).
+// 2D dispatch: tid.y = dim-0 index (no division), tid.x = linear index for
+// dims 1..ndim-1. For an N-dim tensor this requires N-1 divisions instead of N,
+// and consecutive threads in x access consecutive addresses in the innermost
+// dimension (coalesced writes).
 template <typename T>
 kernel void fill_scalar_strided(
     device T* out [[buffer(0)]],
@@ -46,10 +47,15 @@ kernel void fill_scalar_strided(
   out[offset] = fill_val;
 }
 
-#define REGISTER_FILL_STRIDED_OP(T)                                        \
-  template [[host_name("fill_scalar_strided_" #T)]] kernel void            \
-      fill_scalar_strided<T>(device T*, constant T&, constant long*,       \
-                             constant long*, constant uint&, uint2)
+#define REGISTER_FILL_STRIDED_OP(T)                             \
+  template [[host_name("fill_scalar_strided_" #T)]] kernel void \
+  fill_scalar_strided<T>(                                       \
+      device T*,                                                \
+      constant T&,                                              \
+      constant long*,                                           \
+      constant long*,                                           \
+      constant uint&,                                           \
+      uint2)
 
 REGISTER_FILL_STRIDED_OP(float);
 REGISTER_FILL_STRIDED_OP(half);

@@ -1,6 +1,9 @@
 """Benchmark fill_ and zero_ operations on MPS across dtypes, sizes, and layouts."""
-import torch
+
 import time
+
+import torch
+
 
 device = torch.device("mps")
 WARMUP = 20
@@ -33,8 +36,16 @@ print("-" * 68)
 
 # --- dtype sweep: fill_ ---
 print("fill_ dtype sweep  [shape=(4096, 4096)]")
-for dtype in [torch.float32, torch.float16, torch.bfloat16,
-              torch.int32, torch.int64, torch.int8, torch.uint8, torch.bool]:
+for dtype in [
+    torch.float32,
+    torch.float16,
+    torch.bfloat16,
+    torch.int32,
+    torch.int64,
+    torch.int8,
+    torch.uint8,
+    torch.bool,
+]:
     t = make_tensor((4096, 4096), dtype)
     fill_val = True if dtype == torch.bool else 42
     name = str(dtype).replace("torch.", "")
@@ -43,8 +54,16 @@ for dtype in [torch.float32, torch.float16, torch.bfloat16,
 # --- dtype sweep: zero_ ---
 print()
 print("zero_ dtype sweep  [shape=(4096, 4096)]")
-for dtype in [torch.float32, torch.float16, torch.bfloat16,
-              torch.int32, torch.int64, torch.int8, torch.uint8, torch.bool]:
+for dtype in [
+    torch.float32,
+    torch.float16,
+    torch.bfloat16,
+    torch.int32,
+    torch.int64,
+    torch.int8,
+    torch.uint8,
+    torch.bool,
+]:
     t = make_tensor((4096, 4096), dtype)
     name = str(dtype).replace("torch.", "")
     bench(lambda t=t: t.zero_(), f"zero_  {name}")
@@ -61,8 +80,15 @@ for numel in [256, 4096, 65536, 1 << 20, 1 << 24, 1 << 27]:
 # --- 2-D size sweep ---
 print()
 print("2-D size sweep  [dtype=float32]")
-for shape in [(64, 64), (256, 256), (512, 512), (1024, 1024),
-              (2048, 2048), (4096, 4096), (8192, 8192)]:
+for shape in [
+    (64, 64),
+    (256, 256),
+    (512, 512),
+    (1024, 1024),
+    (2048, 2048),
+    (4096, 4096),
+    (8192, 8192),
+]:
     rows, cols = shape
     t = make_tensor(shape, torch.float32)
     label = f"({rows}x{cols})"
