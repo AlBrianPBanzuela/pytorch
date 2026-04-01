@@ -14,7 +14,7 @@ from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
-from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_SYCLTLA
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -109,7 +109,7 @@ class MockComputedBuffer(ComputedBuffer):
 class TestCutlassEVT(TestCase):
     device_type = GPU_TYPE
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_accumulator_return(self):
@@ -167,7 +167,7 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
@@ -217,7 +217,7 @@ return tmp_0, tmp_2, D""",
 index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_broadcasting(self):
@@ -278,7 +278,7 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
@@ -335,7 +335,7 @@ def fn(accum, buf1, buf2):
 return tmp_1, D""",
         )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
@@ -368,7 +368,7 @@ return tmp_1, D""",
                 result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
             )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
@@ -430,7 +430,7 @@ return tmp_1, D""",
 """,
             )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self):
@@ -495,7 +495,7 @@ def fn(accum, bias):
 """,
             )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "Unsupported platform")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
