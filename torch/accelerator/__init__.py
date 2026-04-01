@@ -24,7 +24,34 @@ from .memory import (
 )
 
 
+class Event:
+    r"""Accelerator-aware event factory.
+
+    This is the accelerator namespace entry point for the generic :class:`torch.Event`
+    API. Constructing it returns a :class:`torch.Event`.
+    """
+
+    def __new__(
+        cls,
+        device: torch.device | None = None,
+        *,
+        enable_timing: bool = False,
+        blocking: bool = False,
+        interprocess: bool = False,
+    ) -> torch.Event:
+        return torch.Event(
+            device=device,
+            enable_timing=enable_timing,
+            blocking=blocking,
+            interprocess=interprocess,
+        )
+
+    @classmethod
+    def from_ipc_handle(cls, device: torch.device, handle: str) -> torch.Event:
+        return torch.Event.from_ipc_handle(device, handle)
+
 __all__ = [
+    "Event",
     "Graph",
     "current_accelerator",
     "current_device_idx",  # deprecated
@@ -257,8 +284,8 @@ def synchronize(device: _device_t = None, /) -> None:
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> assert torch.accelerator.is_available() "No available accelerators detected."
-        >>> start_event = torch.Event(enable_timing=True)
-        >>> end_event = torch.Event(enable_timing=True)
+        >>> start_event = torch.accelerator.Event(enable_timing=True)
+        >>> end_event = torch.accelerator.Event(enable_timing=True)
         >>> start_event.record()
         >>> tensor = torch.randn(100, device=torch.accelerator.current_accelerator())
         >>> sum = torch.sum(tensor)

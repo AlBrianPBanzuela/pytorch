@@ -178,6 +178,19 @@ class TestAccelerator(TestCase):
         ):
             event1.elapsed_time(event2)
 
+    def test_event_namespace(self):
+        self.assertEqual(torch.accelerator.Event.__module__, "torch.accelerator")
+
+        event1 = torch.accelerator.Event(enable_timing=True)
+        event2 = torch.accelerator.Event(enable_timing=True)
+        self.assertIsInstance(event1, torch.Event)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be recorded before calculating elapsed time",
+        ):
+            event1.elapsed_time(event2)
+
     @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
     def test_memory_stats(self):
         # Ensure that device allocator is initialized
