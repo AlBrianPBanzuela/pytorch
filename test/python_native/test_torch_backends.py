@@ -9,7 +9,7 @@ class RegistryTestMixin:
 
     def setUp(self):
         """Set up test state with registry preservation."""
-        super().setUp() if hasattr(super(), 'setUp') else None
+        super().setUp() if hasattr(super(), "setUp") else None
 
         # Use the new _preserve_filter_state but setup manually for tearDown
         filter_state = pn._get_filter_state()
@@ -48,7 +48,7 @@ class RegistryTestMixin:
                 filter_state._dispatch_keys.update(self._original_filter_state[2])
         except Exception:
             pass
-        super().tearDown() if hasattr(super(), 'tearDown') else None
+        super().tearDown() if hasattr(super(), "tearDown") else None
 
 
 @skipIfTorchDynamo("Backend tests don't need dynamo compilation")
