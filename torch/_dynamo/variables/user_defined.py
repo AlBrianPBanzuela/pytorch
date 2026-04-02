@@ -1996,12 +1996,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # C-extension types in the enum's MRO (e.g. str for StrEnum).
         if isinstance(self.value, enum.Enum):
             if not hasattr(self.value, name):
-                raise ObservedAttributeError()
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    args=[
+                        f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                    ],
+                )
             if name in cmp_name_to_op_mapping:
                 return variables.GetAttrVariable(self, name)
             member = getattr(self.value, name)
             if isinstance(member, types.MethodType):
-                return variables.UserMethodVariable(member.__func__, self, source=source)
+                return variables.UserMethodVariable(
+                    member.__func__, self, source=source
+                )
             return VariableTracker.build(tx, member, source)
 
         if self._object_has_getattribute:

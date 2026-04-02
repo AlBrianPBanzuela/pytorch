@@ -4852,7 +4852,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         try:
             expected = model(input_tensor)
         except Exception as e:
-            raise unittest.SkipTest("eager failed, requires Python>=3.12") from e
+            raise unittest.SkipTest(
+                "eager failed, requires Python between 3.9 and 3.12"
+            ) from e
         actual = opt(input_tensor)
         self.assertEqual(actual, expected)
 
