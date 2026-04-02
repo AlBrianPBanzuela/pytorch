@@ -45,13 +45,23 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename scalar_t>
 inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
-  scalar_t max = at::_isnan(b) ? b : compat_max(a, b);
-  return max;
+  if constexpr (std::is_integral_v<scalar_t>) {
+    return a > b ? a : b;
+  } else {
+    using opmath_t = at::opmath_type<scalar_t>;
+    return at::_isnan(b) ? b : static_cast<scalar_t>(
+        compat_max(static_cast<opmath_t>(a), static_cast<opmath_t>(b)));
+  }
 }
 template <typename scalar_t>
 inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
-  scalar_t min = at::_isnan(b) ? b : compat_min(a, b);
-  return min;
+  if constexpr (std::is_integral_v<scalar_t>) {
+    return a < b ? a : b;
+  } else {
+    using opmath_t = at::opmath_type<scalar_t>;
+    return at::_isnan(b) ? b : static_cast<scalar_t>(
+        compat_min(static_cast<opmath_t>(a), static_cast<opmath_t>(b)));
+  }
 }
 #define MAX(X, Y) max_propagate_nan(X,Y)
 #define MIN(X, Y) min_propagate_nan(X,Y)
