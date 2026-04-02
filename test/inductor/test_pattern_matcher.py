@@ -2169,6 +2169,111 @@ class TestPatternMatcher(TestCase):
                 pattern, replacement, example_input, fwd_only, my_patterns
             )
 
+    def _inject_test_metadata(self, graph):
+        """Inject identifiable metadata on all call_function nodes for testing."""
+        for node in graph.nodes:
+            if node.op == "call_function":
+                node.meta["stack_trace"] = f"trace_for_{node.name}"
+                node.meta["nn_module_stack"] = {"test": ("m", "M")}
+                node.meta["_numeric_debug_handle"] = 42
+                node.meta["custom"] = {"test_key": "test_value"}
+
+    def test_metadata_propagation_register_replacement(self):
+        """Verify metadata from matched nodes transfers to replacement nodes."""
+
+        def pattern(x, y):
+            return x + y
+
+        def replacement(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            # apply() automatically snapshots meta before and checks after
+            my_patterns.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y)
+
+    def test_metadata_propagation_register_replacement_multinode(self):
+        """Verify metadata propagation for multi-node patterns."""
+
+        def pattern(x, y):
+            tmp = x + y
+            return tmp * 2
+
+        def replacement(x, y):
+            return (x + y) * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            my_patterns.apply(graph)
+
+        def fn(x, y):
+            tmp = x + y
+            return tmp * 2
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y)
+
+    def test_metadata_propagation_graph_pattern_replace_by_example(self):
+        """Verify metadata propagation for replace_by_example (single-node match)."""
+
+        test_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(aten.add.Tensor, KeywordArg("x"), KeywordArg("y")),
+            pass_dict=test_pass,
+        )
+        def add_to_mul(match: Match, x, y):
+            def repl(a, b):
+                return a * b
+
+            with V.fake_mode:
+                match.replace_by_example(repl, [x, y])
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            test_pass.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y)
+
 
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
