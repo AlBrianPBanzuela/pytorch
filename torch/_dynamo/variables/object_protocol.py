@@ -9,10 +9,9 @@ Per-type richcompare_impl hooks live in their respective VT files.
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from torch._C._dynamo import get_type_slots
+from torch._C._dynamo import get_type_slots, has_slot, PyMappingSlots, PySequenceSlots
 
 from .. import graph_break_hints
-from .._type_slots import has_slot, PyMappingSlots, PySequenceSlots
 from ..exc import unimplemented
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, raise_type_error_exc, VariableTracker
