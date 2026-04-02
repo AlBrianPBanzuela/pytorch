@@ -389,7 +389,7 @@ class OverlapScheduler:
         bucket_exposed_first: bool | None = None,
         enable_fusion_regions: bool = False,
         bucket_only_internode_comms: bool = False,
-        bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_mode: BucketMode = "default",
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
     ):
@@ -1001,6 +1001,7 @@ class OverlapScheduler:
             region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_internode_comms=self.bucket_only_internode_comms,
+            bucket_mode=self.bucket_mode,
         )
 
         if self.log_final_collectives_estimations:
@@ -1422,12 +1423,12 @@ class OverlapScheduler:
         if not torch._inductor.config.test_configs.assume_bucketing_reduces_latency:
             return False
 
-        key = bucket_key(node, mode="custom_ops_multidtype")
+        key = bucket_key(node, mode=self.bucket_mode)
         if key is None:
             return False
 
         for in_flight_coll in self.in_flight:
-            if bucket_key(in_flight_coll, mode="custom_ops_multidtype") == key:
+            if bucket_key(in_flight_coll, mode=self.bucket_mode) == key:
                 return True
 
         return False
@@ -1739,7 +1740,7 @@ def schedule_overlap_bucketing(
     bucket_only_internode_comms=False,
     prioritize_bucketing_during_scheduling: bool = True,
     max_off_bucket_gb: float | None = 0.5,
-    bucket_mode: BucketMode | None = None,
+    bucket_mode: BucketMode = "default",
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1766,8 +1767,6 @@ def schedule_overlap_bucketing(
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
-        bucket_mode: Bucket mode for collective bucketing. "default" uses plain torch.cat
-            (visible to Inductor), "custom_ops"/"custom_ops_multidtype" use opaque custom ops.
     """
     if not any(is_wait_tensor(n) for n in gm.graph.nodes):
         return gm
@@ -1780,7 +1779,8 @@ def schedule_overlap_bucketing(
         },
         payload_fn=lambda: gm.print_readable(False),
     )
-    overlap_kwargs: dict[str, object] = dict(
+    ret = OverlapScheduler(
+        gm,
         compute_overlap_multipler=compute_overlap_multipler,
         max_in_flight_gb=max_in_flight_gb,
         max_coll_distance=max_coll_distance,
@@ -1798,10 +1798,8 @@ def schedule_overlap_bucketing(
         bucket_only_internode_comms=bucket_only_internode_comms,
         prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
         max_off_bucket_gb=max_off_bucket_gb,
-    )
-    if bucket_mode is not None:
-        overlap_kwargs["bucket_mode"] = bucket_mode
-    ret = OverlapScheduler(gm, **overlap_kwargs).run()  # type: ignore[arg-type]
+        bucket_mode=bucket_mode,
+    ).run()
     trace_structured(
         "artifact",
         metadata_fn=lambda: {

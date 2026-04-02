@@ -1,6 +1,5 @@
 import itertools
 import logging
-import operator
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
@@ -140,7 +139,7 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         collective_bucketing: bool = True,
-        bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_mode: BucketMode = "default",
         bucket_exposed_first: bool | None = None,
         region_of: dict[fx.Node, Any] | None = None,
         bucket_only_internode_comms: bool = False,
@@ -337,6 +336,10 @@ class OverlapPreservingBucketer:
         """Apply topological sort and effect tokens to preserve overlap."""
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
+        # Clean up any remaining erased node references and cycles
+        self.aug_graph.remove_erased_extra_deps()
+        autofix = torch._inductor.config.aten_distributed_optimizations.overlap_scheduling_autofix_cycles
+        self.aug_graph.check_and_maybe_autofix_cyclic_extra_deps(autofix=autofix)
         additional_deps = self.aug_graph.get_all_extra_deps()
 
         for n, deps in additional_deps.items():
@@ -1019,52 +1022,36 @@ class OverlapPreservingBucketer:
 
         # Get new nodes
         new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
+        assert len(new_waits) == 1
+
+        new_wait = new_waits[0]
+        new_start = new_wait.args[0]
+        assert isinstance(new_start, fx.Node)
 
         # Create mapping of all erased nodes to their replacements
         erased_to_new: dict[fx.Node, fx.Node | None] = {}
-        new_start: fx.Node | None = None
-        if len(new_waits) == 1:
-            # Standard bucketing: single start + single wait
-            new_wait = new_waits[0]
-            new_start = new_wait.args[0]  # pyrefly: ignore [bad-assignment]
-            assert isinstance(new_start, fx.Node)
-            for old_start in old_starts:
-                erased_to_new[old_start] = new_start
-            for old_wait in old_waits:
-                erased_to_new[old_wait] = new_wait
-        else:
-            # Coalesced bucketing: single start + N waits (one per original tensor)
-            assert len(new_waits) == len(old_waits)
-            # Find the coalesced collective start (look through getitem)
-            coll_start = new_waits[0].args[0]
-            assert isinstance(coll_start, fx.Node)
-            if (
-                coll_start.op == "call_function"
-                and coll_start.target is operator.getitem
-            ):
-                coll_start = coll_start.args[0]
-            assert isinstance(coll_start, fx.Node)
-            new_start = coll_start
-            for old_start in old_starts:
-                erased_to_new[old_start] = coll_start
-            for old_wait, new_wait in zip(old_waits, new_waits):
-                erased_to_new[old_wait] = new_wait  # noqa: PERF403
+        for old_start in old_starts:
+            erased_to_new[old_start] = new_start
+        for old_wait in old_waits:
+            erased_to_new[old_wait] = new_wait
 
         # Handle convert_element_type nodes that were fused and erased
         # The bucketed operation may have a _pre_bucket op that handles dtype conversion
         if fused_convert_dtypes:
-            # all gather bucketing may fuse in dtype conversion into the bucketing
-            # if so, we need to transfer hiding deps from the old dtype conversion
-            # to the new bucketing node
-            new_convert_dtypes_node = new_start.kwargs["out"]
-            assert isinstance(new_convert_dtypes_node, fx.Node)
-            assert (
-                new_convert_dtypes_node.target
+            # In custom_ops mode, the _pre_bucket_all_gather node handles dtype conversion
+            # In default mode, convert nodes are just erased — map them to new_start
+            new_convert_dtypes_node = new_start.kwargs.get("out")
+            if (
+                isinstance(new_convert_dtypes_node, fx.Node)
+                and new_convert_dtypes_node.target
                 == torch.ops.bucketing._pre_bucket_all_gather.default
-            )
+            ):
+                replacement = new_convert_dtypes_node
+            else:
+                replacement = new_start
 
             for n in fused_convert_dtypes:
-                erased_to_new[n] = new_convert_dtypes_node
+                erased_to_new[n] = replacement
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
@@ -1082,6 +1069,7 @@ def finalize_overlap_scheduling(
     region_of: dict[fx.Node, Any] | None = None,
     bucket_exposed_first: bool | None = None,
     bucket_only_internode_comms: bool = False,
+    bucket_mode: BucketMode = "default",
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
@@ -1113,5 +1101,6 @@ def finalize_overlap_scheduling(
         bucket_exposed_first=bucket_exposed_first,
         bucket_only_internode_comms=bucket_only_internode_comms,
         region_of=region_of,
+        bucket_mode=bucket_mode,
     )
     bucketer.bucket_collectives()
