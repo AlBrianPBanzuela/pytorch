@@ -76,10 +76,17 @@ class TestNativeDSLOps(TestCase):
                 pass
 
     def test_consistent_helper_interface(self):
-        """Test triton_utils and cutedsl_utils expose consistent public APIs."""
+        """Test all registered DSL utils expose consistent public APIs."""
+        from torch.testing._internal.common_utils import get_all_dsls
+
+        # Automatically discover all registered DSLs
+        dsl_names = get_all_dsls()
+        if not dsl_names:
+            # Fallback to hardcoded list if registry not available
+            dsl_names = ["triton", "cutedsl"]
+
         modules_info = [
-            ("triton_utils.py", "torch._native.triton_utils"),
-            ("cutedsl_utils.py", "torch._native.cutedsl_utils"),
+            (f"{dsl}_utils.py", f"torch._native.{dsl}_utils") for dsl in dsl_names
         ]
 
         # Import modules directly to avoid dependency issues
@@ -376,6 +383,58 @@ class TestNativeDSLOps(TestCase):
                     # Clear cache so function re-reads environment variable
                     check_native_version_skip.cache_clear()
                     self.assertEqual(check_native_version_skip(), expected_result)
+
+    def test_dsl_registry_functionality(self):
+        """Test that DSL registry works correctly"""
+        from torch.testing._internal.common_utils import (
+            get_all_dsls,
+            get_available_dsls,
+            is_dsl_available,
+        )
+
+        # Test registry returns expected DSLs
+        all_dsls = get_all_dsls()
+        self.assertIsInstance(all_dsls, list)
+        self.assertIn("triton", all_dsls)
+        self.assertIn("cutedsl", all_dsls)
+
+        # Test available DSLs are subset of all DSLs
+        available_dsls = get_available_dsls()
+        self.assertIsInstance(available_dsls, list)
+        for dsl in available_dsls:
+            self.assertIn(dsl, all_dsls)
+
+        # Test availability check function
+        for dsl in all_dsls:
+            availability = is_dsl_available(dsl)
+            self.assertIsInstance(availability, bool)
+            # If DSL is in available list, it should return True
+            if dsl in available_dsls:
+                self.assertTrue(availability)
+
+    def test_dsl_test_helpers(self):
+        """Test that DSL test helper decorators work"""
+        from torch.testing._internal.common_utils import (
+            skipIfDSLUnavailable,
+            skipIfNoCuteDSL,
+            skipIfNoTritonDSL,
+            skipUnlessDSLAvailable,
+        )
+
+        # Test that decorators are callable
+        self.assertTrue(callable(skipIfNoTritonDSL))
+        self.assertTrue(callable(skipIfNoCuteDSL))
+        self.assertTrue(callable(skipIfDSLUnavailable))
+        self.assertTrue(callable(skipUnlessDSLAvailable))
+
+        # Test dynamic decorators can be called
+        try:
+            decorator1 = skipIfDSLUnavailable("nonexistent_dsl")
+            decorator2 = skipUnlessDSLAvailable("triton")
+            self.assertTrue(callable(decorator1))
+            self.assertTrue(callable(decorator2))
+        except Exception as e:
+            self.fail(f"Dynamic DSL decorators failed: {e}")
 
 
 if __name__ == "__main__":
