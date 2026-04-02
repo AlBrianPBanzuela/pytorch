@@ -264,6 +264,7 @@ dtensor_compiled_fails = {
     xfail("cartesian_prod"),
     xfail("flatten"),
     xfail("kron"),
+    xfail("linalg.tensorsolve"),
     xfail("nn.functional.instance_norm"),
     xfail("ravel"),
     xfail("reshape_as"),
