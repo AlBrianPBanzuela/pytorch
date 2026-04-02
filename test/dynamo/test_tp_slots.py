@@ -1,3 +1,5 @@
+# Owner(s): ["module: dynamo"]
+
 """Tests for CPython type slot detection in Dynamo.
 
 Tests that get_type_slots correctly identifies which protocol methods
@@ -8,13 +10,14 @@ import collections.abc
 import dataclasses
 import enum
 import unittest
+
 from torch._C._dynamo import get_type_slots
 from torch._dynamo._type_slots import (
-    PySequenceSlots,
+    has_slot,
     PyMappingSlots,
     PyNumberSlots,
+    PySequenceSlots,
     PyTypeSlots,
-    has_slot,
 )
 
 
@@ -76,9 +79,7 @@ class TestTypeSlots(unittest.TestCase):
         class DictSubclass(dict):
             pass
 
-        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(
-            DictSubclass
-        )
+        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(DictSubclass)
 
         # Dict subclasses expose both protocols for compatibility
         self.assertTrue(has_slot(seq_slots, PySequenceSlots.SQ_LENGTH))
@@ -90,9 +91,7 @@ class TestTypeSlots(unittest.TestCase):
         class ListSubclass(list):
             pass
 
-        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(
-            ListSubclass
-        )
+        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(ListSubclass)
 
         # List subclasses should have sequence protocol
         self.assertTrue(has_slot(seq_slots, PySequenceSlots.SQ_LENGTH))
@@ -136,9 +135,7 @@ class TestTypeSlots(unittest.TestCase):
         class CustomClass:
             pass
 
-        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(
-            CustomClass
-        )
+        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(CustomClass)
 
         # Custom classes should not have sequence/mapping/number protocol by default
         self.assertFalse(has_slot(seq_slots, PySequenceSlots.SQ_LENGTH))
@@ -150,9 +147,7 @@ class TestTypeSlots(unittest.TestCase):
         class SetSubclass(set):
             pass
 
-        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(
-            SetSubclass
-        )
+        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(SetSubclass)
 
         # Set subclasses should have sq_contains
         self.assertTrue(has_slot(seq_slots, PySequenceSlots.SQ_CONTAINS))
@@ -161,11 +156,9 @@ class TestTypeSlots(unittest.TestCase):
         """Test that tuple subclasses inherit sequence protocol."""
 
         class TupleSubclass(tuple):
-            pass
+            __slots__ = ()
 
-        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(
-            TupleSubclass
-        )
+        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(TupleSubclass)
 
         # Tuple subclasses should have sequence protocol
         self.assertTrue(has_slot(seq_slots, PySequenceSlots.SQ_LENGTH))
@@ -208,9 +201,7 @@ class TestTypeSlots(unittest.TestCase):
             x: int
             y: str
 
-        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(
-            FrozenData
-        )
+        seq_slots, map_slots, num_slots, type_slots = self._get_slot_info(FrozenData)
 
         # Frozen dataclasses should have basic type slots like hash
         self.assertTrue(has_slot(type_slots, PyTypeSlots.TP_HASH))
