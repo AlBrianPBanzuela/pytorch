@@ -533,7 +533,7 @@ def bucket_reduce_scatter_by_mb(
     """
     mode = mode or _default_bucket_mode()
 
-    assert "multidtype" not in mode, (
+    assert mode is None or "multidtype" not in mode, (
         "reduce scatter bucketing does not support multidtype"
     )
 
@@ -654,9 +654,9 @@ def reduce_scatter_merge_fn_coalesced(
     group_size: int,
     group_name: str,
     reduce_op: str,
-    reduce_dtype: torch.dtype,  # type: ignore[name-defined]
-    device: torch.device,  # type: ignore[name-defined]
-) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
+    reduce_dtype: torch.dtype,
+    device: torch.device,
+) -> list[torch.Tensor]:
     """Bucketed RS via NCCL's coalesced API (ncclGroupStart/End).
 
     Avoids cat-ing inputs into one buffer; instead passes the tensor list
@@ -873,9 +873,11 @@ def all_gather_merge_fn_to_trace(
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
-    foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
-    torch._foreach_copy_(foreach_copy_dsts, ag_ins_flattened)
+    # Inductor fuses copy_(cat(...)) into 1 Triton kernel with no allocation for cat.
+    # _foreach_copy_(..., ag_ins_flattened) emits separate kernel per item,
+    # resulting in large number of small triton kernels to launch.
+    new_ag_in.copy_(torch.cat(ag_ins_flattened))
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_gather_into_tensor_out.default(
             new_ag_in, group_size, group_name, out=new_ag_out
@@ -1230,6 +1232,8 @@ def merge_all_gather_bucket(
 
     # Choose merge function based on mode
     ag_merge_fn = all_gather_merge_fn_to_trace
+    if mode == "coalesced":
+        logger.info("coalesced bucket_mode not supported for all_gather, using default")
     if mode is not None and "custom_ops" in mode:
         ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
 
