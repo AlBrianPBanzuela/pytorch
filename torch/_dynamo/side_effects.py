@@ -57,7 +57,6 @@ from .variables.base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .variables.user_defined import FrozenDataClassVariable
 
 
 if TYPE_CHECKING:
@@ -535,8 +534,6 @@ class SideEffects:
             variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
-        elif is_frozen_dataclass(user_cls):
-            variable_cls = FrozenDataClassVariable
         elif issubclass(user_cls, BaseException):
             variable_cls = variables.UserDefinedExceptionObjectVariable
         elif variables.InspectVariable.is_matching_class(user_cls):
@@ -845,15 +842,24 @@ class SideEffects:
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
 
-                if isinstance(var, variables.FrozenDataClassVariable):
+                # For frozen dataclasses, emit object.__setattr__ immediately
+                # after __new__ because the object may be used (e.g., in repr
+                # or format strings) before codegen_suffix runs.
+                if (
+                    isinstance(var, variables.UserDefinedObjectVariable)
+                    and is_frozen_dataclass(var.value)
+                ):
                     for name, value in self.store_attr_mutations.get(var, {}).items():
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
-                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(var.source)
                         cg(variables.ConstantVariable(name))
                         cg(value)
                         cg.extend_output(
-                            [*create_call_method(3), create_instruction("POP_TOP")]
+                            [
+                                *create_call_method(3),
+                                create_instruction("POP_TOP"),
+                            ]
                         )
 
         for ctx, args in self.save_for_backward:
@@ -1180,13 +1186,7 @@ class SideEffects:
                     _maybe_log_side_effect(var)
 
             elif self.is_attribute_mutation(var):
-                if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                    var, variables.FrozenDataClassVariable
-                ):
-                    # These frozen attribute initializations are handled in codegen_save_tempvars
-                    # and don't need to be reset in the suffix.
-                    continue
-                elif isinstance(
+                if isinstance(
                     var,
                     variables.UserDefinedDictVariable,
                 ) and self.is_modified(var._dict_vt):
@@ -1298,6 +1298,16 @@ class SideEffects:
                 # the mutations of attributes in the reverse order.  To account
                 # for this reversal, we iterate through the mutable attributes
                 # in reverse order.
+                # Frozen dataclass mutations were already emitted in
+                # codegen_save_tempvars right after __new__
+                if (
+                    isinstance(var, variables.UserDefinedObjectVariable)
+                    and isinstance(var.mutation_type, AttributeMutationNew)
+                    and is_frozen_dataclass(var.value)
+                ):
+                    _maybe_log_side_effect(var)
+                    continue
+
                 side_effect_occurred = False
                 for name, value in reversed(
                     self.store_attr_mutations.get(var, {}).items()

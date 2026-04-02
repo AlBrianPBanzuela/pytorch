@@ -11,11 +11,10 @@ The key classes are:
   - UserDefinedSetVariable: For set subclasses
   - UserDefinedTupleVariable: For tuple subclasses
   - UserDefinedExceptionObjectVariable: For exception subclasses
-  - FrozenDataClassVariable: Special handling of frozen dataclasses
   - MutableMappingVariable: For collections.abc.MutableMapping subclasses
 
-Dynamo specializes to VariableTracker subclasses like FrozenDataClassVariable if available; if no
-subclass qualifies, it falls back to UserDefinedObjectVariable.
+Dynamo specializes to VariableTracker subclasses if available; if no subclass qualifies,
+it falls back to UserDefinedObjectVariable.
 
 These classes help Dynamo track and handle arbitrary Python objects during tracing,
 maintaining proper semantics while enabling optimizations where possible.
@@ -63,7 +62,6 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
-    DataclassFieldsSource,
     DictGetItemSource,
     GetItemSource,
     RandomValueSource,
@@ -1047,49 +1045,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 "because validation mutates the instance outside traced bytecode.",
                 hints=graph_break_hints.SUPPORTABLE,
             )
-        elif is_frozen_dataclass(self.value) and self.is_standard_new():
-            fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
-            assert self.source is not None
-            fields_source = DataclassFieldsSource(self.source)
-            items = list(args)
-            items.extend([None] * (len(fields) - len(items)))  # type: ignore[arg-type]
-
-            default_kwargs = {}
-            for ind, field, var_tracker in zip(itertools.count(), fields, items):
-                if var_tracker is None:
-                    if field.name in kwargs:
-                        var_tracker = kwargs[field.name]
-                    else:
-                        if not field.init:
-                            continue
-
-                        if field.default is not dataclasses.MISSING:
-                            var_tracker = VariableTracker.build(
-                                tx,
-                                field.default,
-                                source=AttrSource(
-                                    GetItemSource(fields_source, ind), "default"
-                                ),
-                            )
-                        elif field.default_factory is not dataclasses.MISSING:
-                            factory_fn = VariableTracker.build(
-                                tx, field.default_factory
-                            )
-                            var_tracker = factory_fn.call_function(tx, [], {})
-                        else:
-                            # if we are subclass, the constructor could possibly
-                            # be missing args
-                            continue
-
-                    default_kwargs[field.name] = var_tracker
-            kwargs.update(default_kwargs)
-            var = tx.output.side_effects.track_new_user_defined_object(
-                SourcelessBuilder.create(tx, object),
-                self,
-                args,  # type: ignore[arg-type]
-            )
-            var.call_method(tx, "__init__", args, kwargs)  # type: ignore[arg-type]
-            return var
         elif (
             self.value in self._in_graph_classes()
             or is_traceable_wrapper_subclass_type(self.value)
@@ -1684,6 +1639,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise_observed_exception(AttributeError, tx, args=[error_msg])
 
         tx.output.side_effects.store_attr(self, name_str, value)
+        if is_frozen_dataclass(self.value):
+            if not hasattr(self, "_frozen_fields"):
+                self._frozen_fields: dict[str, VariableTracker] = {}
+            self._frozen_fields[name_str] = value
         return variables.CONSTANT_VARIABLE_NONE
 
     def needs_slow_setattr(self) -> bool:
@@ -2353,10 +2312,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return True
 
     def get_python_hash(self) -> int:
-        # default hash
+        if hasattr(self, "_frozen_fields"):
+            return hash(
+                tuple(v.get_python_hash() for v in self._frozen_fields.values())
+            )
         return hash(self.value)
 
     def is_python_equal(self, other: object) -> bool:
+        if hasattr(self, "_frozen_fields"):
+            if not isinstance(other, UserDefinedObjectVariable):
+                return False
+            if not hasattr(other, "_frozen_fields"):
+                return False
+            return (
+                self.python_type() is other.python_type()
+                and self._frozen_fields.keys() == other._frozen_fields.keys()
+                and all(
+                    a.is_python_equal(b)
+                    for a, b in zip(
+                        self._frozen_fields.values(), other._frozen_fields.values()
+                    )
+                )
+            )
         if (
             isinstance(other, VariableTracker)
             and self.is_python_constant()
@@ -2367,6 +2344,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if not isinstance(other, UserDefinedVariable):
             return False
         return self.value is other.value
+
+    def as_proxy(self) -> object:
+        if hasattr(self, "_frozen_fields"):
+            from dataclasses import fields as dc_fields
+
+            args: list[object] = []
+            kwargs: dict[str, object] = {}
+            for field in dc_fields(self.value):  # type: ignore[arg-type]
+                proxy = self._frozen_fields[field.name].as_proxy()
+                if getattr(field, "kw_only", False):
+                    kwargs[field.name] = proxy
+                else:
+                    args.append(proxy)
+            return self.python_type()(*args, **kwargs)
+        return super().as_proxy()
 
     def call_tree_map_branch(
         self,
@@ -2542,194 +2534,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tree_map_kwargs,
             keypath,
         )
-
-
-class FrozenDataClassVariable(UserDefinedObjectVariable):
-    @staticmethod
-    def create(
-        tx: "InstructionTranslator", value: object, source: Source
-    ) -> "FrozenDataClassVariable":
-        from dataclasses import fields
-
-        assert is_frozen_dataclass(value)
-
-        field_map = {}
-        for field in fields(value):  # type: ignore[arg-type]
-            if hasattr(value, field.name):
-                field_map[field.name] = VariableTracker.build(
-                    tx,
-                    getattr(value, field.name),
-                    source and AttrSource(source, field.name),
-                )
-
-        return FrozenDataClassVariable(value, fields=field_map, source=source)
-
-    def __init__(
-        self, value: object, fields: dict[str, Any] | None = None, **kwargs: Any
-    ) -> None:
-        super().__init__(value, **kwargs)
-        if fields is None:
-            fields = {}
-        self.fields = fields
-
-    def as_python_constant(self) -> object:
-        # NOTE: this is an intentionally limited version of
-        # `as_python_constant` for `nonstrict_trace` implementation.
-        from dataclasses import fields
-
-        import torch.utils._pytree as pytree
-
-        if not istype(
-            self.value, (pytree.TreeSpec, pytree.LeafSpec, pytree.ConstantNode)
-        ):
-            # TODO loosen this restriction and fix `as_proxy`.
-            raise NotImplementedError(
-                "currently can't reconstruct arbitrary frozen dataclass instances"
-            )
-
-        # LeafSpec is deprecated, use treespec_leaf() instead
-        if istype(self.value, pytree.LeafSpec):
-            return pytree.treespec_leaf()
-
-        args = []
-        kwargs = {}
-        for field in fields(self.value):  # type: ignore[arg-type]
-            if field.init:
-                data = self.fields[field.name].as_python_constant()
-                if getattr(field, "kw_only", False):
-                    kwargs[field.name] = data
-                else:
-                    args.append(data)
-
-        # This is safe because we know the TreeSpec classes constructors don't
-        # have external side effects.
-        ctor = self.python_type()
-        return ctor(*args, **kwargs)
-
-    def as_proxy(self) -> object:
-        from dataclasses import fields
-
-        args = []
-        kwargs = {}
-        for field in fields(self.value):  # type: ignore[arg-type]
-            proxy = self.fields[field.name].as_proxy()
-            if hasattr(field, "kw_only") and field.kw_only:
-                kwargs[field.name] = proxy
-            else:
-                args.append(proxy)
-
-        # TODO this isn't really safe, because
-        # 1. it could invoke a user defined `__post_init__`.
-        # 2. it could invoke a user defined `__init__` if the class _subclasses_
-        #    a frozen dataclass.
-        # Either of the above could end up mutating external state.
-        ctor = self.python_type()
-        return ctor(*args, **kwargs)
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        from dataclasses import fields
-
-        # Handle specific pytree classes
-        import torch.utils._pytree as pytree
-
-        if isinstance(self.value, pytree.TreeSpec) and self.value.is_leaf():
-            # Create a new LeafSpec instance by calling the constructor
-            codegen.add_push_null(
-                lambda: codegen.load_import_from("torch.utils._pytree", "LeafSpec")
-            )
-            codegen.extend_output(create_call_function(0, False))
-            return
-
-        # For general frozen dataclasses, reconstruct by calling the constructor
-        # with the field values as arguments
-        dataclass_cls = self.python_type()
-
-        if hasattr(dataclass_cls, "__post_init__"):
-            unimplemented(
-                gb_type="Frozen dataclass with __post_init__",
-                context=f"dataclass={dataclass_cls.__name__}",
-                explanation="Cannot reconstruct frozen dataclass with __post_init__ method, "
-                "as it may have side effects that would be incorrectly replayed.",
-                hints=[
-                    "Remove the __post_init__ method from the frozen dataclass.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
-        # Collect positional and keyword-only arguments
-        pos_args = []
-        # pyrefly: ignore [implicit-any]
-        kw_args = []
-        for field in fields(dataclass_cls):
-            if not field.init:
-                continue
-            field_vt = self.fields.get(field.name)
-            if field_vt is None:
-                unimplemented(
-                    gb_type="Frozen dataclass with missing field",
-                    context=f"dataclass={dataclass_cls.__name__}, field={field.name}",
-                    explanation=f"Cannot reconstruct frozen dataclass: field '{field.name}' "
-                    "was not tracked during tracing.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            if getattr(field, "kw_only", False):
-                kw_args.append((field.name, field_vt))
-            else:
-                pos_args.append(field_vt)
-
-        # Load the dataclass constructor
-        codegen.add_push_null(
-            lambda: codegen.append_output(
-                codegen.create_load_const_unchecked(dataclass_cls)
-            )
-        )
-        # Reconstruct all arguments
-        for arg_vt in pos_args:
-            codegen(arg_vt)
-        for _, arg_vt in kw_args:
-            codegen(arg_vt)
-        # Call the constructor
-        total_args = len(pos_args) + len(kw_args)
-        if kw_args:
-            kw_names = tuple(name for name, _ in kw_args)
-            codegen.extend_output(
-                codegen.create_call_function_kw(total_args, kw_names, push_null=False)
-            )
-        else:
-            codegen.extend_output(create_call_function(total_args, False))
-
-    # NB: This is called during __init__ for a frozen dataclass
-    # use this to accumulate the most up-to-date field values
-    def method_setattr_standard(
-        self,
-        tx: "InstructionTranslator",
-        name: VariableTracker,
-        value: VariableTracker,
-        directly_update_dict: bool = False,
-    ) -> VariableTracker:
-        self.fields[name.as_python_constant()] = value
-        return super().method_setattr_standard(tx, name, value, directly_update_dict)
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.value_type.__name__})"
-
-    def is_python_hashable(self) -> Literal[True]:
-        # TODO - Check corner cases like eq=False, hash=False etc
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
-
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, FrozenDataClassVariable):
-            return False
-        is_class_same = self.python_type() is other.python_type()
-        is_field_name_same = self.fields.keys() == other.fields.keys()
-        is_field_value_same = all(
-            value_a.is_python_equal(value_b)
-            for value_a, value_b in zip(self.fields.values(), other.fields.values())
-        )
-        return is_class_same and is_field_name_same and is_field_value_same
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):

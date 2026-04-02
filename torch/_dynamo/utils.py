@@ -5335,6 +5335,9 @@ def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
     from . import graph_break_hints
     from .exc import unimplemented
 
+    if is_frozen_dataclass(obj):
+        return
+
     is_overridden = type(obj).__dict__.get("__hash__", False)
 
     if is_overridden:

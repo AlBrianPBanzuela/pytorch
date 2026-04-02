@@ -154,7 +154,6 @@ from ..utils import (
     get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
-    is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
     is_invoke_subgraph,
@@ -292,7 +291,6 @@ from .torch_function import (
     TorchFunctionModeVariable,
 )
 from .user_defined import (
-    FrozenDataClassVariable,
     InspectVariable,
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
@@ -1771,10 +1769,6 @@ class VariableBuilder:
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = MutableMappingVariable(value, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
-        elif is_frozen_dataclass(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
             if all(ConstantVariable.is_literal(k) for k in value):
