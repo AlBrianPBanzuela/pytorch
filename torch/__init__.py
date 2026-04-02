@@ -2569,6 +2569,8 @@ def compile(
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
+    recompile_limit: builtins.int | None = None,
+    nested_compile_regions: list[type] | None = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2582,6 +2584,8 @@ def compile(
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
+    recompile_limit: builtins.int | None = None,
+    nested_compile_regions: list[type] | None = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
