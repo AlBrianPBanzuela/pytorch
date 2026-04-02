@@ -45,6 +45,7 @@ from ..exc import (
     ObservedAttributeError,
     ObservedUserStopIteration,
     raise_observed_exception,
+    type_error,
     unimplemented,
     Unsupported,
     UserError,
@@ -1226,7 +1227,7 @@ class BuiltinVariable(VariableTracker):
         try:
             return args[0].var_getattr(tx, "__dict__")
         except ObservedAttributeError:
-            raise_observed_exception(TypeError, tx)
+            type_error(tx)
 
     def _handle_insert_op_in_graph(
         self,
