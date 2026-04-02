@@ -294,25 +294,27 @@ class PythonNativeModule(types.ModuleType):
 
     def __dir__(self):
         """Return available attributes including DSL names."""
-        attrs = [
-            "available_dsls",
-            "all_dsls",
-            "get_dsl_operations",
-            "disable_operations",
-            "enable_operations",
-            "disable_dispatch_keys",
-            "enable_dispatch_keys",
-            "operations_disabled",
-        ]
+        attrs = set(
+            {
+                "available_dsls",
+                "all_dsls",
+                "get_dsl_operations",
+                "disable_operations",
+                "enable_operations",
+                "disable_dispatch_keys",
+                "enable_dispatch_keys",
+                "operations_disabled",
+            }
+        )
 
         # Add DSL names
         try:
-            attrs.extend(self.all_dsls)
+            attrs.update(self.all_dsls)
         except Exception:
             # If registry not available yet, skip DSL names
             pass
 
-        return sorted(set(attrs))
+        return sorted(attrs)
 
 
 # Replace the current module with our enhanced version
