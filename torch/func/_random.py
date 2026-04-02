@@ -83,7 +83,7 @@ def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
-        data (int): A non-negative integer to fold into the key.
+        data (int): An integer to fold into the key, interpreted as uint64.
 
     Returns:
         A new key tensor with the same shape as ``key``.
