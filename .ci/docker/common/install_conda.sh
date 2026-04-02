@@ -59,7 +59,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   CONDA_CHANNEL_ARGS=""
   if [[ $PYTHON_DEV_CHANNEL == "1" ]]
   then
-    CONDA_CHANNEL_ARGS="-c conda-forge/label/python_dev"
+    CONDA_CHANNEL_ARGS="-c conda-forge/label/python_dev -c conda-forge/label/python_rc"
   fi
 
   # Install correct Python version
