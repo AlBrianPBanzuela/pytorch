@@ -1106,6 +1106,7 @@ def _overload_method(func):
         # Fixed in 3.13.9. Swallow the error on affected versions; re-raise otherwise.
         if sys.version_info[:3] == (3, 13, 8):
             import warnings
+
             warnings.warn(
                 "Skipping overload body check due to a known CPython 3.13.8 bug "
                 "(https://github.com/python/cpython/issues/139783). "
