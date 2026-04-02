@@ -292,7 +292,7 @@ static py::handle _callback_from_action(
 static int32_t c_recursion_limit = -1;
 
 void dynamo_set_c_recursion_limit(int32_t limit) {
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       limit >= 1 || limit == -1,
       "recursion limit must be >= 1, or -1 to reset");
   c_recursion_limit = limit;
