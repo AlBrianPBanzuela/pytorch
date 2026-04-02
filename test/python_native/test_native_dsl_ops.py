@@ -276,6 +276,7 @@ class TestNativeDSLOps(TestCase):
 
         # Use the preserve_filter_state context manager pattern
         from torch._native.registry import _filter_state
+
         original_filter_state = (
             set(_filter_state._dsl_names),
             set(_filter_state._op_symbols),
