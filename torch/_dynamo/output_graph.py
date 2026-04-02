@@ -509,10 +509,14 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     # _side_effectful_functions, and random ops.
     if node.is_impure():
         return False
-    # Non-OpOverload call_function targets that take no FX Node arguments are
-    # likely state-changing operations (e.g., _vmap_increment_nesting,
-    # _set_fwd_grad_enabled). Functions consuming tensors are computations.
+    # Non-OpOverload call_function targets need two checks:
+    # 1. In-place functions (name ending with '_') mutate their inputs.
+    # 2. Targets with no FX Node arguments are likely state-changing operations
+    #    (e.g., _vmap_increment_nesting, _set_fwd_grad_enabled).
     if not isinstance(node.target, torch._ops.OpOverload):
+        name = getattr(node.target, "__name__", "")
+        if name.endswith("_"):
+            return False
         return bool(node.all_input_nodes)
     return True
 
@@ -520,7 +524,8 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
 def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
     """
     Reorder graph nodes into a canonical topological order that is deterministic
-    regardless of the order in which nodes were originally traced.
+    regardless of the order in which nodes were originally traced, and rename
+    them to canonical names.
 
     This ensures that structurally equivalent graphs (e.g., same model traced with
     different dict iteration orders across distributed ranks) produce identical node
@@ -534,10 +539,10 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
 
     Nodes that aren't provably pure act as barriers — they are chained in
     original order, and pure nodes are confined to their barrier segment.
-    """
-    from torch.fx.graph import map_arg
 
-    new_graph = fx.Graph()
+    Operates in-place on the graph to preserve node object identity (required
+    by GraphRegionTracker and other infrastructure that holds node references).
+    """
     indeg: dict[fx.Node, int] = dict.fromkeys(graph.nodes, 0)
 
     # Build standard data-dependency edges
@@ -589,17 +594,6 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
             input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
             return (2, input_indices)
 
-    def _copy_node(node: fx.Node) -> fx.Node:
-        # Like node_copy but without preserving the original name, so the
-        # new graph's namespace assigns canonical names based on target.
-        args = map_arg(node.args, lambda x: env[x])
-        kwargs = map_arg(node.kwargs, lambda x: env[x])
-        new_node = new_graph.create_node(
-            node.op, node.target, args, kwargs, type_expr=node.type
-        )
-        new_node.meta = copy.copy(node.meta)
-        return new_node
-
     # Seed the heap with nodes that have no dependencies
     ready: list[tuple[tuple[Any, ...], int, fx.Node]] = []
     for node in graph.nodes:
@@ -607,11 +601,11 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
             heapq.heappush(ready, (_canonical_key(node), counter, node))
             counter += 1
 
-    env: dict[fx.Node, fx.Node] = {}
+    canonical_order: list[fx.Node] = []
 
     while ready:
         _, _, cur = heapq.heappop(ready)
-        env[cur] = _copy_node(cur)
+        canonical_order.append(cur)
         canonical_idx[cur] = len(canonical_idx)
 
         for user in itertools.chain(cur.users, extra_users.get(cur, ())):
@@ -620,15 +614,33 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
                 heapq.heappush(ready, (_canonical_key(user), counter, user))
                 counter += 1
 
-    if len(new_graph.nodes) != len(graph.nodes):
+    if len(canonical_order) != len(list(graph.nodes)):
         remaining = [n for n in indeg if indeg[n] != 0]
         raise RuntimeError(
-            f"Canonicalization failed: processed {len(new_graph.nodes)} of "
-            f"{len(graph.nodes)} nodes. Remaining: {remaining}"
+            f"Canonicalization failed: processed {len(canonical_order)} of "
+            f"{len(list(graph.nodes))} nodes. Remaining: {remaining}"
         )
 
-    new_graph._codegen = graph._codegen
-    return new_graph
+    # Reorder nodes in-place: move each node after the previously placed one.
+    # graph._root is the sentinel; inserting after it places at the front.
+    cursor = graph._root  # type: ignore[attr-defined]
+    for node in canonical_order:
+        cursor.append(node)
+        cursor = node
+
+    # Rename nodes to canonical names based on target (same naming scheme that
+    # FX Graph.create_node uses for auto-generated names).
+    from torch.fx.graph import _Namespace
+
+    ns = _Namespace()
+    for node in graph.nodes:
+        candidate = graph._target_to_str(node.target)
+        new_name = ns.create_name(candidate, node)
+        node.name = new_name
+    # Replace the graph's namespace so future node creation stays consistent
+    graph._graph_namespace = ns
+
+    return graph
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -2750,7 +2762,8 @@ class OutputGraph(OutputGraphCommon):
             # free a bit of memory
             self.real_value_cache.clear()
 
-            self.graph = _canonicalize_graph(self.graph)
+            if not self.export:
+                _canonicalize_graph(self.graph)
 
             gm = _make_graph_module(root, self.graph)
 
