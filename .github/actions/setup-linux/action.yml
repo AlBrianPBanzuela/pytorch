@@ -55,7 +55,7 @@ runs:
         # can update the uid to 1001 eventually when everything migrates to ARC.
         # In the meantime, this is a quick fix to ensure that CI has the permission
         # to use the GITHUB_WORKSPACE while still allowing the GH hook (uid 1001,
-        # gid 1001) to clean up the directory after the job        
+        # gid 1001) to clean up the directory after the job
         sudo chmod -R 777 "$GITHUB_WORKSPACE"
 
     - name: Ack Git cache ownership
