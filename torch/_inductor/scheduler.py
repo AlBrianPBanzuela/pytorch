@@ -5629,8 +5629,8 @@ class Scheduler:
                 r = node2_reads.get(buffer_name) or node1_reads.get(buffer_name)
                 if isinstance(w, MemoryDep) and isinstance(r, MemoryDep):
                     sv = V.graph.sizevars
-                    w_sizes = set(w.normalize().size)
-                    r_sizes = set(r.normalize().size)
+                    w_sizes = w.normalize().size
+                    r_sizes = r.normalize().size
                     if not all(
                         any(sv.statically_known_equals(ws, rs) for rs in r_sizes)
                         for ws in w_sizes
