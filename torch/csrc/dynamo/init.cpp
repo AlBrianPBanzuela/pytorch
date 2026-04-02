@@ -229,115 +229,106 @@ enum class PyTypeSlotBit : int64_t {
 
 int64_t get_pysequence_slots(PyTypeObject* type) {
   int64_t slots = 0;
-  if (type->tp_as_sequence == nullptr) {
-    return slots;
-  }
-  if (type->tp_as_sequence->sq_length != nullptr)
+  if (PyType_GetSlot(type, Py_sq_length) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_LENGTH));
-  if (type->tp_as_sequence->sq_concat != nullptr)
+  if (PyType_GetSlot(type, Py_sq_concat) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_CONCAT));
-  if (type->tp_as_sequence->sq_repeat != nullptr)
+  if (PyType_GetSlot(type, Py_sq_repeat) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_REPEAT));
-  if (type->tp_as_sequence->sq_item != nullptr)
+  if (PyType_GetSlot(type, Py_sq_item) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_ITEM));
-  if (type->tp_as_sequence->sq_contains != nullptr)
+  if (PyType_GetSlot(type, Py_sq_contains) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_CONTAINS));
-  if (type->tp_as_sequence->sq_ass_item != nullptr)
+  if (PyType_GetSlot(type, Py_sq_ass_item) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_ASS_ITEM));
-  if (type->tp_as_sequence->sq_inplace_concat != nullptr)
+  if (PyType_GetSlot(type, Py_sq_inplace_concat) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_INPLACE_CONCAT));
-  if (type->tp_as_sequence->sq_inplace_repeat != nullptr)
+  if (PyType_GetSlot(type, Py_sq_inplace_repeat) != nullptr)
     slots |= (1LL << static_cast<int>(PySequenceSlotBit::SQ_INPLACE_REPEAT));
   return slots;
 }
 
 int64_t get_pymapping_slots(PyTypeObject* type) {
   int64_t slots = 0;
-  if (type->tp_as_mapping == nullptr) {
-    return slots;
-  }
-  if (type->tp_as_mapping->mp_length != nullptr)
+  if (PyType_GetSlot(type, Py_mp_length) != nullptr)
     slots |= (1LL << static_cast<int>(PyMappingSlotBit::MP_LENGTH));
-  if (type->tp_as_mapping->mp_subscript != nullptr)
+  if (PyType_GetSlot(type, Py_mp_subscript) != nullptr)
     slots |= (1LL << static_cast<int>(PyMappingSlotBit::MP_SUBSCRIPT));
-  if (type->tp_as_mapping->mp_ass_subscript != nullptr)
+  if (PyType_GetSlot(type, Py_mp_ass_subscript) != nullptr)
     slots |= (1LL << static_cast<int>(PyMappingSlotBit::MP_ASS_SUBSCRIPT));
   return slots;
 }
 
 int64_t get_pynumber_slots(PyTypeObject* type) {
   int64_t slots = 0;
-  if (type->tp_as_number == nullptr) {
-    return slots;
-  }
-  if (type->tp_as_number->nb_add != nullptr)
+  if (PyType_GetSlot(type, Py_nb_add) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_ADD));
-  if (type->tp_as_number->nb_subtract != nullptr)
+  if (PyType_GetSlot(type, Py_nb_subtract) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_SUBTRACT));
-  if (type->tp_as_number->nb_multiply != nullptr)
+  if (PyType_GetSlot(type, Py_nb_multiply) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_MULTIPLY));
-  if (type->tp_as_number->nb_remainder != nullptr)
+  if (PyType_GetSlot(type, Py_nb_remainder) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_REMAINDER));
-  if (type->tp_as_number->nb_power != nullptr)
+  if (PyType_GetSlot(type, Py_nb_power) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_POWER));
-  if (type->tp_as_number->nb_negative != nullptr)
+  if (PyType_GetSlot(type, Py_nb_negative) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_NEGATIVE));
-  if (type->tp_as_number->nb_positive != nullptr)
+  if (PyType_GetSlot(type, Py_nb_positive) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_POSITIVE));
-  if (type->tp_as_number->nb_absolute != nullptr)
+  if (PyType_GetSlot(type, Py_nb_absolute) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_ABSOLUTE));
-  if (type->tp_as_number->nb_bool != nullptr)
+  if (PyType_GetSlot(type, Py_nb_bool) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_BOOL));
-  if (type->tp_as_number->nb_invert != nullptr)
+  if (PyType_GetSlot(type, Py_nb_invert) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INVERT));
-  if (type->tp_as_number->nb_lshift != nullptr)
+  if (PyType_GetSlot(type, Py_nb_lshift) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_LSHIFT));
-  if (type->tp_as_number->nb_rshift != nullptr)
+  if (PyType_GetSlot(type, Py_nb_rshift) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_RSHIFT));
-  if (type->tp_as_number->nb_and != nullptr)
+  if (PyType_GetSlot(type, Py_nb_and) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_AND));
-  if (type->tp_as_number->nb_xor != nullptr)
+  if (PyType_GetSlot(type, Py_nb_xor) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_XOR));
-  if (type->tp_as_number->nb_or != nullptr)
+  if (PyType_GetSlot(type, Py_nb_or) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_OR));
-  if (type->tp_as_number->nb_int != nullptr)
+  if (PyType_GetSlot(type, Py_nb_int) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INT));
-  if (type->tp_as_number->nb_float != nullptr)
+  if (PyType_GetSlot(type, Py_nb_float) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_FLOAT));
-  if (type->tp_as_number->nb_inplace_add != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_add) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_ADD));
-  if (type->tp_as_number->nb_inplace_subtract != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_subtract) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_SUBTRACT));
-  if (type->tp_as_number->nb_inplace_multiply != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_multiply) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_MULTIPLY));
-  if (type->tp_as_number->nb_inplace_remainder != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_remainder) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_REMAINDER));
-  if (type->tp_as_number->nb_inplace_power != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_power) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_POWER));
-  if (type->tp_as_number->nb_inplace_lshift != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_lshift) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_LSHIFT));
-  if (type->tp_as_number->nb_inplace_rshift != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_rshift) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_RSHIFT));
-  if (type->tp_as_number->nb_inplace_and != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_and) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_AND));
-  if (type->tp_as_number->nb_inplace_xor != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_xor) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_XOR));
-  if (type->tp_as_number->nb_inplace_or != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_or) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_OR));
-  if (type->tp_as_number->nb_floor_divide != nullptr)
+  if (PyType_GetSlot(type, Py_nb_floor_divide) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_FLOOR_DIVIDE));
-  if (type->tp_as_number->nb_true_divide != nullptr)
+  if (PyType_GetSlot(type, Py_nb_true_divide) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_TRUE_DIVIDE));
-  if (type->tp_as_number->nb_inplace_floor_divide != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_floor_divide) != nullptr)
     slots |=
         (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_FLOOR_DIVIDE));
-  if (type->tp_as_number->nb_inplace_true_divide != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_true_divide) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_TRUE_DIVIDE));
-  if (type->tp_as_number->nb_index != nullptr)
+  if (PyType_GetSlot(type, Py_nb_index) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_INDEX));
-  if (type->tp_as_number->nb_matrix_multiply != nullptr)
+  if (PyType_GetSlot(type, Py_nb_matrix_multiply) != nullptr)
     slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_MATRIX_MULTIPLY));
-  if (type->tp_as_number->nb_inplace_matrix_multiply != nullptr)
+  if (PyType_GetSlot(type, Py_nb_inplace_matrix_multiply) != nullptr)
     slots |=
         (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY));
   return slots;
@@ -345,25 +336,25 @@ int64_t get_pynumber_slots(PyTypeObject* type) {
 
 int64_t get_pytype_slots(PyTypeObject* type) {
   int64_t slots = 0;
-  if (type->tp_hash != nullptr)
+  if (PyType_GetSlot(type, Py_tp_hash) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_HASH));
-  if (type->tp_iter != nullptr)
+  if (PyType_GetSlot(type, Py_tp_iter) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITER));
-  if (type->tp_iternext != nullptr)
+  if (PyType_GetSlot(type, Py_tp_iternext) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITERNEXT));
-  if (type->tp_call != nullptr)
+  if (PyType_GetSlot(type, Py_tp_call) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_CALL));
-  if (type->tp_repr != nullptr)
+  if (PyType_GetSlot(type, Py_tp_repr) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_REPR));
-  if (type->tp_richcompare != nullptr)
+  if (PyType_GetSlot(type, Py_tp_richcompare) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_RICHCOMPARE));
-  if (type->tp_getattro != nullptr)
+  if (PyType_GetSlot(type, Py_tp_getattro) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_GETATTRO));
-  if (type->tp_setattro != nullptr)
+  if (PyType_GetSlot(type, Py_tp_setattro) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_SETATTRO));
-  if (type->tp_descr_get != nullptr)
+  if (PyType_GetSlot(type, Py_tp_descr_get) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_GET));
-  if (type->tp_descr_set != nullptr)
+  if (PyType_GetSlot(type, Py_tp_descr_set) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_SET));
   return slots;
 }
@@ -513,6 +504,78 @@ void initDynamoBindings(PyObject* torch) {
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
   m.def("code_framelocals_names", &code_framelocals_names);
   _register_functions(dynamo);
+
+  auto dynamo_module = py::handle(dynamo).cast<py::module>();
+  dynamo_module.def("has_slot", [](int64_t slots, py::object slot_bit_obj) {
+    // Convert slot_bit to int - handle both int and pybind11 enums
+    int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
+    return (slots & (1LL << slot_bit)) != 0;
+  });
+  py::enum_<PySequenceSlotBit>(dynamo_module, "PySequenceSlots")
+      .value("SQ_LENGTH", PySequenceSlotBit::SQ_LENGTH)
+      .value("SQ_CONCAT", PySequenceSlotBit::SQ_CONCAT)
+      .value("SQ_REPEAT", PySequenceSlotBit::SQ_REPEAT)
+      .value("SQ_ITEM", PySequenceSlotBit::SQ_ITEM)
+      .value("SQ_CONTAINS", PySequenceSlotBit::SQ_CONTAINS)
+      .value("SQ_ASS_ITEM", PySequenceSlotBit::SQ_ASS_ITEM)
+      .value("SQ_INPLACE_CONCAT", PySequenceSlotBit::SQ_INPLACE_CONCAT)
+      .value("SQ_INPLACE_REPEAT", PySequenceSlotBit::SQ_INPLACE_REPEAT);
+
+  py::enum_<PyMappingSlotBit>(dynamo_module, "PyMappingSlots")
+      .value("MP_LENGTH", PyMappingSlotBit::MP_LENGTH)
+      .value("MP_SUBSCRIPT", PyMappingSlotBit::MP_SUBSCRIPT)
+      .value("MP_ASS_SUBSCRIPT", PyMappingSlotBit::MP_ASS_SUBSCRIPT);
+
+  py::enum_<PyNumberSlotBit>(dynamo_module, "PyNumberSlots")
+      .value("NB_ADD", PyNumberSlotBit::NB_ADD)
+      .value("NB_SUBTRACT", PyNumberSlotBit::NB_SUBTRACT)
+      .value("NB_MULTIPLY", PyNumberSlotBit::NB_MULTIPLY)
+      .value("NB_REMAINDER", PyNumberSlotBit::NB_REMAINDER)
+      .value("NB_POWER", PyNumberSlotBit::NB_POWER)
+      .value("NB_NEGATIVE", PyNumberSlotBit::NB_NEGATIVE)
+      .value("NB_POSITIVE", PyNumberSlotBit::NB_POSITIVE)
+      .value("NB_ABSOLUTE", PyNumberSlotBit::NB_ABSOLUTE)
+      .value("NB_BOOL", PyNumberSlotBit::NB_BOOL)
+      .value("NB_INVERT", PyNumberSlotBit::NB_INVERT)
+      .value("NB_LSHIFT", PyNumberSlotBit::NB_LSHIFT)
+      .value("NB_RSHIFT", PyNumberSlotBit::NB_RSHIFT)
+      .value("NB_AND", PyNumberSlotBit::NB_AND)
+      .value("NB_XOR", PyNumberSlotBit::NB_XOR)
+      .value("NB_OR", PyNumberSlotBit::NB_OR)
+      .value("NB_INT", PyNumberSlotBit::NB_INT)
+      .value("NB_FLOAT", PyNumberSlotBit::NB_FLOAT)
+      .value("NB_INPLACE_ADD", PyNumberSlotBit::NB_INPLACE_ADD)
+      .value("NB_INPLACE_SUBTRACT", PyNumberSlotBit::NB_INPLACE_SUBTRACT)
+      .value("NB_INPLACE_MULTIPLY", PyNumberSlotBit::NB_INPLACE_MULTIPLY)
+      .value("NB_INPLACE_REMAINDER", PyNumberSlotBit::NB_INPLACE_REMAINDER)
+      .value("NB_INPLACE_POWER", PyNumberSlotBit::NB_INPLACE_POWER)
+      .value("NB_INPLACE_LSHIFT", PyNumberSlotBit::NB_INPLACE_LSHIFT)
+      .value("NB_INPLACE_RSHIFT", PyNumberSlotBit::NB_INPLACE_RSHIFT)
+      .value("NB_INPLACE_AND", PyNumberSlotBit::NB_INPLACE_AND)
+      .value("NB_INPLACE_XOR", PyNumberSlotBit::NB_INPLACE_XOR)
+      .value("NB_INPLACE_OR", PyNumberSlotBit::NB_INPLACE_OR)
+      .value("NB_FLOOR_DIVIDE", PyNumberSlotBit::NB_FLOOR_DIVIDE)
+      .value("NB_TRUE_DIVIDE", PyNumberSlotBit::NB_TRUE_DIVIDE)
+      .value(
+          "NB_INPLACE_FLOOR_DIVIDE", PyNumberSlotBit::NB_INPLACE_FLOOR_DIVIDE)
+      .value("NB_INPLACE_TRUE_DIVIDE", PyNumberSlotBit::NB_INPLACE_TRUE_DIVIDE)
+      .value("NB_INDEX", PyNumberSlotBit::NB_INDEX)
+      .value("NB_MATRIX_MULTIPLY", PyNumberSlotBit::NB_MATRIX_MULTIPLY)
+      .value(
+          "NB_INPLACE_MATRIX_MULTIPLY",
+          PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY);
+
+  py::enum_<PyTypeSlotBit>(dynamo_module, "PyTypeSlots")
+      .value("TP_HASH", PyTypeSlotBit::TP_HASH)
+      .value("TP_ITER", PyTypeSlotBit::TP_ITER)
+      .value("TP_ITERNEXT", PyTypeSlotBit::TP_ITERNEXT)
+      .value("TP_CALL", PyTypeSlotBit::TP_CALL)
+      .value("TP_REPR", PyTypeSlotBit::TP_REPR)
+      .value("TP_RICHCOMPARE", PyTypeSlotBit::TP_RICHCOMPARE)
+      .value("TP_GETATTRO", PyTypeSlotBit::TP_GETATTRO)
+      .value("TP_SETATTRO", PyTypeSlotBit::TP_SETATTRO)
+      .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
+      .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET);
 
   py::enum_<EvalFrameOverride>(m, "_EvalFrameOverride")
       .value("NONE", EvalFrameOverride::NONE)

@@ -10,8 +10,8 @@ import collections.abc
 import dataclasses
 import enum
 
-from torch._C._dynamo import get_type_slots
-from torch._dynamo._type_slots import (
+from torch._C._dynamo import (
+    get_type_slots,
     has_slot,
     PyMappingSlots,
     PyNumberSlots,
