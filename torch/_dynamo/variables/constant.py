@@ -10,7 +10,7 @@ import enum
 import operator
 from collections.abc import Sequence
 from typing import Any, Literal, Optional, overload, TYPE_CHECKING
-from typing_extensions import Never, override
+from typing_extensions import override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -45,15 +45,15 @@ class ConstantVariable(VariableTracker):
 
     @overload
     @staticmethod
-    def create(value: None) -> Never: ...
+    def create(value: None) -> "ConstantVariable": ...
 
     @overload
     @staticmethod
-    def create(value: Literal[True]) -> Never: ...
+    def create(value: Literal[True]) -> "ConstantVariable": ...
 
     @overload
     @staticmethod
-    def create(value: Literal[False]) -> Never: ...
+    def create(value: Literal[False]) -> "ConstantVariable": ...
 
     @overload
     @staticmethod
@@ -74,6 +74,16 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
+        # Return pre-allocated sentinels for None/True/False when there are
+        # no extra kwargs (source, etc.) that would differentiate the instance.
+        if not kwargs and isinstance(value, (bool, type(None))):
+            if value is None:
+                return CONSTANT_VARIABLE_NONE
+            if value is True:
+                return CONSTANT_VARIABLE_TRUE
+            if value is False:
+                return CONSTANT_VARIABLE_FALSE
+
         source = kwargs.get("source")
 
         # Routing for supported collection literals.
