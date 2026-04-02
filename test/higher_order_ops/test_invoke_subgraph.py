@@ -3814,6 +3814,67 @@ class GraphModule(torch.nn.Module):
         # should reuse the first trace despite having different function ids.
         self.assertEqual(count(), 1)
 
+    def test_subgraph_reuse_class_level_wrap(self):
+        """Wrapping cls.forward with nested_compile_region for named_modules pattern."""
+
+        class Layer(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        # Wrap at the class level — the pattern a user would use after
+        # iterating named_modules to wrap all layers of a given type.
+        Layer.forward = nested_compile_region(Layer.forward)
+
+        mod1 = Layer(5)
+        mod2 = Layer(5)
+
+        def fn(x):
+            return mod1(x) + mod2(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_module_instance_as_callable(self):
+        """Passing nn.Module instances directly to nested_compile_region."""
+
+        class Layer(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        mod1 = Layer(5)
+        mod2 = Layer(5)
+
+        wrapped1 = nested_compile_region(mod1)
+        wrapped2 = nested_compile_region(mod2)
+
+        def fn(x):
+            return wrapped1(x) + wrapped2(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        # Both modules have the same forward code and same c=5, so the
+        # second call should reuse the first trace.
+        self.assertEqual(count(), 1)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
