@@ -8,7 +8,6 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
     TEST_NUMBA_CUDA,
-    xfailIfSM89OrLaterOnWindows,
 )
 from torch.testing._internal.common_utils import TEST_NUMPY
 
@@ -102,7 +101,6 @@ class TestNumbaIntegration(common.TestCase):
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
             self.assertEqual(ar_dict["version"], 2)
 
-    @xfailIfSM89OrLaterOnWindows("Failing on Windows with CUDA SM89+")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     def test_array_adaptor(self):
@@ -324,7 +322,6 @@ class TestNumbaIntegration(common.TestCase):
                     numpy.asarray(numba_ary, dtype=dtype) + 42,
                 )
 
-    @xfailIfSM89OrLaterOnWindows("Failing on Windows with CUDA SM89+")
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")

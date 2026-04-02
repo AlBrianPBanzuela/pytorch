@@ -6,7 +6,7 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_cuda import skipIfNoTritonOnWindows
+from torch.testing._internal.common_cuda import xfailIfNoTriton
 from torch.testing._internal.common_utils import run_tests, skipIfCrossRef
 
 
@@ -625,7 +625,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @skipIfNoTritonOnWindows
+    @xfailIfNoTriton
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_add_tensor_alpha_fma_matches_aten_cuda(self):
         """On CUDA, ATen add_ with tensor alpha extracts the scalar and uses
@@ -644,7 +644,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @skipIfNoTritonOnWindows
+    @xfailIfNoTriton
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcmul_value_1_fma_matches_aten_cuda(self):
         """On CUDA, ATen addcmul_ with value=1 uses hardware fma(t1, t2, self).
@@ -667,7 +667,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @skipIfNoTritonOnWindows
+    @xfailIfNoTriton
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcmul_scalar_value_cuda(self):
         """Compiled addcmul_ with scalar value matches eager on CUDA."""
@@ -685,7 +685,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @skipIfNoTritonOnWindows
+    @xfailIfNoTriton
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcmul_tensor_value_cuda(self):
         """Compiled addcmul_ with tensor value matches eager on CUDA."""
@@ -704,7 +704,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @skipIfNoTritonOnWindows
+    @xfailIfNoTriton
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcdiv_scalar_value_cuda(self):
         """Compiled addcdiv_ with scalar value matches eager on CUDA.
@@ -726,7 +726,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @skipIfNoTritonOnWindows
+    @xfailIfNoTriton
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcdiv_tensor_value_cuda(self):
         """Compiled addcdiv_ with tensor value matches eager on CUDA.
@@ -749,7 +749,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @skipIfNoTritonOnWindows
+    @xfailIfNoTriton
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_add_scalar_alpha_cuda(self):
         """Compiled add_ with scalar alpha matches eager on CUDA."""

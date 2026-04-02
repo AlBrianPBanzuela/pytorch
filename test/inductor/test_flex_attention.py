@@ -51,8 +51,6 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
-    skipIfNoTritonOnWindows,
-    SM89OrLater,
     TEST_MULTIGPU,
 )
 from torch.testing._internal.common_device_type import (
@@ -73,7 +71,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
-    IS_WINDOWS,
     MI200_ARCH,
     skipIfRocm,
     skipIfRocmArch,
@@ -470,7 +467,6 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-@skipIfNoTritonOnWindows
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
@@ -5930,7 +5926,6 @@ class GraphModule(torch.nn.Module):
         )
 
 
-@skipIfNoTritonOnWindows
 class TestBlockMask(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -6995,7 +6990,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 )
 
 
-@skipIfNoTritonOnWindows
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
@@ -7461,7 +7455,6 @@ supports_learnable_bias = unittest.skipUnless(
 )
 
 
-@skipIfNoTritonOnWindows
 @supports_learnable_bias
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
