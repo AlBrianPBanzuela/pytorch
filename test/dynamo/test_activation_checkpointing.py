@@ -2310,7 +2310,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
             )
             loss = z.sum()
 
-            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+            with torch.fx.traceback.annotate({"phase": "backward"}):
                 dx, dy = _grad(loss, (x, y))
 
             return dx.detach(), dy.detach()
@@ -2364,7 +2364,7 @@ def forward(self, arg0_1, arg1_1):
             )
             loss = z.sum()
 
-            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+            with torch.fx.traceback.annotate({"phase": "backward"}):
                 dx = _grad(loss, x)[0]
 
             return dx
@@ -2421,7 +2421,7 @@ def forward(self, arg0_1, arg1_1):
             )
             loss = result.sum()
 
-            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+            with torch.fx.traceback.annotate({"phase": "backward"}):
                 dx, dw, db = _grad(loss, (x, w1, b1))
             return dx, dw, db
 
@@ -2497,7 +2497,7 @@ def forward(self, arg0_1, arg1_1):
             )
             loss = z.sum()
 
-            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+            with torch.fx.traceback.annotate({"phase": "backward"}):
                 dx = _grad(loss, x)[0]
 
             return dx.detach()
@@ -2546,7 +2546,7 @@ def forward(self, arg0_1):
             )
             loss = z.sum()
 
-            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+            with torch.fx.traceback.annotate({"phase": "backward"}):
                 dx = _grad(loss, x)[0]
 
             return dx.detach()
@@ -2661,6 +2661,7 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
 
         with (
             torch.compiler._non_strict_tracing_context(),
+            torch.compiler._patch_autograd_grad(),
             preserve_node_meta(),
         ):
             return make_fx(train_step)(*full_args)
@@ -2810,6 +2811,36 @@ def forward(self, arg0_1, arg1_1):
     mm_2 = torch.ops.aten.mm.default(t, mul_2);  t = mul_2 = None
     return (mm_2,)""",
         )
+
+    def test_is_backward_tag_on_checkpoint_nodes(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return checkpoint(
+                    lambda x: torch.sin(x @ self.w), x, use_reentrant=False
+                )
+
+        gm = self._trace_train_step(Model(), torch.randn(2, 4))
+
+        fwd_ops = []
+        bwd_ops = []
+        for node in gm.graph.nodes:
+            if node.op != "call_function":
+                continue
+            if node.meta.get("custom", {}).get("autograd_backward", False):
+                bwd_ops.append(node.target)
+            else:
+                fwd_ops.append(node.target)
+
+        # Forward: mm, sin, sum, ones_like
+        self.assertIn(torch.ops.aten.mm.default, fwd_ops)
+        self.assertIn(torch.ops.aten.sin.default, fwd_ops)
+        # Backward: recomputed mm, cos, mul, t, final mm
+        self.assertIn(torch.ops.aten.cos.default, bwd_ops)
+        self.assertIn(torch.ops.aten.t.default, bwd_ops)
 
 
 if __name__ == "__main__":
