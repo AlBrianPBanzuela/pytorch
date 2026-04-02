@@ -56,7 +56,7 @@ from ..exc import (
     ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
-    type_error,
+    raise_type_error,
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
@@ -704,7 +704,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
             if not args[0].is_python_constant():
-                type_error(tx, "torch.cuda.device() requires a constant argument")
+                raise_type_error(tx, "torch.cuda.device() requires a constant argument")
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)

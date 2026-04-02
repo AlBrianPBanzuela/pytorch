@@ -38,7 +38,7 @@ from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     raise_observed_exception,
-    type_error,
+    raise_type_error,
     unimplemented,
     UnspecializeRestartAnalysis,
     Unsupported,
@@ -635,12 +635,12 @@ class NNModuleVariable(VariableTracker):
 
         if name == "_get_item_by_idx":
             if not args[1].is_python_constant():
-                type_error(
+                raise_type_error(
                     tx,
                     f"``nn.Module`` {module}'s call method {name} requires a constant index argument",
                 )
             if not isinstance(args[0], TupleVariable):
-                type_error(
+                raise_type_error(
                     tx,
                     f"``nn.Module`` {module}'s call method {name} requires a tuple as first argument",
                 )

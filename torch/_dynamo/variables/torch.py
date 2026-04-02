@@ -65,7 +65,7 @@ from ..create_parameter_op import (
 from ..device_interface import get_registered_device_interfaces
 from ..exc import (
     raise_observed_exception,
-    type_error,
+    raise_type_error,
     unimplemented,
     UserError,
     UserErrorType,
@@ -1752,7 +1752,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
-                type_error(
+                raise_type_error(
                     tx,
                     f"push_torch_function takes exactly one argument ({len(args)} given)",
                 )
@@ -1769,7 +1769,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if args or kwargs:
-                type_error(tx, "len_torch_function_stack takes no arguments")
+                raise_type_error(tx, "len_torch_function_stack takes no arguments")
             return VariableTracker.build(
                 tx, len(tx.symbolic_torch_function_state.mode_stack)
             )
@@ -1782,7 +1782,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> TorchFunctionModeVariable:
             if len(args) != 1 or kwargs:
-                type_error(
+                raise_type_error(
                     tx,
                     f"get_function_stack_at takes exactly one argument ({len(args)} given)",
                 )
@@ -2041,7 +2041,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fn: Callable[[int], int | None],
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
-                type_error(
+                raise_type_error(
                     tx,
                     f"{fn.__name__} takes exactly one argument ({len(args)} given)",
                 )
