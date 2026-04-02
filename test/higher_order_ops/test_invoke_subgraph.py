@@ -3946,8 +3946,10 @@ class GraphModule(torch.nn.Module):
                 return x.sin()
 
         model = torch.nn.Sequential(
-            LinearBlock(), ActivationBlock(),
-            LinearBlock(), ActivationBlock(),
+            LinearBlock(),
+            ActivationBlock(),
+            LinearBlock(),
+            ActivationBlock(),
         )
 
         x = torch.randn(8)
