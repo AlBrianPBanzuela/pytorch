@@ -1991,27 +1991,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
-        # Enum members are immutable singletons guarded by ID_MATCH, so their
-        # attributes are fixed. Skip the full MRO guard walk which can fail on
-        # C-extension types in the enum's MRO (e.g. str for StrEnum).
-        if isinstance(self.value, enum.Enum):
-            if not hasattr(self.value, name):
-                raise_observed_exception(
-                    AttributeError,
-                    tx,
-                    args=[
-                        f"'{type(self.value).__name__}' object has no attribute '{name}'",
-                    ],
-                )
-            if name in cmp_name_to_op_mapping:
-                return variables.GetAttrVariable(self, name)
-            member = getattr(self.value, name)
-            if isinstance(member, types.MethodType):
-                return variables.UserMethodVariable(
-                    member.__func__, self, source=source
-                )
-            return VariableTracker.build(tx, member, source)
-
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
