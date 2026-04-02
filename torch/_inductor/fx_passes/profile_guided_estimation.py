@@ -141,6 +141,7 @@ class ProfileData:
 
         self._parse_pg_configs(data)
         self._parse_events(data.get("traceEvents", []))
+        del data  # free raw JSON — can be 100MB+ for large traces
         self._build_indices()
 
         log.info(
@@ -806,24 +807,29 @@ def _get_collective_info(
     node: fx.Node,
 ) -> tuple[str, tuple[int, ...], int, str] | None:
     """Extract (collective_name, pg_ranks, nelems, dtype) from collective node."""
+    import torch.distributed as c10d
     from torch.fx.operator_schemas import normalize_function
 
+    if not c10d.is_initialized():
+        return None
+
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return None
+    collective_name = target.name().split("::")[-1].split(".")[0]
+
+    opt = normalize_function(
+        target,
+        args=node.args,
+        kwargs=node.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    if opt is None:
+        return None
+    _, kwargs = opt
+    group_name = kwargs.get("group_name", "")
+
     try:
-        target = node.target
-        assert isinstance(target, torch._ops.OpOverload)
-        collective_name = target.name().split("::")[-1].split(".")[0]
-
-        opt = normalize_function(
-            target,
-            args=node.args,
-            kwargs=node.kwargs,
-            normalize_to_only_use_kwargs=True,
-        )
-        if opt is None:
-            return None
-        _, kwargs = opt
-        group_name = kwargs.get("group_name", "")
-
         from torch.distributed.distributed_c10d import (
             _resolve_process_group,
             get_process_group_ranks,
@@ -831,34 +837,34 @@ def _get_collective_info(
 
         pg = _resolve_process_group(group_name)
         pg_ranks = tuple(sorted(get_process_group_ranks(pg)))
-
-        # Get nelems from input tensor
-        val = node.meta.get("val")
-        if isinstance(val, torch.Tensor):
-            nelems = 1
-            for s in val.shape:
-                nelems *= int(s)
-            dtype = _dtype_to_profile_str(val.dtype)
-        else:
-            # Try first arg
-            if node.args and isinstance(node.args[0], fx.Node):
-                inp_val = node.args[0].meta.get("val")
-                if isinstance(inp_val, torch.Tensor):
-                    nelems = 1
-                    for s in inp_val.shape:
-                        nelems *= int(s)
-                    dtype = _dtype_to_profile_str(inp_val.dtype)
-                else:
-                    return None
-            else:
-                return None
-
-        return (collective_name, pg_ranks, nelems, dtype)
-    except Exception:
+    except (RuntimeError, KeyError, ValueError):
         log.debug(
-            "PGE: failed to extract collective info for %s", node.name, exc_info=True
+            "PGE: failed to resolve process group for %s", node.name, exc_info=True
         )
         return None
+
+    # Get nelems from input tensor
+    val = node.meta.get("val")
+    if isinstance(val, torch.Tensor):
+        nelems = 1
+        for s in val.shape:
+            nelems *= int(s)
+        dtype = _dtype_to_profile_str(val.dtype)
+    else:
+        # Try first arg
+        if node.args and isinstance(node.args[0], fx.Node):
+            inp_val = node.args[0].meta.get("val")
+            if isinstance(inp_val, torch.Tensor):
+                nelems = 1
+                for s in inp_val.shape:
+                    nelems *= int(s)
+                dtype = _dtype_to_profile_str(inp_val.dtype)
+            else:
+                return None
+        else:
+            return None
+
+    return (collective_name, pg_ranks, nelems, dtype)
 
 
 def _normalize_profile_indices(profile: ProfileData) -> None:
@@ -956,18 +962,15 @@ class ProfileGuidedEstimator:
             )
             return None
         coll_name, pg_ranks, nelems, dtype = info
+        val = node.meta.get("val")
         if override_size is not None:
             if override_size == 0:
-                return 0.0
-            val = node.meta.get("val")
+                return None  # no profile data for zero-size; fall back to analytical
             if isinstance(val, torch.Tensor):
                 elem_size = val.element_size()
                 if elem_size > 0:
                     nelems = override_size // elem_size
-        dtype_bytes = 0
-        val = node.meta.get("val")
-        if isinstance(val, torch.Tensor):
-            dtype_bytes = val.element_size()
+        dtype_bytes = val.element_size() if isinstance(val, torch.Tensor) else 0
         result = self.profile.lookup_collective(coll_name, pg_ranks, nelems, dtype)
         if result is not None:
             est, source = result
@@ -1128,7 +1131,7 @@ def _format_pge_table(
         gpu_name = torch.cuda.get_device_name(0)
         gpu_count = torch.cuda.device_count()
         lines.append(f"GPU: {gpu_name} x{gpu_count}")
-    except Exception:
+    except (RuntimeError, AssertionError):
         lines.append("GPU: unknown")
     lines.append("")
 
@@ -1215,7 +1218,7 @@ def _format_pge_table(
         miss_header = f"{'node':<45} {'op':<30} {'reason'}"
         lines.append(miss_header)
         lines.append("-" * len(miss_header))
-        for m in misses:  # pyrefly: ignore[unsupported-operation]
+        for m in misses:
             node = m.get("node", "")[:44]
             op = (m.get("op") or m.get("target") or "")[:29]
             reason = m.get("reason", "")

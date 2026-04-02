@@ -1914,12 +1914,12 @@ def schedule_overlap_bucketing_from_inductor_configs(
     # Profile-guided latency estimation: load profile and set as custom estimator
     pge_path = dist_opts.profile_guided_estimations_profile_path
     if pge_path and "custom_runtime_estimation" not in kwargs:
-        from torch._inductor.fx_passes.node_runtime_estimation import (
-            make_profile_guided_estimator,
+        from torch._inductor.fx_passes.profile_guided_estimation import (
+            _rank_stride,
+            ProfileGuidedEstimator,
         )
-        from torch._inductor.fx_passes.profile_guided_estimation import _rank_stride
 
-        pge_estimator = make_profile_guided_estimator(pge_path)
+        pge_estimator = ProfileGuidedEstimator(pge_path)
         kwargs["custom_runtime_estimation"] = pge_estimator
         log.info("PGE: using profile-guided estimation from %s", pge_path)
 

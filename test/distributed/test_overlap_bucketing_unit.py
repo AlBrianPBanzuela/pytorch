@@ -19,6 +19,7 @@ from torch._inductor.fx_passes.profile_guided_estimation import (
     _normalize_profile_indices,
     _rank_stride,
     ProfileData,
+    ProfileGuidedEstimator,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -35,7 +36,6 @@ from torch.utils._ordered_set import OrderedSet
 
 
 # flake8: noqa: B950
-# Owner(s): ["module: inductor"]
 
 
 aten = torch.ops.aten
@@ -1650,6 +1650,7 @@ def _load_pge_profile(data):
 
 
 class TestProfileGuidedEstimation(TestCase):
+    # Pure data-path tests (JSON parsing + index lookup) — no Inductor cache needed.
     def test_collective_lookup_and_interpolation(self):
         """Parse collectives, exact lookup, interpolation, stride fallback, name normalization, edge cases."""
         # _rank_stride
@@ -1965,6 +1966,135 @@ class TestProfileGuidedEstimation(TestCase):
             0.06,
             places=4,
         )
+
+    def test_malformed_and_missing_fields(self):
+        """Invalid JSON raises; missing traceEvents yields empty profile."""
+        # Invalid JSON
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{not valid json")
+            path = f.name
+        try:
+            with self.assertRaises(json.JSONDecodeError):
+                profile = ProfileData()
+                profile.load(path)
+        finally:
+            os.unlink(path)
+
+        # Valid JSON but missing traceEvents key
+        profile = _load_pge_profile({"distributedInfo": {"pg_config": {}}})
+        self.assertEqual(len(profile.collectives), 0)
+        self.assertEqual(len(profile.matmuls), 0)
+
+        # Events with missing fields are silently skipped
+        trace = _make_pge_trace(
+            collectives=[
+                {
+                    "name": "allreduce",
+                    "dur": 100.0,
+                    "nelems": 1024,
+                    "dtype": "Float",
+                },
+            ]
+        )
+        # Remove optional fields from the event
+        for ev in trace["traceEvents"]:
+            ev["args"].pop("Group size", None)
+        profile2 = _load_pge_profile(trace)
+        # Should still parse (group_size defaults to 0)
+        self.assertEqual(len(profile2.collectives), 1)
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestProfileGuidedEstimatorIntegration(InductorTestCase):
+    """Integration tests: ProfileGuidedEstimator.__call__ on traced FX graphs."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_estimator_call_on_fx_graph(self):
+        """ProfileGuidedEstimator returns estimates for collective and mm nodes in a traced graph."""
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        pg_ranks = tuple(
+            sorted(dist.get_process_group_ranks(dist.group.WORLD))
+        )
+
+        # Build a trace with matching collective and matmul data
+        trace = _make_pge_trace(
+            collectives=[
+                {
+                    "name": "allreduce",
+                    "dur": 200.0,
+                    "nelems": 256,
+                    "out_nelems": 256,
+                    "dtype": "Float",
+                    "ranks": json.dumps(list(pg_ranks)),
+                    "group_size": len(pg_ranks),
+                },
+            ],
+            matmuls=[
+                {
+                    "shapes": [[16, 16], [16, 16]],
+                    "dur": 50.0,
+                    "dtypes": ["Float", "Float"],
+                },
+            ],
+            pg_config={"0": {"ranks": list(pg_ranks)}},
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as f:
+            json.dump(trace, f)
+            f.flush()
+            trace_path = f.name
+
+        try:
+            estimator = ProfileGuidedEstimator(trace_path)
+
+            def func(a, b):
+                ar = torch.ops._c10d_functional.all_reduce(
+                    a, "sum", len(pg_ranks), group_name
+                )
+                ar_out = torch.ops._c10d_functional.wait_tensor(ar)
+                mm = torch.mm(b, b)
+                return ar_out + mm
+
+            with FakeTensorMode():
+                a = torch.randn(16, 16, device=self.device)
+                b = torch.randn(16, 16, device=self.device)
+                gm = make_fx(func)(a, b)
+
+            # Call estimator on each node
+            collective_hit = False
+            mm_hit = False
+            for node in gm.graph.nodes:
+                est = estimator(node)
+                if "all_reduce" in str(node.target) and "wait" not in str(node.target):
+                    if est is not None:
+                        collective_hit = True
+                        self.assertGreater(est, 0)
+                if node.target == torch.ops.aten.mm.default:
+                    if est is not None:
+                        mm_hit = True
+                        self.assertAlmostEqual(est, 0.05, places=4)
+
+            self.assertTrue(collective_hit, "Estimator should match the collective node")
+            self.assertTrue(mm_hit, "Estimator should match the mm node")
+            self.assertGreater(len(estimator.estimation_log), 0)
+        finally:
+            os.unlink(trace_path)
 
 
 if __name__ == "__main__":
