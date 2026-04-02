@@ -1421,8 +1421,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().as_python_constant()
 
     def as_proxy(self) -> object:
-        if isinstance(self.value, int) and isinstance(self.value, enum.Enum):
-            return int(self.value)
+        if isinstance(self.value, enum.Enum):
+            if isinstance(self.value, int):
+                return int(self.value)
+            return self.value
         return super().as_proxy()
 
     def guard_as_python_constant(self) -> object:

@@ -3373,6 +3373,7 @@ class IterBuiltinVariable(BaseBuiltinVariable):
                     variables.NNModuleVariable,
                     variables.TensorVariable,
                     variables.TupleVariable,
+                    variables.UserDefinedClassVariable,
                     DictViewVariable,
                 ),
             )
