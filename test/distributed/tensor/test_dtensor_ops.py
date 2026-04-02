@@ -394,7 +394,6 @@ dtensor_fails_no_strategy = {
     xfail("index_reduce", "amin"),
     xfail("isin"),
     xfail("linalg.matrix_power"),
-    xfail("linalg.tensorsolve"),
     xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
     xfail("logspace", "tensor_overload"),
