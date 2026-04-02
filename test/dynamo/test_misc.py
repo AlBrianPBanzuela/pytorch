@@ -573,7 +573,7 @@ graph():
                 return False
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(func, backend=backend, fullgraph=True)(
+                out = torch.compile(func, backend=backend, fullgraph=False)(
                     *args, **kwargs
                 )
                 return out
