@@ -146,6 +146,58 @@ static Tensor& s_addmm_out_sparse_dense_mps(
   return r;
 }
 
+static void build_batch_ptr_mps(
+    const Tensor& indices_dim0,
+    int64_t B,
+    Tensor& batch_ptr
+) {
+  // Builds an array of pointers which point to each batches elements. Example:
+  // idx_b = [0, 0, 0, 1, 1, 2, 2, 2, 2]  // 9 non-zero elements
+  //          └─────┘  └──┘  └─────────┘
+  //          batch 0  batch 1  batch 2
+  // batch_ptr = [0, 3, 5, 9]
+  //              │  │  │  └─ end of batch 2 (total nnz)
+  //              │  │  └──── batch 2 starts at index 5
+  //              │  └─────── batch 1 starts at index 3
+  //              └────────── batch 0 starts at index 0
+  TORCH_CHECK(indices_dim0.is_mps() && batch_ptr.is_mps(), "MPS device expected");
+  auto device = indices_dim0.device();
+  auto stream = getCurrentMPSStream();
+
+  const int64_t nnz = indices_dim0.numel();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("build_batch_ptr_from_sorted_batches");
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+
+      const uint32_t tew = pso.threadExecutionWidth;
+      const uint32_t Q = static_cast<uint32_t>(B + 1);
+      const uint32_t tgW = std::min<uint32_t>(Q, tew);
+      MTLSize grid = MTLSizeMake(Q, 1, 1);
+      MTLSize tgs  = MTLSizeMake(tgW, 1, 1);
+
+      mtl_setArgs(enc,
+                  indices_dim0,
+                  batch_ptr,
+                  std::array<uint32_t, 2>{static_cast<uint32_t>(nnz),
+                                          static_cast<uint32_t>(B)});
+      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
+    }
+  });
+}
+
+static void build_row_ptr_per_batch_mps(
+    const Tensor& rows,
+    const Tensor& batch_ptr,
+    int64_t B,
+    int64_t I,
+    Tensor& row_ptr
+) {
+  at::native::mps::csr::build_row_ptr_per_batch_mps_out(rows, batch_ptr, B, I, row_ptr);
+}
+
 
 namespace csr_utils = at::native::mps::csr;
 
@@ -188,10 +240,10 @@ Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tenso
   // builds an array of pointers of where the batch_idx's pointer starts and ends
   // look in function for better explanation
   auto batch_ptr = at::empty({B + 1}, at::device(result_.device()).dtype(kLong));
-  csr_utils::build_batch_ptr_mps_out(idx_b, B, batch_ptr);
+  build_batch_ptr_mps(idx_b, B, batch_ptr);
   // build row_ptr per batch: for each (b, i) get [start, end) into rows/cols/vals
   auto row_ptr = at::empty({B * (I + 1)}, at::device(result_.device()).dtype(kLong));
-  csr_utils::build_row_ptr_per_batch_mps_out(idx_i, batch_ptr, B, I, row_ptr);
+  build_row_ptr_per_batch_mps(idx_i, batch_ptr, B, I, row_ptr);
 
   const bool out_needs_cast = (result_.scalar_type() != computeDtype) || !result_.is_contiguous();
   Tensor out_buf = out_needs_cast
@@ -972,7 +1024,7 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
   {
     auto batch_ptr = at::tensor({0LL, nnzB}, at::device(device).dtype(at::kLong));
     row_ptr_B = at::empty({K + 1}, at::device(device).dtype(at::kLong));
-    csr_utils::build_row_ptr_per_batch_mps_out(B_k, batch_ptr, /*B=*/1, /*I=*/K, row_ptr_B);
+    build_row_ptr_per_batch_mps(B_k, batch_ptr, /*B=*/1, /*I=*/K, row_ptr_B);
   }
 
   auto row_ptr_B_lo = row_ptr_B.narrow(0, 0, K);
@@ -1232,7 +1284,7 @@ Tensor index_select_sparse_mps(const Tensor& self_, int64_t dim, const Tensor& i
   // Build row_ptr for lower/upper bound lookups
   auto batch_ptr = tensor({0LL, nnz}, at::device(self_.device()).dtype(kLong));
   auto row_ptr = empty({I + 1}, at::device(self_.device()).dtype(kLong));
-  csr_utils::build_row_ptr_per_batch_mps_out(sorted_dim_indices, batch_ptr, /*B=*/1, /*I=*/I, row_ptr);
+  build_row_ptr_per_batch_mps(sorted_dim_indices, batch_ptr, /*B=*/1, /*I=*/I, row_ptr);
 
   auto lower = row_ptr.index_select(0, nneg_index);
   auto nneg_index_plus1 = nneg_index.add(1);

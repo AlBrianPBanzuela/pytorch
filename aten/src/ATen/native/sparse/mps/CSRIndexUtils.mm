@@ -206,60 +206,6 @@ static void launch_validate_compressed_sparse_indices_mps_kernel(
   stream->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
-void build_batch_ptr_mps_out(
-    const Tensor& batch_indices,
-    int64_t batch_count,
-    const Tensor& batch_ptr) {
-  TORCH_CHECK(
-      batch_indices.is_mps() && batch_ptr.is_mps(),
-      "build_batch_ptr_mps_out: expected MPS tensors");
-  TORCH_CHECK(
-      batch_ptr.scalar_type() == at::kLong,
-      "build_batch_ptr_mps_out: expected output dtype int64 but got ",
-      batch_ptr.scalar_type());
-  TORCH_CHECK(
-      batch_ptr.numel() == batch_count + 1,
-      "build_batch_ptr_mps_out: expected output shape [",
-      batch_count + 1,
-      "] but got ",
-      batch_ptr.numel());
-
-  // Builds an array of pointers for where each batch begins/ends in a packed
-  // COO index tensor. Example:
-  //   batch indices: [0, 0, 0, 1, 1, 2, 2, 2, 2]
-  //                   └─────┘  └──┘  └─────────┘
-  //                   batch0  batch1   batch2
-  //   batch_ptr -> [0, 3, 5, 9]
-  //                  │  │  │  └─ end of batch2 (total nnz)
-  //                  │  │  └──── batch2 starts at index 5
-  //                  │  └─────── batch1 starts at index 3
-  //                  └────────── batch0 starts at index 0
-
-  batch_ptr.zero_();
-
-  if (batch_count == 0 || batch_indices.numel() == 0) {
-    return;
-  }
-
-  auto options = batch_ptr.options();
-  Tensor counts = at::empty({batch_count}, options);
-  counts.zero_();
-  Tensor ones = at::empty(batch_indices.sizes(), options);
-  ones.fill_(1);
-  counts.scatter_add_(0, batch_indices, ones);
-
-  Tensor prefix = at::cumsum(counts, /*dim=*/0);
-  batch_ptr.slice(/*dim=*/0, /*start=*/1, /*end=*/batch_count + 1).copy_(prefix);
-}
-
-Tensor build_batch_ptr_mps(const Tensor& batch_indices, int64_t batch_count) {
-  auto options = batch_indices.options().dtype(at::kLong);
-  Tensor batch_ptr = at::empty({batch_count + 1}, options);
-  batch_ptr.zero_();
-  build_batch_ptr_mps_out(batch_indices, batch_count, batch_ptr);
-  return batch_ptr;
-}
-
 void build_row_ptr_per_batch_mps_out(
     const Tensor& rows,
     const Tensor& batch_ptr,
@@ -319,17 +265,6 @@ void build_row_ptr_per_batch_mps_out(
   Tensor row_ptr_view = row_ptr.view({batch_count, rows_per_batch + 1});
   row_ptr_view.slice(/*dim=*/1, /*start=*/1, /*end=*/rows_per_batch + 1).copy_(
       at::cumsum(counts, /*dim=*/1));
-}
-
-Tensor build_row_ptr_per_batch_mps(
-    const Tensor& rows,
-    const Tensor& batch_ptr,
-    int64_t batch_count,
-    int64_t rows_per_batch) {
-  auto options = rows.options().dtype(at::kLong);
-  Tensor row_ptr = at::empty({batch_count * (rows_per_batch + 1)}, options);
-  build_row_ptr_per_batch_mps_out(rows, batch_ptr, batch_count, rows_per_batch, row_ptr);
-  return row_ptr;
 }
 
 void expand_csr_rows_to_coo_out(

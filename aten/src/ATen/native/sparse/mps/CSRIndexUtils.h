@@ -8,28 +8,6 @@ class Tensor;
 
 namespace at::native::mps::csr {
 
-// Builds prefix pointers (batch_ptr) for batched COO data where the first
-// dimension of indices encodes the batch id. The returned tensor has shape
-// [batch_count + 1] and dtype long on the same MPS device as the input.
-Tensor build_batch_ptr_mps(const Tensor& batch_indices, int64_t batch_count);
-
-// Writes prefix pointers (batch_ptr) for batched COO data where the first
-// dimension of indices encodes the batch id. The provided output tensor must be
-// allocated on the same MPS device with shape [batch_count + 1] and dtype long.
-void build_batch_ptr_mps_out(
-    const Tensor& batch_indices,
-    int64_t batch_count,
-    const Tensor& batch_ptr);
-
-// Builds CSR-style row pointers per batch. The returned tensor has shape
-// [batch_count * (rows_per_batch + 1)] and dtype long on the same MPS device as
-// the inputs.
-Tensor build_row_ptr_per_batch_mps(
-    const Tensor& rows,
-    const Tensor& batch_ptr,
-    int64_t batch_count,
-    int64_t rows_per_batch);
-
 // Writes CSR-style row pointers per batch into the provided output tensor which
 // must have shape [batch_count * (rows_per_batch + 1)] and dtype long on the
 // same MPS device.
