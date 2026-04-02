@@ -928,6 +928,16 @@
       "Hints": []
     }
   ],
+  "GB6012": [
+    {
+      "Gb_type": "Cannot trace user-defined __len__",
+      "Context": "{self.python_type_name()}.__len__()",
+      "Explanation": "Dynamo cannot trace len() on {self.python_type_name()} because the __len__ method is either not traceable (e.g., defined in C or built-in) or returns a non-constant value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0075": [
     {
       "Gb_type": "LOAD_BUILD_CLASS bytecode not supported",

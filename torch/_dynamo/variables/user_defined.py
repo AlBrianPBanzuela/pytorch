@@ -1488,7 +1488,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             method_var = self.resolve_type_attr(tx, "__len__", type_attr, source)
             if not isinstance(method_var, variables.GetAttrVariable):
                 return method_var.call_function(tx, [], {})
-        return super().sq_length(tx)
+
+        unimplemented(
+            gb_type="Cannot trace user-defined __len__",
+            context=f"{self.python_type_name()}.__len__()",
+            explanation=(
+                f"Dynamo cannot trace len() on {self.python_type_name()} because the __len__ "
+                "method is either not traceable (e.g., defined in C or built-in) or returns a "
+                "non-constant value."
+            ),
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.len_impl(tx)
