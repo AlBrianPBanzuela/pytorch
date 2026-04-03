@@ -2833,7 +2833,6 @@ def _handle_combo_kernel_per_subkernel_blocks(
         all_subkernel_cfgs.append(cfgs)
         all_skip_rblock.append(skip_rblock)
 
-
     unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
 
     phase_configs: list[Config] = []
