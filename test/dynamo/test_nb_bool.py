@@ -5,6 +5,13 @@ import collections
 import enum
 
 import torch
+
+
+class _Color(enum.Enum):
+    RED = 1
+    BLUE = 2
+
+
 import torch.nn
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
 
@@ -14,133 +21,129 @@ class NbBoolTests(TestCase):
 
     @make_dynamo_test
     def test_int(self):
-        self.assertFalse(bool(0))
-        self.assertTrue(bool(1))
-        self.assertTrue(bool(-1))
+        self.assertEqual(bool(0), False)
+        self.assertEqual(bool(1), True)
+        self.assertEqual(bool(-1), True)
 
     @make_dynamo_test
     def test_float(self):
-        self.assertFalse(bool(0.0))
-        self.assertFalse(bool(-0.0))
-        self.assertTrue(bool(3.14))
+        self.assertEqual(bool(0.0), False)
+        self.assertEqual(bool(-0.0), False)
+        self.assertEqual(bool(3.14), True)
 
     @make_dynamo_test
     def test_none(self):
-        self.assertFalse(bool(None))
+        self.assertEqual(bool(None), False)
 
     @make_dynamo_test
     def test_str(self):
-        self.assertFalse(bool(""))
-        self.assertTrue(bool("nonempty"))
+        self.assertEqual(bool(""), False)
+        self.assertEqual(bool("nonempty"), True)
 
     @make_dynamo_test
     def test_bytes(self):
-        self.assertFalse(bool(b""))
-        self.assertTrue(bool(b"hello"))
+        self.assertEqual(bool(b""), False)
+        self.assertEqual(bool(b"hello"), True)
 
     @make_dynamo_test
     def test_bool(self):
-        self.assertFalse(False)
-        self.assertTrue(True)
+        self.assertEqual(False, False)
+        self.assertEqual(True, True)
 
     @make_dynamo_test
     def test_complex_zero(self):
-        self.assertFalse(bool(0j))
+        self.assertEqual(bool(0j), False)
 
     @make_dynamo_test
     def test_complex_nonzero(self):
-        self.assertTrue(bool(1 + 2j))
+        self.assertEqual(bool(1 + 2j), True)
 
     @make_dynamo_test
     def test_complex_real_nonzero_imag_zero(self):
-        self.assertTrue(bool(1 + 0j))
+        self.assertEqual(bool(1 + 0j), True)
 
     @make_dynamo_test
     def test_complex_real_zero_imag_nonzero(self):
-        self.assertTrue(bool(0 + 1j))
+        self.assertEqual(bool(0 + 1j), True)
 
     # --- Containers (length fallback / _bool_from_length path) ---
 
     @make_dynamo_test
     def test_empty_list(self):
-        self.assertFalse(bool([]))
+        self.assertEqual(bool([]), False)
 
     @make_dynamo_test
     def test_nonempty_list(self):
-        self.assertTrue(bool([1, 2, 3]))
+        self.assertEqual(bool([1, 2, 3]), True)
 
     @make_dynamo_test
     def test_empty_dict(self):
-        self.assertFalse(bool({}))
+        self.assertEqual(bool({}), False)
 
     @make_dynamo_test
     def test_nonempty_dict(self):
-        self.assertTrue(bool({"a": 1}))
+        self.assertEqual(bool({"a": 1}), True)
 
     @make_dynamo_test
     def test_empty_tuple(self):
-        self.assertFalse(bool(()))
+        self.assertEqual(bool(()), False)
 
     @make_dynamo_test
     def test_nonempty_tuple(self):
-        self.assertTrue(bool((1,)))
+        self.assertEqual(bool((1,)), True)
 
     @make_dynamo_test
     def test_empty_set(self):
-        self.assertFalse(bool(set()))
+        self.assertEqual(bool(set()), False)
 
     @make_dynamo_test
     def test_nonempty_set(self):
-        self.assertTrue(bool({1, 2}))
+        self.assertEqual(bool({1, 2}), True)
 
     @make_dynamo_test
     def test_empty_frozenset(self):
-        self.assertFalse(bool(frozenset()))
+        self.assertEqual(bool(frozenset()), False)
 
     @make_dynamo_test
     def test_nonempty_frozenset(self):
-        self.assertTrue(bool(frozenset({1})))
+        self.assertEqual(bool(frozenset({1})), True)
 
     @make_dynamo_test
     def test_empty_range(self):
-        self.assertFalse(bool(range(0)))
+        self.assertEqual(bool(range(0)), False)
 
     @make_dynamo_test
     def test_nonempty_range(self):
-        self.assertTrue(bool(range(5)))
+        self.assertEqual(bool(range(5)), True)
 
     # --- dict subclasses ---
 
     @make_dynamo_test
     def test_empty_defaultdict(self):
         d = collections.defaultdict(int)
-        self.assertFalse(bool(d))
+        self.assertEqual(bool(d), False)
 
     @make_dynamo_test
     def test_nonempty_defaultdict(self):
         d = collections.defaultdict(int, {"x": 1})
-        self.assertTrue(bool(d))
+        self.assertEqual(bool(d), True)
 
     @make_dynamo_test
     def test_empty_counter(self):
         c = collections.Counter()
-        self.assertFalse(bool(c))
+        self.assertEqual(bool(c), False)
 
     @make_dynamo_test
     def test_nonempty_counter(self):
         c = collections.Counter("abc")
-        self.assertTrue(bool(c))
+        self.assertEqual(bool(c), True)
 
     # --- Enum (UserDefinedClassVariable / ConstantVariable path) ---
 
     @make_dynamo_test
     def test_enum_member(self):
-        class Color(enum.Enum):
-            RED = 1
-            BLUE = 2
-
-        self.assertTrue(bool(Color.RED))
-        self.assertTrue(bool(Color.BLUE))
+        self.assertEqual(bool(_Color.RED), True)
+        self.assertEqual(bool(_Color.BLUE), True)
 
     # --- UserDefinedObjectVariable tests (torch.compile path) ---
 
