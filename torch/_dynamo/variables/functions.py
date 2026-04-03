@@ -1244,12 +1244,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__next__":
-            return self.tp_iternext(tx)
-        elif name == "__iter__":
-            # iter(gen) returns itself
-            return self
-        elif name == "send":
+        if name == "send":
             # Sends a value into the generator function. Returns the next value
             # yielded by the generator, or raises StopIteration if the generator
             # exits without yielding another value

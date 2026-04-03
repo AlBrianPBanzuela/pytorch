@@ -285,17 +285,6 @@ class IteratorVariable(VariableTracker):
         """Iterators are their own iterator."""
         return self
 
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__next__":
-            return self.tp_iternext(tx)
-        return super().call_method(tx, name, args, kwargs)
-
 
 class RepeatIteratorVariable(IteratorVariable):
     def __init__(self, item: VariableTracker, **kwargs: Any) -> None:
