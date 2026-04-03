@@ -455,37 +455,41 @@ class SizeVarAllocator:
     def statically_known_multiple_of(
         self, numerator: Expr, denominator: Expr | int
     ) -> bool:
-        if denominator == 0:
+        """
+        Return a bool indicating if it is sound to optimize
+        for the numerator being a multiple of the denominator.
+        """
+
+        # Performance guard - main branch standard is 20
+        if len(free_symbols(numerator)) > 20:
             return False
 
-        # Quick check for identical numerator and denominator
-        if numerator == denominator:
-            return True
-
-        # Use specialized structural helper for integer denominators
-        # This integrates logic from the newly merged #177214
         if isinstance(denominator, (int, sympy.Integer)):
-            if self._is_multiple_of(numerator, int(denominator)):
-                return True
+            return self._is_multiple_of(numerator, int(denominator))
 
-        # Performance guard to avoid expensive symbolic operations on complex expressions
-        if len(free_symbols(numerator)) > 15:
-            return False
-
-        # Final fallback using standard ShapeEnv truth-proving mechanism
-        expr = sympy.Eq(sympy.Mod(numerator, denominator), 0)
+        # For symbolic denominators, fall back to direct sympy check
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
+        """
+        Returns a bool indicating if x is known to be a power of 2.
+        """
         return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
 
     def expect_true(self, expr: Expr) -> bool:
+        """
+        Use it when you already know that expr is true or should be true and want to
+        ensure that guards/runtime assertions are in place to ensure this in compiled
+        function. Unlike check, this WON'T raise an error if expr isn't actually true.
+        check Note [expect_true].
+        """
         if not self.statically_known_true(expr):
             return self.shape_env.guard_or_defer_runtime_assert(
                 expr, "sizevars.expect_true"
             )
         return True
-    
+
     def check(self, expr: Expr) -> None:
         """
         Use it when you already know that expr is true or should be true and want to
