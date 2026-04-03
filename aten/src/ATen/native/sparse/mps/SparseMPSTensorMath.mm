@@ -6,13 +6,11 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
-#include <ATen/native/sparse/mps/CSRIndexUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#endif
-
+#else
 #include <ATen/ops/_coalesce_native.h>
 #include <ATen/ops/repeat_interleave_native.h>
 #include <ATen/ops/cumsum.h>
@@ -41,6 +39,7 @@
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/copy_sparse_to_sparse.h>
 #include <ATen/ops/mul.h>
+#endif
 
 namespace at::native {
 
@@ -146,6 +145,7 @@ static Tensor& s_addmm_out_sparse_dense_mps(
   return r;
 }
 
+
 static void build_batch_ptr_mps(
     const Tensor& indices_dim0,
     int64_t B,
@@ -195,11 +195,52 @@ static void build_row_ptr_per_batch_mps(
     int64_t I,
     Tensor& row_ptr
 ) {
-  at::native::mps::csr::build_row_ptr_per_batch_mps_out(rows, batch_ptr, B, I, row_ptr);
+  // Build per-batch CSR-style row pointer arrays from row indices sorted by batch
+  // Given:
+  //   rows: 1-D array of length nnz with row ids in [0, I), sorted within each batch
+  //   batch_ptr: length B+1, where [batch_ptr[b], batch_ptr[b+1]) is the subrange for batch b
+  // Produces:
+  //   - row_ptr: shape [B, I+1]
+  //
+  // Example (B = 2, I = 4):
+  // rows       = [0,   0,   1,  3,  0,   2,    2]   // 7 non-zero elements
+  //               └─── batch 0 ──┘  └─ batch 1 ─┘
+  // batch_ptr  = [0, 4, 7]
+  //               │  │  └─ end of batch 1 (total nnz)
+  //               │  └──── end of batch 0/start of batch 1
+  //               └─────── start of batch 0
+  //
+  // per-batch row pointers (I+1 entries each):
+  //   row_ptr[0] = [0, 2, 3, 3, 4]
+  //   row_ptr[1] = [0, 1, 1, 3, 3]
+  // laid out in memory: [0, 2, 3, 3, 4,  0, 1, 1, 3, 3]
+  TORCH_CHECK(rows.is_mps() && batch_ptr.is_mps() && row_ptr.is_mps(), "MPS device expected");
+  auto stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("build_row_ptr_from_sorted_rows_by_batch");
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+
+      const uint32_t tew = pso.threadExecutionWidth;
+      const uint32_t Qx = static_cast<uint32_t>(I + 1);
+      const uint32_t Qy = static_cast<uint32_t>(B);
+      const uint32_t tgW = std::min<uint32_t>(Qx, tew);
+
+      MTLSize grid = MTLSizeMake(Qx, Qy, 1);
+      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
+
+      mtl_setArgs(enc,
+                  rows,
+                  batch_ptr,
+                  row_ptr,
+                  std::array<uint32_t, 2>{static_cast<uint32_t>(I),
+                                           static_cast<uint32_t>(B)});
+      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
+    }
+  });
 }
-
-
-namespace csr_utils = at::native::mps::csr;
 
 Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tensor& result_) {
   TORCH_CHECK(result_.is_mps(), "bmm_sparse: expected 'out' to be MPS, got ", result_.device());
