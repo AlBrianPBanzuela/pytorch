@@ -2696,7 +2696,7 @@ class DIMENSION_MARKING_GUARD : public LeafGuard {
         PyErr_Clear();
         continue; // absent = don't care
       }
-      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/true);
+      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/false);
       Py_DECREF(actual);
       if (!match)
         return false;
@@ -2725,7 +2725,7 @@ class DIMENSION_MARKING_GUARD : public LeafGuard {
         }
         return false;
       }
-      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/true);
+      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/false);
       Py_DECREF(actual);
       if (!match)
         return false;
@@ -2742,7 +2742,7 @@ class DIMENSION_MARKING_GUARD : public LeafGuard {
         PyErr_Clear();
         continue;
       }
-      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/true);
+      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/false);
       Py_DECREF(actual);
       if (!match) {
         std::string attr_name = PyUnicode_AsUTF8(attr_str);
@@ -2786,7 +2786,7 @@ class DIMENSION_MARKING_GUARD : public LeafGuard {
         }
         continue;
       }
-      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/true);
+      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/false);
       Py_DECREF(actual);
       if (!match) {
         std::string attr_name = PyUnicode_AsUTF8(attr_str);
