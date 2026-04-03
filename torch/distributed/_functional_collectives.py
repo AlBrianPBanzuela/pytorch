@@ -1044,6 +1044,20 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return self.trigger_wait()
 
+    @classmethod
+    def __coerce_tangent_from__(
+        cls, tensor: torch.Tensor, expected_metadata: Any
+    ) -> torch.Tensor | None:
+        # A plain Tensor tangent is a valid tangent for an
+        # AsyncCollectiveTensor — it is semantically an already-resolved
+        # async collective result. This arises when an async collective
+        # output crosses a torch.compile boundary into eager code: the
+        # backward tangent is a plain Tensor but the compiled forward
+        # traced an AsyncCollectiveTensor.
+        if isinstance(tensor, torch.Tensor):
+            return cls(tensor)
+        return None
+
     def __repr__(self) -> str:  # type: ignore[override]
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 

@@ -3042,14 +3042,24 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             if same_type and same_meta:
                 return x
 
-            if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
-                return None
+            if hasattr(x, "__coerce_same_metadata_as_tangent__"):
+                if same_type:
+                    # Backward Compatibility, as some Subclass impls can have original 1-arg function.
+                    return x.__coerce_same_metadata_as_tangent__(expected_meta)
+                return x.__coerce_same_metadata_as_tangent__(expected_meta, expected_type)
 
-            if same_type:
-                # Backward Compatibility, as some Subclass impls can have original 1-arg function.
-                return x.__coerce_same_metadata_as_tangent__(expected_meta)
+            # Reverse direction: when the runtime tangent (e.g. plain Tensor)
+            # doesn't know how to coerce itself, ask the expected type if it
+            # can accept the tangent. This handles cases like a plain Tensor
+            # tangent flowing into a region that traced with
+            # AsyncCollectiveTensor (an already-materialized tensor is a valid
+            # "resolved" async tensor).
+            if expected_type is not None and hasattr(
+                expected_type, "__coerce_tangent_from__"
+            ):
+                return expected_type.__coerce_tangent_from__(x, expected_meta)
 
-            return x.__coerce_same_metadata_as_tangent__(expected_meta, expected_type)
+            return None
 
         # Coerce to expected type and metadata
         orig_x = x
