@@ -8,15 +8,15 @@ class Tensor;
 
 namespace at::native::mps::csr {
 
-// Writes CSR-style row pointers per batch into the provided output tensor which
-// must have shape [batch_count * (rows_per_batch + 1)] and dtype long on the
-// same MPS device.
-void build_row_ptr_per_batch_mps_out(
+// Writes per-batch row pointers as offsets into the flattened `rows` storage.
+// For batch `b`, entries live at `row_ptr[b * (rows_per_batch + 1) + i]`.
+// When `batch_count == 1`, this matches the standard CSR crow_indices layout.
+void build_row_ptr_per_batch_mps(
     const Tensor& rows,
     const Tensor& batch_ptr,
     int64_t batch_count,
     int64_t rows_per_batch,
-    const Tensor& row_ptr);
+    Tensor& row_ptr);
 
 // Expands batched CSR (crow_indices/col_indices) back to COO indices when the
 // compressed dimension corresponds to rows. The output layout matches the

@@ -206,67 +206,6 @@ static void launch_validate_compressed_sparse_indices_mps_kernel(
   stream->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
-void build_row_ptr_per_batch_mps_out(
-    const Tensor& rows,
-    const Tensor& batch_ptr,
-    int64_t batch_count,
-    int64_t rows_per_batch,
-    const Tensor& row_ptr) {
-  TORCH_CHECK(
-      rows.is_mps() && batch_ptr.is_mps() && row_ptr.is_mps(),
-      "build_row_ptr_per_batch_mps_out: expected MPS tensors");
-  TORCH_CHECK(
-      batch_ptr.scalar_type() == at::kLong,
-      "build_row_ptr_per_batch_mps_out: expected batch_ptr dtype int64 but got ",
-      batch_ptr.scalar_type());
-  TORCH_CHECK(
-      row_ptr.scalar_type() == at::kLong,
-      "build_row_ptr_per_batch_mps_out: expected row_ptr dtype int64 but got ",
-      row_ptr.scalar_type());
-  TORCH_CHECK(
-      row_ptr.numel() == batch_count * (rows_per_batch + 1),
-      "build_row_ptr_per_batch_mps_out: expected output shape [",
-      batch_count * (rows_per_batch + 1),
-      "] but got ",
-      row_ptr.numel());
-
-  // Builds per-batch CSR-style row pointer arrays from sorted row indices.
-  // Example (B = 2, rows_per_batch = 4):
-  //   rows      = [0, 0, 1, 3,   0, 2, 2]
-  //                └─ batch0 ─┘  └ batch1 ─┘
-  //   batch_ptr = [0, 4, 7]
-  //   row_ptr   -> [0, 2, 3, 3, 4,   0, 1, 1, 3, 3]
-  //                  row_ptr[0]          row_ptr[1]
-
-  row_ptr.zero_();
-
-  const auto nnz = rows.numel();
-  if (nnz == 0 || rows_per_batch == 0 || batch_count == 0) {
-    return;
-  }
-
-  Tensor batch_lengths = at::diff(batch_ptr);
-  TORCH_INTERNAL_ASSERT(batch_lengths.numel() == batch_count);
-
-  Tensor batch_ids = at::_ops::repeat_interleave_self_Tensor::call(
-      at::arange(batch_count, rows.options()),
-      batch_lengths.to(rows.scalar_type()),
-      /*dim=*/0,
-      ::std::optional<int64_t>{});
-
-  Tensor flat_indices = batch_ids * rows_per_batch + rows;
-  Tensor counts_flat = at::empty({batch_count * rows_per_batch}, row_ptr.options());
-  counts_flat.zero_();
-  Tensor ones_flat = at::empty(rows.sizes(), row_ptr.options());
-  ones_flat.fill_(1);
-  counts_flat.scatter_add_(0, flat_indices, ones_flat);
-
-  Tensor counts = counts_flat.view({batch_count, rows_per_batch});
-  Tensor row_ptr_view = row_ptr.view({batch_count, rows_per_batch + 1});
-  row_ptr_view.slice(/*dim=*/1, /*start=*/1, /*end=*/rows_per_batch + 1).copy_(
-      at::cumsum(counts, /*dim=*/1));
-}
-
 void expand_csr_rows_to_coo_out(
     const Tensor& crow_indices,
     const Tensor& col_indices,

@@ -230,7 +230,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_mps)
 
   Tensor row_ptr_long = out_int32 ? at::empty(result.sizes(), options) : result;
 
-  mps::csr::build_row_ptr_per_batch_mps_out(
+  mps::csr::build_row_ptr_per_batch_mps(
       rows,
       batch_ptr,
       /*batch_count=*/1,
