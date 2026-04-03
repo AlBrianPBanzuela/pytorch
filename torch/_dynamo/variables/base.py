@@ -532,13 +532,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def iter_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def tp_iter(self, tx: "InstructionTranslator") -> "VariableTracker":
         """
         Implements PyObject_GetIter semantics (tp_iter slot).
         Subclasses override this to support iteration.
         """
         unimplemented(
-            gb_type="iter_impl not implemented",
+            gb_type="tp_iter not implemented",
             context=f"iter({self})",
             explanation=f"Dynamo does not know how to iterate over {self.python_type_name()}",
             hints=[
@@ -843,24 +843,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def iternext_impl(self, tx: Any) -> "VariableTracker":
+    def tp_iternext(self, tx: Any) -> "VariableTracker":
         """
         Implements tp_iternext slot semantics.
         Subclasses override this to support next(). Reaching this base is a
-        bug — it means iternext_impl is missing for that VariableTracker subclass.
+        bug — it means tp_iternext is missing for that VariableTracker subclass.
         """
         unimplemented(
-            gb_type="Missing iternext_impl",
+            gb_type="Missing tp_iternext",
             context=f"next({self.python_type_name()})",
             explanation=(
                 f"Dynamo does not support next() on {self.python_type_name()}."
-                " Add iternext_impl to this VariableTracker subclass."
+                " Add tp_iternext to this VariableTracker subclass."
             ),
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
     def next_variable(self, tx: Any) -> "VariableTracker":
-        return self.iternext_impl(tx)
+        return self.tp_iternext(tx)
 
     def is_strict_mode(self, tx: Any) -> bool:
         return bool(tx.strict_checks_fn and tx.strict_checks_fn(self))

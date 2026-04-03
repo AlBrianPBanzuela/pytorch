@@ -574,7 +574,7 @@ class NNModuleVariable(VariableTracker):
                     kwargs,
                 )
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         from . import ListIteratorVariable
 
         return ListIteratorVariable(
@@ -826,7 +826,7 @@ class NNModuleVariable(VariableTracker):
                 items_result.append(named_embed(name, submod))
             return ListIteratorVariable(items_result, mutation_type=ValueMutationNew())
         elif name == "__iter__":
-            return self.iter_impl(tx)
+            return self.tp_iter(tx)
         #     return ListIteratorVariable(
         #         self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
         #     )
