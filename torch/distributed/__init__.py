@@ -49,6 +49,7 @@ if is_available():
         _register_comm_hook,
         _StoreCollectives,
         _test_python_store,
+        _test_thpstore_unwrap,
         _verify_params_across_processes,
         Backend as _Backend,
         BuiltinCommHookType,

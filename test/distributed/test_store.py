@@ -780,6 +780,25 @@ class PythonStoreTest(TestCase):
         dist._test_python_store(MyPythonStore())
 
 
+class THPStoreUnwrapTest(TestCase):
+    """Test THPStore_Unwrap: extracts c10::intrusive_ptr<Store> from Python.
+
+    THPStore_Unwrap (declared in store_utils.h) enables third-party backend
+    extensions to access the C++ Store across pybind11 module boundaries.
+    See _test_python_store above for the reverse direction test.
+    """
+
+    def test_hash_store(self):
+        dist._test_thpstore_unwrap(dist.HashStore())
+
+    def test_tcp_store(self):
+        dist._test_thpstore_unwrap(dist.TCPStore("localhost", 0, 1, True))
+
+    def test_prefix_store(self):
+        tcp = dist.TCPStore("localhost", 0, 1, True)
+        dist._test_thpstore_unwrap(dist.PrefixStore("test", tcp))
+
+
 class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):

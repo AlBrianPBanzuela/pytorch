@@ -1,3 +1,4 @@
+#include <torch/csrc/distributed/c10d/store_utils.h>
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
@@ -4137,6 +4138,30 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       },
       py::call_guard<py::gil_scoped_release>());
 
+  // Test that THPStore_Unwrap correctly round-trips a Store through Python.
+  // See `torch/csrc/distributed/c10d/store_utils.h` for the declaration.
+  // This is the C++ counterpart of _test_python_store — it tests the reverse
+  // direction (extracting a C++ Store from a Python object).
+  module.def(
+      "_test_thpstore_unwrap",
+      [](const c10::intrusive_ptr<::c10d::Store>& store) {
+        py::gil_scoped_acquire gil;
+        py::object py_store = py::cast(store);
+        c10::intrusive_ptr<::c10d::Store> unwrapped;
+        int rc = THPStore_Unwrap(py_store.ptr(), &unwrapped);
+        TORCH_CHECK(rc == 0, "THPStore_Unwrap failed");
+        TORCH_CHECK(unwrapped != nullptr, "THPStore_Unwrap returned null");
+        TORCH_CHECK(
+            unwrapped.get() == store.get(),
+            "THPStore_Unwrap returned different pointer");
+        unwrapped->set("_unwrap_test", std::vector<uint8_t>{7, 8, 9});
+        auto val = store->get("_unwrap_test");
+        TORCH_CHECK(
+            val == std::vector<uint8_t>({7, 8, 9}),
+            "Store data mismatch after unwrap");
+      },
+      py::arg("store"));
+
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
   module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
 #ifdef USE_C10D_NCCL
@@ -4386,3 +4411,17 @@ PyMethodDef* python_functions() {
 }
 
 } // namespace torch::distributed::c10d
+
+// Cross-module Store access for third-party backends.
+// See torch/csrc/distributed/c10d/store_utils.h for declaration.
+extern "C" C10_EXPORT int THPStore_Unwrap(
+    PyObject* obj,
+    c10::intrusive_ptr<::c10d::Store>* out) {
+  try {
+    *out = py::handle(obj).cast<c10::intrusive_ptr<::c10d::Store>>();
+    return 0;
+  } catch (const py::cast_error& e) {
+    PyErr_SetString(PyExc_TypeError, e.what());
+    return -1;
+  }
+}
