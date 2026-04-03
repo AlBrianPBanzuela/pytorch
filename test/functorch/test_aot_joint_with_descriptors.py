@@ -967,6 +967,7 @@ class inner_f(torch.nn.Module):
 ('call_function', 'mul', {'pp_stage': 1})
 ('call_function', 'mul_1', {'pp_stage': 1})
 ('call_function', 'mul_2', {'pp_stage': 1})
+('call_function', 'add', {'autograd_backward': True})
 ('call_function', 't_1', {'pp_stage': 0})
 ('call_function', 'mm', {'pp_stage': 0})
 ('call_function', 't_2', {'pp_stage': 0})
