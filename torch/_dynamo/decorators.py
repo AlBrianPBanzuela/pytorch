@@ -1084,8 +1084,7 @@ def mark_unbacked(
         t (Any): The tensor to mark as having an unbacked dimension.
         index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single
             integer or a list/tuple of integers. Calls are additive: mark_unbacked(x, 0) followed
-            by mark_unbacked(x, 1) marks both dims. For details on guard semantics and
-            recompilation behavior, see [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
+            by mark_unbacked(x, 1) marks both dims.
         hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
             This is only used by the inductor backend for size hint queries, such as during autotuning.
             NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
@@ -1218,9 +1217,6 @@ def mark_dynamic(
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
     2-8x speedups depending on the specific specialization and model architecture.
-
-    For details on guard semantics and recompilation behavior, see
-    [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -1267,9 +1263,6 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
     """
     Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
     dimension ends up getting specialized, don't error).
-
-    Calls are additive. For details on guard semantics and recompilation behavior, see
-    [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror maybe_mark_dynamic() on all inner tensors with same dim as t
@@ -1302,9 +1295,6 @@ def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> No
 
     Unlike mark_dynamic, this can be done inside a graph, in which case it
     induces specialization on the tensor.
-
-    For details on guard semantics and recompilation behavior, see
-    [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
 
     For nn.Module classes
     =====================
