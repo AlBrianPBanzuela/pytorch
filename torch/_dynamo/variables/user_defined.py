@@ -1439,16 +1439,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return side_effects.is_modified(self.base_vt)
         return False
 
-    def unpack_var_sequence(
-        self, tx: "InstructionTranslator"
-    ) -> list[VariableTracker]:
-        if self._solid_base is not None and self.base_vt is not None:
-            # Check that __iter__ hasn't been overridden by the subclass
-            iter_fn = inspect.getattr_static(self.value, "__iter__")
-            if iter_fn is self._solid_base.__iter__:  # type: ignore[union-attr]
-                return self.base_vt.unpack_var_sequence(tx)
-        return super().unpack_var_sequence(tx)
-
     @property
     def set_items(self) -> set[Any]:
         if self._solid_base in (set, frozenset) and self.base_vt is not None:
@@ -1809,6 +1799,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ) and not isinstance(self.value, threading.local)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+        # Delegate to base_vt if __iter__ hasn't been overridden
+        if self._solid_base is not None and self.base_vt is not None:
+            iter_fn = inspect.getattr_static(self.value, "__iter__")
+            if iter_fn is self._solid_base.__iter__:  # type: ignore[union-attr]
+                return self.base_vt.unpack_var_sequence(tx)
+
         if (
             self.source
             and self._maybe_get_baseclass_method("__iter__") is list.__iter__
