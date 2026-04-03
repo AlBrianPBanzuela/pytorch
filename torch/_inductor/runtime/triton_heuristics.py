@@ -4338,7 +4338,8 @@ class Grid2DWithYZOverflow(GridExpr):
                     "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
                 ),
                 self.assign_tmp(
-                    "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
+                    "y_grid_div_",
+                    f"max(1, {self.ceildiv('y_grid_raw_', get_max_y_grid())})",
                 ),
             ]
         )
