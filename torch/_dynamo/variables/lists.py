@@ -276,10 +276,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name == "__len__":
-            self._install_list_length_guard()
-            return self.sq_length(tx)
-        elif name == "__getitem__":
+        if name == "__getitem__":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
