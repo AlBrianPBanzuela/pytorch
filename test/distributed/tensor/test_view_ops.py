@@ -1721,7 +1721,7 @@ class TestViewOps(DTensorContinuousTestBase):
         )._local_tensor
         self.assertEqual(unflattened._local_tensor, expected_local)
 
-    def test_strided_shard_softmax(self):
+    def test_flatten_then_softmax(self):
         """Verify _StridedShard correctness through softmax.
 
         softmax uses replicate_reduction_dims which only checks isinstance(p, Shard).
@@ -1744,7 +1744,7 @@ class TestViewOps(DTensorContinuousTestBase):
         result = torch.softmax(dt_flat, dim=-1)
         self.assertEqual(result.full_tensor(), torch.softmax(flat_full, dim=-1))
 
-    def test_strided_shard_layer_norm(self):
+    def test_flatten_then_layer_norm(self):
         """Verify _StridedShard correctness through layer_norm.
 
         layer_norm uses _replicate_dims_start_at which only checks isinstance(p, Shard).
@@ -1773,7 +1773,7 @@ class TestViewOps(DTensorContinuousTestBase):
             torch.nn.functional.layer_norm(flat_full, list(flat_full.shape)),
         )
 
-    def test_strided_shard_transpose(self):
+    def test_flatten_then_transpose(self):
         """Verify _StridedShard correctness through transpose.
 
         aten.transpose.int goes through view op propagation which handles
@@ -1860,7 +1860,7 @@ class TestViewOps(DTensorContinuousTestBase):
         )
         self.assertEqual(result3.full_tensor(), full3.flatten(1, 2).t())
 
-    def test_strided_shard_nll_loss(self):
+    def test_flatten_then_nll_loss(self):
         """Verify _StridedShard correctness through nll_loss.
 
         nll_loss_forward_strategy uses replicate_reduction_dims on the channel
@@ -1921,7 +1921,7 @@ class TestViewOps(DTensorContinuousTestBase):
         )
         self.assertEqual(result_3d.full_tensor(), expected_3d)
 
-    def test_strided_shard_select(self):
+    def test_flatten_then_select(self):
         """Verify _StridedShard correctness through select.
 
         select removes a dim, so select_int_strategy must detect
@@ -1959,7 +1959,7 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertNotIsInstance(result2.placements[0], _StridedShard)
         self.assertEqual(result2.full_tensor(), expected2)
 
-    def test_strided_shard_unbind(self):
+    def test_flatten_then_unbind(self):
         """Verify _StridedShard correctness through unbind.
 
         unbind removes a dim via shift_shard_dims_after_remove, which
@@ -2009,7 +2009,7 @@ class TestViewOps(DTensorContinuousTestBase):
             self.assertEqual(r.placements[0].split_factor, orig_split_factor2)
             self.assertEqual(r.full_tensor(), e)
 
-    def test_strided_shard_stack(self):
+    def test_flatten_then_stack(self):
         """Verify _StridedShard correctness through stack.
 
         stack inserts a new dim via shift_shard_dims_after_insert, which
