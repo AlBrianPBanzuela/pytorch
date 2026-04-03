@@ -1794,23 +1794,83 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertEqual(result.full_tensor(), flat_full.transpose(0, 1))
 
         # t() on 2D tensor (aten.t via transpose_strategy in _matrix_ops.py)
+        # _StridedShard(dim=0) → _StridedShard(dim=1), split_factor preserved
         result = dt_flat.t()
+        self.assertIsInstance(result.placements[0], _StridedShard)
+        self.assertEqual(result.placements[0].dim, 1)
+        self.assertEqual(
+            result.placements[0].split_factor, dt_flat.placements[0].split_factor
+        )
         self.assertEqual(result.full_tensor(), flat_full.t())
+
+        # t() with _StridedShard(dim=1) → _StridedShard(dim=0)
+        # Shard(2) on (4, 6, ws*2) + flatten(1,2) → _StridedShard(dim=1)
+        shape1 = (4, 6, self.world_size * 2)
+        full1 = torch.randn(*shape1, device=self.device_type)
+        dt1 = distribute_tensor(full1, mesh, [Shard(2)])
+        dt1_flat = dt1.flatten(1, 2)  # (4, 6*ws*2) with _StridedShard(dim=1)
+        self.assertIsInstance(dt1_flat.placements[0], _StridedShard)
+        self.assertEqual(dt1_flat.placements[0].dim, 1)
+
+        result1 = dt1_flat.t()
+        self.assertIsInstance(result1.placements[0], _StridedShard)
+        self.assertEqual(result1.placements[0].dim, 0)
+        self.assertEqual(
+            result1.placements[0].split_factor, dt1_flat.placements[0].split_factor
+        )
+        self.assertEqual(result1.full_tensor(), full1.flatten(1, 2).t())
+
+        # t() with uneven shapes: shard dim not divisible by world_size
+        # _StridedShard(dim=0) → _StridedShard(dim=1)
+        shape2 = (
+            3,
+            self.world_size * 2,
+            5,
+        )  # flatten(0,1) gives (3*ws*2, 5), uneven in dim 0
+        full2 = torch.randn(*shape2, device=self.device_type)
+        dt2 = distribute_tensor(full2, mesh, [Shard(1)])
+        dt2_flat = dt2.flatten(0, 1)
+        self.assertIsInstance(dt2_flat.placements[0], _StridedShard)
+
+        result2 = dt2_flat.t()
+        self.assertIsInstance(result2.placements[0], _StridedShard)
+        self.assertEqual(result2.placements[0].dim, 1)
+        self.assertEqual(
+            result2.placements[0].split_factor, dt2_flat.placements[0].split_factor
+        )
+        self.assertEqual(result2.full_tensor(), full2.flatten(0, 1).t())
+
+        # _StridedShard(dim=1) → _StridedShard(dim=0), uneven
+        shape3 = (
+            5,
+            3,
+            self.world_size * 2,
+        )  # flatten(1,2) gives (5, 3*ws*2), uneven in dim 1
+        full3 = torch.randn(*shape3, device=self.device_type)
+        dt3 = distribute_tensor(full3, mesh, [Shard(2)])
+        dt3_flat = dt3.flatten(1, 2)
+        self.assertIsInstance(dt3_flat.placements[0], _StridedShard)
+        self.assertEqual(dt3_flat.placements[0].dim, 1)
+
+        result3 = dt3_flat.t()
+        self.assertIsInstance(result3.placements[0], _StridedShard)
+        self.assertEqual(result3.placements[0].dim, 0)
+        self.assertEqual(
+            result3.placements[0].split_factor, dt3_flat.placements[0].split_factor
+        )
+        self.assertEqual(result3.full_tensor(), full3.flatten(1, 2).t())
 
     def test_strided_shard_nll_loss(self):
         """Verify _StridedShard correctness through nll_loss.
 
         nll_loss_forward_strategy uses replicate_reduction_dims on the channel
-        dim and _skip_dim to build target placements. _skip_dim only handles
-        isinstance(p, Shard), so _StridedShard on non-channel dims falls through
-        unchanged (correct via redistribution).
+        dim and _skip_dim to build target placements.
         """
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         num_classes = 10
 
-        # 2D input: (N, C) — shard on batch dim (dim 0), which is not the
-        # channel dim so _skip_dim and replicate_reduction_dims should
-        # preserve or replicate it correctly.
+        # 2D input: (N, C) — _StridedShard on batch dim (dim 0), which is
+        # below channel_dim (dim 1), so _skip_dim preserves it unchanged.
         shape = (4, self.world_size * 2)
         full_input = torch.randn(*shape, num_classes, device=self.device_type)
         full_target = torch.randint(0, num_classes, shape, device=self.device_type)
@@ -1834,6 +1894,33 @@ class TestViewOps(DTensorContinuousTestBase):
         )
         self.assertEqual(result.full_tensor(), expected)
 
+        # 3D input: (N, C, D) — _StridedShard on spatial dim (dim 2), which
+        # is above channel_dim (dim 1), so _skip_dim must shift it from
+        # dim 2 to dim 1 while preserving split_factor.
+        N, C, D1, D2 = 2, num_classes, 3, self.world_size * 2
+        full_input_3d = torch.randn(N, C, D1, D2, device=self.device_type)
+        full_target_3d = torch.randint(0, C, (N, D1, D2), device=self.device_type)
+        dist.broadcast(full_target_3d, src=0)
+
+        dt_input_3d = distribute_tensor(full_input_3d, mesh, [Shard(3)])
+        dt_input_3d_flat = dt_input_3d.flatten(2, 3)
+        dt_target_3d = distribute_tensor(full_target_3d, mesh, [Shard(2)])
+        dt_target_3d_flat = dt_target_3d.flatten(1, 2)
+
+        self.assertIsInstance(dt_input_3d_flat.placements[0], _StridedShard)
+        self.assertEqual(dt_input_3d_flat.placements[0].dim, 2)
+
+        input_3d_full = full_input_3d.flatten(2, 3)
+        target_3d_full = full_target_3d.flatten(1, 2)
+
+        result_3d = torch.nn.functional.nll_loss(
+            torch.log_softmax(dt_input_3d_flat, dim=1), dt_target_3d_flat
+        )
+        expected_3d = torch.nn.functional.nll_loss(
+            torch.log_softmax(input_3d_full, dim=1), target_3d_full
+        )
+        self.assertEqual(result_3d.full_tensor(), expected_3d)
+
     def test_strided_shard_select(self):
         """Verify _StridedShard correctness through select.
 
@@ -1848,12 +1935,29 @@ class TestViewOps(DTensorContinuousTestBase):
         dt_flat = dt.flatten(2, 3)  # (2, 3, 4*ws*2) with _StridedShard(dim=2)
 
         self.assertIsInstance(dt_flat.placements[0], _StridedShard)
+        orig_split_factor = dt_flat.placements[0].split_factor
 
-        # select on dim 0 shifts _StridedShard dim from 2 to 1
+        # select on dim 0: _StridedShard dim shifts from 2 to 1, split_factor preserved
         result = dt_flat.select(0, 0)
         expected = full.flatten(2, 3).select(0, 0)
         self.assertIsInstance(result.placements[0], _StridedShard)
+        self.assertEqual(result.placements[0].dim, 1)
+        self.assertEqual(result.placements[0].split_factor, orig_split_factor)
         self.assertEqual(result.full_tensor(), expected)
+
+        # select on dim 1: _StridedShard dim shifts from 2 to 1, split_factor preserved
+        result1 = dt_flat.select(1, 0)
+        expected1 = full.flatten(2, 3).select(1, 0)
+        self.assertIsInstance(result1.placements[0], _StridedShard)
+        self.assertEqual(result1.placements[0].dim, 1)
+        self.assertEqual(result1.placements[0].split_factor, orig_split_factor)
+        self.assertEqual(result1.full_tensor(), expected1)
+
+        # select on the _StridedShard dim: must unshard to Replicate
+        result2 = dt_flat.select(2, 0)
+        expected2 = full.flatten(2, 3).select(2, 0)
+        self.assertNotIsInstance(result2.placements[0], _StridedShard)
+        self.assertEqual(result2.full_tensor(), expected2)
 
     def test_strided_shard_unbind(self):
         """Verify _StridedShard correctness through unbind.
@@ -1868,11 +1972,41 @@ class TestViewOps(DTensorContinuousTestBase):
         dt_flat = dt.flatten(2, 3)  # (2, 3, 4*ws*2) with _StridedShard(dim=2)
 
         self.assertIsInstance(dt_flat.placements[0], _StridedShard)
+        orig_split_factor = dt_flat.placements[0].split_factor
 
+        # unbind on dim 0: _StridedShard dim shifts from 2 to 1
         results = torch.unbind(dt_flat, dim=0)
         expected = torch.unbind(full.flatten(2, 3), dim=0)
         for r, e in zip(results, expected):
             self.assertIsInstance(r.placements[0], _StridedShard)
+            self.assertEqual(r.placements[0].dim, 1)
+            self.assertEqual(r.placements[0].split_factor, orig_split_factor)
+            self.assertEqual(r.full_tensor(), e)
+
+        # unbind on dim 1: _StridedShard dim shifts from 2 to 1
+        results1 = torch.unbind(dt_flat, dim=1)
+        expected1 = torch.unbind(full.flatten(2, 3), dim=1)
+        for r, e in zip(results1, expected1):
+            self.assertIsInstance(r.placements[0], _StridedShard)
+            self.assertEqual(r.placements[0].dim, 1)
+            self.assertEqual(r.placements[0].split_factor, orig_split_factor)
+            self.assertEqual(r.full_tensor(), e)
+
+        # unbind on dim above shard dim: _StridedShard dim stays unchanged
+        shape2 = (4, self.world_size * 2, 3, 5)
+        full2 = torch.randn(*shape2, device=self.device_type)
+        dt2 = distribute_tensor(full2, mesh, [Shard(1)])
+        dt2_flat = dt2.flatten(0, 1)  # (4*ws*2, 3, 5) with _StridedShard(dim=0)
+        self.assertIsInstance(dt2_flat.placements[0], _StridedShard)
+        self.assertEqual(dt2_flat.placements[0].dim, 0)
+        orig_split_factor2 = dt2_flat.placements[0].split_factor
+
+        results2 = torch.unbind(dt2_flat, dim=2)
+        expected2 = torch.unbind(full2.flatten(0, 1), dim=2)
+        for r, e in zip(results2, expected2):
+            self.assertIsInstance(r.placements[0], _StridedShard)
+            self.assertEqual(r.placements[0].dim, 0)
+            self.assertEqual(r.placements[0].split_factor, orig_split_factor2)
             self.assertEqual(r.full_tensor(), e)
 
     def test_strided_shard_stack(self):
@@ -1888,12 +2022,23 @@ class TestViewOps(DTensorContinuousTestBase):
         dt_flat = dt.flatten(0, 1)
 
         self.assertIsInstance(dt_flat.placements[0], _StridedShard)
+        orig_split_factor = dt_flat.placements[0].split_factor
 
-        # stack along dim=0 shifts _StridedShard dim by +1
+        # stack along dim=0: _StridedShard dim shifts from 0 to 1
         result = torch.stack([dt_flat, dt_flat], dim=0)
         expected = torch.stack([full.flatten(0, 1), full.flatten(0, 1)], dim=0)
         self.assertIsInstance(result.placements[0], _StridedShard)
+        self.assertEqual(result.placements[0].dim, 1)
+        self.assertEqual(result.placements[0].split_factor, orig_split_factor)
         self.assertEqual(result.full_tensor(), expected)
+
+        # stack along dim=2 (after shard dim): _StridedShard dim stays at 0
+        result2 = torch.stack([dt_flat, dt_flat], dim=2)
+        expected2 = torch.stack([full.flatten(0, 1), full.flatten(0, 1)], dim=2)
+        self.assertIsInstance(result2.placements[0], _StridedShard)
+        self.assertEqual(result2.placements[0].dim, 0)
+        self.assertEqual(result2.placements[0].split_factor, orig_split_factor)
+        self.assertEqual(result2.full_tensor(), expected2)
 
     def test_view_redistribution(self):
         """
