@@ -4152,6 +4152,7 @@ class TestInlineInvokeSubgraph(TestCase):
         self.assertEqual(y.grad, y2.grad)
 
 
+@skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuseHashFn(TestCase):
     @contextlib.contextmanager
     def _count_speculate_calls(self):
