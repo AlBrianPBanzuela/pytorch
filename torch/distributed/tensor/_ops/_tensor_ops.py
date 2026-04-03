@@ -358,11 +358,7 @@ def select_int_strategy(op_schema: OpSchema) -> StrategyType:
 
         # determine input spec
         input_specs = arg_spec
-        # is_tensor_dim_sharded uses is_shard() which misses _StridedShard
-        if is_tensor_dim_sharded(arg_spec, dim=selected_dim) or any(
-            isinstance(p, _StridedShard) and p.dim == selected_dim
-            for p in arg_spec.placements
-        ):
+        if is_tensor_dim_sharded(arg_spec, dim=selected_dim):
             # if input is sharded on the selected dim, need to unshard it, change to replicate
             arg_target_placements = unshard_tensor_dim(
                 arg_spec.placements, dim=selected_dim
@@ -371,10 +367,7 @@ def select_int_strategy(op_schema: OpSchema) -> StrategyType:
 
         # determine output spec
         output_specs = input_specs
-        # is_sharded() uses is_shard() which misses _StridedShard
-        if input_specs.is_sharded() or any(
-            isinstance(p, _StridedShard) for p in input_specs.placements
-        ):
+        if input_specs.is_sharded():
             # handle cases with sharded_dim != selected_dim
             output_placements = shift_shard_dims_after_remove(
                 input_specs.placements, selected_dim
@@ -458,14 +451,8 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
 
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        # is_tensor_dim_sharded uses is_shard() which misses _StridedShard
-        strided_shard_on_slice_dim = any(
-            isinstance(p, _StridedShard) and p.dim == slice_dim
-            for p in arg_spec.placements
-        )
         if (
             not is_tensor_dim_sharded(arg_spec, dim=slice_dim)
-            and not strided_shard_on_slice_dim
             or statically_redundant_slice
         ):
             # only add the strategy if the slice dim is not sharded
@@ -577,14 +564,8 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     # by default follow the input strategy for both input and src
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        # is_tensor_dim_sharded uses is_shard() which misses _StridedShard
-        strided_shard_on_dim = any(
-            isinstance(p, _StridedShard) and p.dim == slice_dim
-            for p in arg_spec.placements
-        )
         if not (
             is_tensor_dim_sharded(arg_spec, dim=slice_dim)
-            or strided_shard_on_dim
             or is_tensor_partial(arg_spec)
         ):
             input_spec = DTensorSpec(mesh, arg_spec.placements, arg_spec.tensor_meta)
@@ -943,12 +924,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
             # exemplar OpSpec to follow
             exemplar_spec = op_spec.output_spec
             # check if the tensor is sharded on the concat dim
-            # is_tensor_dim_sharded uses is_shard() which misses _StridedShard
-            strided_shard_on_cat_dim = any(
-                isinstance(p, _StridedShard) and p.dim == dim
-                for p in exemplar_spec.placements
-            )
-            if is_tensor_dim_sharded(exemplar_spec, dim) or strided_shard_on_cat_dim:
+            if is_tensor_dim_sharded(exemplar_spec, dim):
                 # if the tensor is sharded on the concat dim, we need to unshard it
                 # first
                 exemplar_placement = unshard_tensor_dim(exemplar_spec.placements, dim)
@@ -1224,11 +1200,7 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
     for strategy in input_strategy.strategies:
         spec = strategy.output_spec
         placements = spec.placements
-        # is_tensor_dim_sharded uses is_shard() which misses _StridedShard
-        strided_shard_on_split_dim = any(
-            isinstance(p, _StridedShard) and p.dim == dim for p in spec.placements
-        )
-        if is_tensor_dim_sharded(spec, dim=dim) or strided_shard_on_split_dim:
+        if is_tensor_dim_sharded(spec, dim=dim):
             # if the input is sharded on the split dim, we need to unshard it
             placements = unshard_tensor_dim(spec.placements, dim=dim)
 
@@ -1269,15 +1241,7 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
     unbind_strategy = OpStrategy([])
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        # is_tensor_dim_sharded uses is_shard() which misses _StridedShard
-        strided_shard_on_unbind_dim = any(
-            isinstance(p, _StridedShard) and p.dim == unbind_dim
-            for p in arg_spec.placements
-        )
-        if (
-            is_tensor_dim_sharded(arg_spec, dim=unbind_dim)
-            or strided_shard_on_unbind_dim
-        ):
+        if is_tensor_dim_sharded(arg_spec, dim=unbind_dim):
             raise RuntimeError(
                 f"Attempted to unbind along the sharded dimension {unbind_dim}. ",
                 "It cannot be performed without redistribution, which is disallowed "

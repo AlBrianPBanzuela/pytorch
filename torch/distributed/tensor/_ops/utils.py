@@ -254,7 +254,7 @@ def is_tensor_evenly_shardable_on_dim(
 
     num_shards = 1
     for i, placement in enumerate(spec.placements):
-        if placement.is_shard():
+        if placement.is_shard() or isinstance(placement, _StridedShard):
             shard_dim = cast(Shard, placement).dim
             if shard_dim == dim:
                 num_shards *= spec.mesh.size(i)
@@ -264,7 +264,10 @@ def is_tensor_evenly_shardable_on_dim(
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     """Return True if tensor dim is sharded."""
-    return any(p.is_shard(dim) for p in spec.placements)
+    return any(
+        p.is_shard(dim) or isinstance(p, _StridedShard) and p.dim == dim
+        for p in spec.placements
+    )
 
 
 def is_tensor_partial(spec: DTensorSpec) -> bool:
