@@ -141,7 +141,7 @@ REGISTER_GAMMA(bfloat);
 // Computes -(d/dalpha cdf(x;alpha)) / pdf(x;alpha).
 // Adapted from aten/src/ATen/native/Distributions.h standard_gamma_grad_one().
 
-constant const float GAMMA_GRAD_COEF_UV[3][8] = {
+constant constexpr float GAMMA_GRAD_COEF_UV[3][8] = {
     {0.16009398f,
      -0.094634809f,
      0.025146376f,

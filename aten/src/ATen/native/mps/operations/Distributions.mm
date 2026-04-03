@@ -522,9 +522,8 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
 
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
   auto stream = getCurrentMPSStream();
-  Tensor ret = at::empty_like(alpha);
-  const auto needs_copy = !alpha.is_contiguous();
-  auto alpha_contig = needs_copy ? alpha.contiguous() : alpha;
+  Tensor ret = at::empty_like(alpha, alpha.options(), at::MemoryFormat::Contiguous);
+  auto alpha_contig = alpha.contiguous();
 
   @autoreleasepool {
     auto pso = lib.getPipelineStateForFunc("standard_gamma_" + scalarToMetalTypeString(ret));
@@ -562,9 +561,9 @@ Tensor _standard_gamma_grad_mps(const Tensor& self, const Tensor& output) {
   using namespace mps;
 
   auto stream = getCurrentMPSStream();
-  Tensor ret = at::empty_like(self);
-  const auto self_contig = self.is_contiguous() ? self : self.contiguous();
-  const auto output_contig = output.is_contiguous() ? output : output.contiguous();
+  Tensor ret = at::empty_like(self, self.options(), at::MemoryFormat::Contiguous);
+  const auto self_contig = self.contiguous();
+  const auto output_contig = output.contiguous();
 
   @autoreleasepool {
     auto pso = lib.getPipelineStateForFunc("standard_gamma_grad_" + scalarToMetalTypeString(ret));
