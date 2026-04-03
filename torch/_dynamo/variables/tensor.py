@@ -273,11 +273,7 @@ class TensorVariable(VariableTracker):
         return True
 
     def bool_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        """nb_bool for tensors — calls .item() then converts to bool.
-
-        CPython tensors implement nb_bool via THPVariable_bool which calls
-        at::Tensor::is_nonzero(), equivalent to .item() != 0.
-        """
+        # THPVariable_bool calls at::Tensor::is_nonzero(), i.e. .item() != 0.
         from .constant import ConstantVariable
 
         item = self.call_method(tx, "item", [], {})
@@ -2122,12 +2118,13 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return self.proxy
 
-    def bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        """nb_bool for symbolic int/float/bool.
-
-        Mirrors long_bool (longobject.c:5296) and float_bool (floatobject.c:821):
-        returns whether the value is non-zero.  SymBool is already boolean.
-        """
+    def bool_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        # long_bool / float_bool: non-zero check. SymBool is already boolean.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/longobject.c#L5200
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/floatobject.c#L853
         if isinstance(self.sym_num, torch.SymBool):
             return self
         assert isinstance(self.sym_num, (torch.SymInt, torch.SymFloat))

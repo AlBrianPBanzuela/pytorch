@@ -296,6 +296,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self) -> bool:
         return self.value in self._constant_fold_classes()
 
+    def bool_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> "VariableTracker":
+        from .constant import ConstantVariable
+
+        # bool() on a class consults the metaclass __bool__ (e.g. type(cls).__bool__).
+        # Since the class object is a compile-time constant, evaluate directly.
+        return ConstantVariable.create(bool(self.value))
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from . import ConstantVariable
 
@@ -1303,15 +1313,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslator",
     ) -> "VariableTracker | None":
-        """Mirrors slot_nb_bool (typeobject.c:10630-10671).
-
-        For user-defined types, CPython's slot_nb_bool:
-        1. Tries __bool__ — must return bool, else TypeError.
-        2. Falls back to __len__ — truthy if > 0.
-        3. If neither exists, returns 1 (truthy).
-        """
-        from .constant import ConstantVariable
-        from .object_protocol import CONSTANT_VARIABLE_TRUE
+        # Mirrors slot_nb_bool:
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
+        # __bool__ → __len__ → truthy.
+        from .constant import CONSTANT_VARIABLE_TRUE, ConstantVariable
         from .tensor import SymNodeVariable
 
         if self.call_obj_hasattr(tx, "__bool__").value:
@@ -1319,7 +1324,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if result.is_python_constant():
                 result_value = result.as_python_constant()
                 if not isinstance(result_value, bool):
-                    # CPython: "__bool__ should return bool, got ..."
                     raise_observed_exception(
                         TypeError,
                         tx,
@@ -1349,7 +1353,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return super().nb_index_impl(tx)
         method_var = self.resolve_type_attr(tx, "__index__", type_attr, source=None)
         result = method_var.call_function(tx, [], {})
-        # CPython validates that __index__ returns an int (abstract.c:1433-1438).
+        # CPython validates that __index__ returns an int.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1433-L1438
         if result.is_python_constant() and not isinstance(
             result.as_python_constant(), int
         ):
