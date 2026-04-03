@@ -6,10 +6,19 @@ comparison dispatch machinery that is independent of any specific type.
 Per-type richcompare_impl hooks live in their respective VT files.
 """
 
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from .. import polyfills
-from ..exc import raise_observed_exception
+from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
+    PyMappingSlots,
+    PySequenceSlots,
+    PyTypeSlots,
+)
+
+from .. import graph_break_hints, polyfills
+from ..exc import unimplemented
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, raise_type_error_exc, VariableTracker
 from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
@@ -77,81 +86,92 @@ def vt_identity_compare(
     return None
 
 
-def vt_implements_slot(
-    obj: "VariableTracker",
-    dunder: str,
-    impl_method: str,
-) -> bool:
-    """
-    Check whether obj implements a CPython slot, identified by both its Python
-    dunder name and the corresponding VT impl method name.
-
-    - UserDefinedObjectVariable: check whether the underlying class defines dunder.
-    - ConstantVariable: check hasattr on the wrapped value.
-    - All other VTs: check whether the subclass overrides impl_method.
-    """
-    from .base import VariableTracker
-    from .constant import ConstantVariable
-    from .user_defined import UserDefinedObjectVariable
-
-    if istype(obj, UserDefinedObjectVariable):
-        return obj._maybe_get_baseclass_method(dunder) is not None
-    elif istype(obj, ConstantVariable):
-        return hasattr(obj.value, dunder)
-    else:
-        m1 = getattr(obj.__class__, impl_method)
-        m2 = getattr(VariableTracker, impl_method)
-        return m1 is not m2
+def debug_tp_slots(obj_type: type) -> None:
+    seq_slots, map_slots, _, type_slots = _get_cached_slots(obj_type)
+    print(f"Type {obj_type} slots:")
+    for slot, enum in (
+        (seq_slots, PySequenceSlots),
+        (map_slots, PyMappingSlots),
+        (type_slots, PyTypeSlots),
+    ):
+        names: list[str] = []
+        for slot_name, slot_bit in enum.__members__.items():  # type: ignore[missing-attributes]
+            if has_slot(slot, slot_bit):
+                names.append(slot_name)
+        print(f"  {enum.__name__}: {', '.join(names)}")
 
 
-def vt_implements_sq_length(obj: "VariableTracker") -> bool:
-    return vt_implements_slot(obj, "__len__", "sq_length")
+@lru_cache(maxsize=256)
+def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
+    """Get all type slots for a type (cached)."""
+    return get_type_slots(obj_type)
 
 
-def vt_implements_mp_length(obj: "VariableTracker") -> bool:
-    return vt_implements_slot(obj, "__len__", "mp_length")
+def type_implements_sq_length(obj_type: type) -> bool:
+    """Check whether obj_type implements __len__ as sequence protocol"""
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
+    return has_slot(seq_slots, PySequenceSlots.SQ_LENGTH)
 
 
-def vt_implements_tp_iter(obj: "VariableTracker") -> bool:
-    return vt_implements_slot(obj, "__iter__", "iter_impl")
+def type_implements_mp_length(obj_type: type) -> bool:
+    """Check whether obj_type implements __len__ as mapping protocol"""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, PyMappingSlots.MP_LENGTH)
 
 
-def vt_implements_tp_iternext(obj: "VariableTracker") -> bool:
-    return vt_implements_slot(obj, "__next__", "iternext_impl")
+def type_implements_tp_iter(obj_type: type) -> bool:
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_ITER)
 
 
-def vt_implements_sq_contains(obj: "VariableTracker") -> bool:
-    return vt_implements_slot(obj, "__contains__", "contains_impl")
+def type_implements_tp_iternext(obj_type: type) -> bool:
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
 
 
-def vt_sequence_check(obj: "VariableTracker") -> bool:
+def type_sequence_check(obj_type: type) -> bool:
     """Implements PySequence_Check semantics for VariableTracker objects."""
-    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#1715
-    from .dicts import ConstDictVariable
-
-    if istype(obj, ConstDictVariable):
+    if issubclass(obj_type, dict):
         return False
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
+    return has_slot(seq_slots, PySequenceSlots.SQ_ITEM)
 
-    # needs generic_getitem to be implemented in Dynamo
-    return True
 
-
-def vt_mapping_check(obj: "VariableTracker") -> bool:
+def type_mapping_check(obj_type: type) -> bool:
     """Implements PyMapping_Check semantics for VariableTracker objects."""
-    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#2302
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
 
-    # needs generic_getitem to be implemented in Dynamo
-    return True
+
+def maybe_get_python_type(obj: VariableTracker) -> type:
+    try:
+        return obj.python_type()
+    except NotImplementedError:
+        unimplemented(
+            gb_type="Unsupported python_type() call",
+            context=f"{obj} does not implement python_type()",
+            explanation="This VariableTracker does not implement python_type(), "
+            "which is required for object protocol operations.",
+            hints=[
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
+
+
+def type_implements_sq_contains(obj_type: type) -> bool:
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
+    return has_slot(seq_slots, PySequenceSlots.SQ_CONTAINS)
 
 
 def vt_mapping_size(
     tx: "InstructionTranslator", obj: "VariableTracker"
 ) -> "VariableTracker":
     # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L2308-L2330
-    if vt_implements_mp_length(obj):
+    T = maybe_get_python_type(obj)
+    if type_implements_mp_length(T):
         return obj.mp_length(tx)
 
-    if vt_implements_sq_length(obj):
+    if type_implements_sq_length(T):
         type_error(tx, f"{obj.python_type_name()} is not a mapping")
 
     type_error(tx, f"object of type {obj.python_type_name()} has no len()")
@@ -166,7 +186,8 @@ def generic_len(
     Dispatches to sq_length (sequences) or mp_length (mappings) depending on the VT type.
     """
 
-    if vt_implements_sq_length(obj):
+    T = maybe_get_python_type(obj)
+    if type_implements_sq_length(T):
         return obj.sq_length(tx)
     return vt_mapping_size(tx, obj)
 
@@ -178,7 +199,26 @@ def generic_getitem(
     Implements PyObject_GetItem semantics for VariableTracker objects.
     Routes to obj.getitem_impl(tx, item)
     """
-    return obj.getitem_impl(tx, item)
+    return obj.call_method(tx, "__getitem__", [item], {})
+
+
+def generic_iternext(
+    tx: "InstructionTranslator", obj: "VariableTracker"
+) -> "VariableTracker":
+    """
+    Implements PyIter_Next / tp_iternext semantics for VariableTracker objects.
+
+    Calls obj.tp_iternext(tx) if the object is an iterator, otherwise raises
+    TypeError. StopIteration propagation is left to the caller (mirrors
+    CPython's iternext contract where NULL return signals exhaustion).
+    """
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2865
+
+    T = maybe_get_python_type(obj)
+    if not type_implements_tp_iternext(T):
+        type_error(tx, f"'{obj.python_type_name()}' object is not an iterator")
+
+    return obj.tp_iternext(tx)
 
 
 # TODO(guilhermeleobas): should we narrow the return type to IteratorVariable?
@@ -187,9 +227,8 @@ def generic_getiter(
 ) -> "VariableTracker":
     """
     Implements PyObject_GetIter semantics for VariableTracker objects.
-    Routes to obj.iter_impl(tx), the tp_iter slot on the object's type.
+    Routes to obj.tp_iter(tx), the tp_iter slot on the object's type.
     """
-    from .base import VariableTracker
 
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#2848
     # The algorithm for PyObject_GetIter is as follows: Steps:
@@ -200,85 +239,40 @@ def generic_getiter(
     #    it.
     # 3. Otherwise, raise a TypeError
 
-    if vt_implements_tp_iter(obj):
-        res = obj.iter_impl(tx)
-        if not vt_implements_tp_iternext(res):
-            msg = VariableTracker.build(
+    T = maybe_get_python_type(obj)
+    if type_implements_tp_iter(T):
+        res = obj.tp_iter(tx)
+        res_T = maybe_get_python_type(res)
+        if not type_implements_tp_iternext(res_T):
+            type_error(
                 tx,
-                f"{obj.python_type_name()}.__iter__() must return an iterator, not {res.python_type_name()}",
+                f"{obj.python_type_name()}.__iter__() returned non-iterator {res.python_type_name()}",
             )
-            raise_observed_exception(TypeError, tx, args=[msg])
         return res
-    elif vt_sequence_check(obj):
+    elif type_sequence_check(T):
         return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
             tx, [obj], {}
         )
     else:
-        msg = VariableTracker.build(
-            tx, f"'{obj.python_type_name()}' object is not iterable"
-        )
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[msg],
-        )
-
-
-def generic_iternext(
-    tx: "InstructionTranslator", obj: "VariableTracker"
-) -> "VariableTracker":
-    """
-    Implements PyIter_Next / tp_iternext semantics for VariableTracker objects.
-
-    Calls obj.iternext_impl(tx) if the object is an iterator, otherwise raises
-    TypeError. StopIteration propagation is left to the caller (mirrors
-    CPython's iternext contract where NULL return signals exhaustion).
-    """
-    from .base import VariableTracker
-
-    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2865
-    if not vt_implements_tp_iternext(obj):
-        msg = VariableTracker.build(
-            tx, f"'{obj.python_type_name()}' object is not an iterator"
-        )
-        raise_observed_exception(TypeError, tx, args=[msg])
-
-    return obj.iternext_impl(tx)
-
-
-def vt_sequence_contains(
-    tx: "InstructionTranslator", obj: "VariableTracker", item: "VariableTracker"
-) -> "VariableTracker":
-    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2273
-    if vt_implements_sq_contains(obj):
-        return obj.contains_impl(tx, item)
-    # Fallback mirrors _PySequence_IterSearch: call PyObject_GetIter first (which
-    # handles both __iter__ and the __getitem__ sequence protocol), then search.
-    it = generic_getiter(tx, obj)
-    return UserFunctionVariable(polyfills.impl_CONTAINS_OP_fallback).call_function(
-        tx, [item, it], {}
-    )
+        type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
 
 
 def generic_contains(
     tx: "InstructionTranslator", obj: "VariableTracker", item: "VariableTracker"
 ) -> "VariableTracker":
     """
-    Implements PyMapping_Contains / PySequence_Contains semantics for VariableTracker objects.
+    Implements PySequence_Contains semantics for VariableTracker objects.
 
-    If the object has sq_contains (i.e., __contains__), calls obj.contains_impl(tx, item).
+    If the object has sq_contains (i.e., __contains__), calls obj.sq_contains(tx, item).
     Otherwise falls back to iterating over obj and comparing each element.
     """
-    if vt_mapping_check(obj):
-        # TODO(guilhermeleobas): This should check for __contains__
-        # Using vt_implements_sq_contains for now but is wrong!
-        if vt_implements_sq_contains(obj):
-            return obj.contains_impl(tx, item)
-        else:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[f"Argument of type '{obj.python_type_name()}' is not iterable"],
-            )
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2272-L2283
+    T = maybe_get_python_type(obj)
+    if type_implements_sq_contains(T):
+        return obj.sq_contains(tx, item)
     else:
-        return vt_sequence_contains(tx, obj, item)
+        # iter fallback handles both __iter__ and __getitem__ sequence protocol cases
+        it = generic_getiter(tx, obj)
+        return UserFunctionVariable(polyfills.impl_CONTAINS_OP_fallback).call_function(
+            tx, [item, it], {}
+        )

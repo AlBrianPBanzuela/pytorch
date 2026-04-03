@@ -1525,13 +1525,13 @@ class TensorVariable(VariableTracker):
         """Sequence length for tensors (size along first dimension)."""
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         return ListIteratorVariable(
             self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
         )
 
     def method___iter__(self, tx: "InstructionTranslator") -> VariableTracker:
-        return self.iter_impl(tx)
+        return self.tp_iter(tx)
 
     def method_addcmul_(
         self,
@@ -1698,7 +1698,7 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "copy_", [fma_result], {})
         return None
 
-    def contains_impl(
+    def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
         # Rewrite __contains__ here so that downstream passes can trace through
@@ -1716,7 +1716,7 @@ class TensorVariable(VariableTracker):
     def method___contains__(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        return self.contains_impl(tx, arg)
+        return self.sq_contains(tx, arg)
 
     def method_register_hook(
         self,

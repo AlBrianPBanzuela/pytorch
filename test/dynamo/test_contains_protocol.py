@@ -7,7 +7,7 @@ Tests cover:
 - sq_contains protocol: list, tuple, str, range, set, frozenset
 - mp_contains protocol: dict, dict.keys()
 - Fallback iteration: objects with __iter__ but no __contains__
-- Sequence-protocol fallback: objects with __getitem__/__len__ but no __contains__/__iter__
+- Sequence-protocol fallback: objects with __getitem__ but no __contains__/__iter__
 - operator.contains() — exercises the builtin.py call_contains path
 - User-defined classes with __contains__
 - User-defined classes without __contains__ (iteration fallback)
@@ -16,7 +16,9 @@ Tests cover:
 """
 
 import operator
+import unittest
 
+import types
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
@@ -48,16 +50,13 @@ class WithIterNoContains:
 
 
 class WithGetitemNoContains:
-    """Sequence protocol via __getitem__ / __len__, no __contains__."""
+    """Sequence protocol via __getitem__, no __contains__."""
 
     def __init__(self, data):
         self.data = data
 
     def __getitem__(self, idx):
         return self.data[idx]
-
-    def __len__(self):
-        return len(self.data)
 
 
 class WithContainsAndIter:
@@ -128,9 +127,6 @@ class TupleGetitemWrapper:
         # shifts each value up by 100
         return self.data[idx] + 100
 
-    def __len__(self):
-        return len(self.data)
-
 
 class SetIterWrapper:
     """Set wrapper with custom __iter__ and no __contains__ — forces iter fallback."""
@@ -153,9 +149,6 @@ class DictGetitemWrapper:
     def __getitem__(self, idx):
         # access values by index via sorted keys
         return self.data[self.sorted_keys[idx]]
-
-    def __len__(self):
-        return len(self.data)
 
 
 class ListSubclassCustomContains(list):
@@ -226,6 +219,9 @@ class _ContainsBase:
     empty = []
     item = 2
     missing_item = 4
+    has_contains = True  # Override in subclass if type doesn't implement __contains__
+    has_iter = True  # Override in subclass if type doesn't implement __iter__
+    has_getitem = True  # Override in subclass if type doesn't implement __getitem__
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -236,33 +232,69 @@ class _ContainsBase:
         torch._dynamo.config.enable_trace_unittest = self.old
         return super().tearDown()
 
+    def init(self, thetype, data):
+        return thetype(data)
+
     @make_dynamo_test
     def test_contains(self):
         # Basic membership tests for the main type under test
-        seq = self.thetype(self.data)
+        seq = self.init(self.thetype, self.data)
         self.assertTrue(self.item in seq)
         self.assertFalse(self.missing_item in seq)
 
     @make_dynamo_test
     def test_contains_negation(self):
         # Test `not in` operator
-        seq = self.thetype(self.data)
+        seq = self.init(self.thetype, self.data)
         self.assertFalse(self.item not in seq)
         self.assertTrue(self.missing_item not in seq)
 
     @make_dynamo_test
     def test_contains_operator_module(self):
         # Test operator.contains()
-        seq = self.thetype(self.data)
+        seq = self.init(self.thetype, self.data)
         self.assertTrue(operator.contains(seq, self.item))
         self.assertFalse(operator.contains(seq, self.missing_item))
 
     @make_dynamo_test
     def test_contains_empty(self):
         # Test on empty container
-        seq = self.thetype(self.empty)
+        seq = self.init(self.thetype, self.empty)
         self.assertFalse(self.item in seq)
         self.assertTrue(self.missing_item not in seq)
+
+    @make_dynamo_test
+    def test_has_contains_method(self):
+        # Verify whether the type has __contains__ method as expected
+        seq = self.init(self.thetype, self.data)
+        has_method = hasattr(seq, "__contains__")
+        self.assertEqual(
+            has_method,
+            self.has_contains,
+            f"{self.thetype.__name__} __contains__ presence mismatch",
+        )
+
+    @make_dynamo_test
+    def test_has_iter_method(self):
+        # Verify whether the type has __iter__ method as expected
+        seq = self.init(self.thetype, self.data)
+        has_method = hasattr(seq, "__iter__")
+        self.assertEqual(
+            has_method,
+            self.has_iter,
+            f"{self.thetype.__name__} __iter__ presence mismatch",
+        )
+
+    @make_dynamo_test
+    def test_has_getitem_method(self):
+        # Verify whether the type has __getitem__ method as expected
+        seq = self.init(self.thetype, self.data)
+        has_method = hasattr(seq, "__getitem__")
+        self.assertEqual(
+            has_method,
+            self.has_getitem,
+            f"{self.thetype.__name__} __getitem__ presence mismatch",
+        )
 
 
 class ListContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
@@ -285,42 +317,68 @@ class DictContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     data = {"a": 1, "b": 2, "c": 3}
     item = "b"
     missing_item = "d"
+    empty = {}
+
+
+class MappingProxyContainsTest(DictContainsTest):
+    thetype = types.MappingProxyType
 
 
 class SetContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = set
+    has_getitem = False
+
+    @unittest.expectedFailure
+    def test_has_getitem_method(self):
+        return super().test_has_getitem_method()
 
 
 class FrozensetContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = frozenset
+    has_getitem = False
+
+    @unittest.expectedFailure
+    def test_has_getitem_method(self):
+        return super().test_has_getitem_method()
 
 
 class WithContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = WithContains
+    has_iter = False
+    has_getitem = False
 
 
 class WithIterNoContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = WithIterNoContains
+    has_contains = False
+    has_getitem = False
 
 
 class WithGetitemNoContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = WithGetitemNoContains
+    has_contains = False
+    has_iter = False
 
 
 class WithContainsAndIterTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = WithContainsAndIter
+    has_getitem = False
 
 
 class ListIterWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = ListIterWrapper
     item = 4  # Will be doubled by __iter__
     missing_item = 1
+    has_contains = False
+    has_getitem = False
 
 
 class ListGetitemWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = ListGetitemWrapper
     item = 101  # Will be shifted +100 by __getitem__
     missing_item = 10
+    has_contains = False
+    has_iter = False
 
 
 class DictIterWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
@@ -329,18 +387,24 @@ class DictIterWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     empty = {}
     item = 2  # Will iterate over values
     missing_item = "a"
+    has_contains = False
+    has_getitem = False
 
 
 class TupleIterWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = TupleIterWrapper
     item = 4  # Will be doubled by __iter__
     missing_item = 10
+    has_contains = False
+    has_getitem = False
 
 
 class TupleGetitemWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = TupleGetitemWrapper
     item = 101  # Will be shifted +100 by __getitem__
     missing_item = 10
+    has_contains = False
+    has_iter = False
 
 
 class SetIterWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
@@ -348,6 +412,8 @@ class SetIterWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     data = {1, 2, 3}
     item = 4  # Will be doubled by __iter__
     missing_item = 10
+    has_contains = False
+    has_getitem = False
 
 
 class DictGetitemWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
@@ -356,6 +422,8 @@ class DictGetitemWrapperTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     empty = {}
     item = 2  # Will be retrieved by __getitem__
     missing_item = 10
+    has_contains = False
+    has_iter = False
 
 
 class ListSubclassCustomContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
@@ -378,6 +446,7 @@ class SetSubclassCustomContainsTest(_ContainsBase, torch._dynamo.test_case.TestC
     data = [1, 2, 3]
     item = 4  # Custom __contains__ negates base class result
     missing_item = 1
+    has_getitem = False
 
     @make_dynamo_test
     def test_contains_empty(self):
@@ -385,6 +454,17 @@ class SetSubclassCustomContainsTest(_ContainsBase, torch._dynamo.test_case.TestC
         seq = self.thetype(self.empty)
         self.assertTrue(self.item in seq)
         self.assertFalse(self.missing_item not in seq)
+
+
+class RangeContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
+    thetype = range
+    data = (0, 10, 2)
+    item = 2
+    missing_item = 10
+    empty = (0, 0, 1)
+
+    def init(self, thetype, data):
+        return thetype(*data)
 
 
 class ContainsReturnsTruthyTest(torch._dynamo.test_case.TestCase):
@@ -485,7 +565,7 @@ class ContainsRaisesTypeErrorTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(str(cm.exception), "bad operand")
 
 
-class RangeContainsTest(torch._dynamo.test_case.TestCase):
+class RangeContainsMiscTest(torch._dynamo.test_case.TestCase):
     """Specific tests for range __contains__ protocol"""
 
     def setUp(self):

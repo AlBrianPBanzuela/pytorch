@@ -1150,7 +1150,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_iternext(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
@@ -1190,7 +1190,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             return CONSTANT_VARIABLE_TRUE
         return CONSTANT_VARIABLE_FALSE
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         return self
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
@@ -1211,7 +1211,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     ) -> None:
         while True:
             try:
-                fn(self.iternext_impl(tx))
+                fn(self.tp_iternext(tx))
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
@@ -1244,12 +1244,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__next__":
-            return self.iternext_impl(tx)
-        elif name == "__iter__":
-            # iter(gen) returns itself
-            return self
-        elif name == "send":
+        if name == "send":
             # Sends a value into the generator function. Returns the next value
             # yielded by the generator, or raises StopIteration if the generator
             # exits without yielding another value
@@ -1260,7 +1255,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     raise_observed_exception(TypeError, tx)
             tracer = self.inline_tracer
             tracer.push_many(args)
-            return self.iternext_impl(tx)
+            return self.tp_iternext(tx)
         elif name == "close":
             # * Raises a GeneratorExit at the point where the generator function was paused.
             # * If the generator function catches the exception and returns a
@@ -1315,7 +1310,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 # Raise RuntimeError if the generator yields any other value
-                if self.iternext_impl(tx):
+                if self.tp_iternext(tx):
                     raise_observed_exception(RuntimeError, tx)
             except ObservedGeneratorExit:
                 tracer.generator_exhausted = True
@@ -1346,7 +1341,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # propagate the exception back to the parent caller
                 raise
 
-            retval = self.iternext_impl(tx)
+            retval = self.tp_iternext(tx)
 
             # The exception raised before is still active. We need to check the exception
             # table one more time to find the next target. But why? Let's walk
@@ -3119,7 +3114,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
             grid=args[0],
-            kernel_source=variable.source,
+            kernel_source=variable.kernel_source,
         )
 
     def call_HOP(
@@ -3204,12 +3199,12 @@ class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
     kernel_idx: int | None
-    kernel_source: "AttrSource"
+    kernel_source: Source | None
 
     def __init__(
         self, kernel: Any, kernel_idx: int | None, grid: Any, **kwargs: Any
     ) -> None:
-        self.kernel_source = kwargs.pop("kernel_source", None)
+        self.kernel_source = kwargs.pop("kernel_source", kwargs.get("source"))
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 

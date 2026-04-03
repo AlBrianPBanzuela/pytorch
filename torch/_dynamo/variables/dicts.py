@@ -600,7 +600,7 @@ class ConstDictVariable(VariableTracker):
             else:
                 self.install_dict_keys_match_guard()
 
-    def contains_impl(
+    def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
         if not is_hashable(item):
@@ -609,7 +609,7 @@ class ConstDictVariable(VariableTracker):
         contains = item in self
         return VariableTracker.build(tx, contains)
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         from .iter import DictIterator
 
         self.install_dict_keys_match_guard()
@@ -929,7 +929,6 @@ class ConstDictVariable(VariableTracker):
                     user_cls = self.user_cls
                     to_cpy = self
                 else:
-                    assert isinstance(other, ConstDictVariable)
                     user_cls = other.user_cls
                     to_cpy = other
 
@@ -1079,6 +1078,14 @@ class MappingProxyVariable(VariableTracker):
                 ],
             )
         return self.dv_dict.call_method(tx, name, args, kwargs)
+
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.dv_dict.tp_iter(tx)
+
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        return self.dv_dict.sq_contains(tx, item)
 
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.dv_dict.mp_length(tx)
@@ -1489,7 +1496,15 @@ class SetVariable(ConstDictVariable):
                 "__xor__": "symmetric_difference",
                 "__sub__": "difference",
             }.get(name)
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1499,8 +1514,41 @@ class SetVariable(ConstDictVariable):
                 )
             assert m is not None
             return self.call_method(tx, m, args, kwargs)
+        elif name in ("__rand__", "__ror__", "__rxor__", "__rsub__"):
+            m = {
+                "__rand__": "__and__",
+                "__ror__": "__or__",
+                "__rxor__": "__xor__",
+                "__rsub__": "__sub__",
+            }.get(name)
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{args[0].python_type_name()}' and '{self.python_type_name()}'"
+                    ],
+                )
+            assert m is not None
+            return args[0].call_method(tx, m, [self], kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1518,12 +1566,28 @@ class SetVariable(ConstDictVariable):
             self.call_method(tx, m, args, kwargs)
             return self
         elif name == "__eq__":
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return CONSTANT_VARIABLE_FALSE
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
@@ -1531,7 +1595,7 @@ class SetVariable(ConstDictVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def contains_impl(
+    def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
         # https://github.com/python/cpython/blob/8e9d21c64b65edda99a0d38e8d23545b17f8455e/Objects/setobject.c#L2501-L2520
@@ -1540,8 +1604,8 @@ class SetVariable(ConstDictVariable):
         # if isinstance(item, SetVariable) and self.python_type() is set:
         if isinstance(item, SetVariable) and item.python_type() is set:
             frozenset_item = variables.FrozensetVariable(item.items)
-            return super().contains_impl(tx, frozenset_item)
-        return super().contains_impl(tx, item)
+            return super().sq_contains(tx, frozenset_item)
+        return super().sq_contains(tx, item)
 
     def python_type_var(self) -> "BuiltinVariable":
         return variables.BuiltinVariable(set)
@@ -1554,6 +1618,9 @@ class SetVariable(ConstDictVariable):
     def install_dict_keys_match_guard(self) -> None:
         # Already EQUALS_MATCH guarded
         pass
+
+    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+        return VariableTracker.build(tx, len(self.set_items))
 
 
 class OrderedSetClassVariable(VariableTracker):
@@ -1831,7 +1898,7 @@ class DictViewVariable(VariableTracker):
             return CONSTANT_VARIABLE_TRUE
         return CONSTANT_VARIABLE_FALSE
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         from .lists import ListIteratorVariable
 
         return ListIteratorVariable(
@@ -1845,30 +1912,24 @@ class DictViewVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__iter__":
-            from .lists import ListIteratorVariable
-
-            return ListIteratorVariable(
-                self.view_items_vt, mutation_type=ValueMutationNew()
-            )
-        elif name == "__len__":
+        if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
         elif name == "__repr__":
             return VariableTracker.build(tx, self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
-    def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
-        """Mapping length for dict view objects."""
-        return self.dv_dict.mp_length(tx)
+    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+        """Sequence length for dict view objects."""
+        return VariableTracker.build(tx, len(self.view_items))
 
 
 class DictKeysVariable(DictViewVariable):
     kv = "keys"
 
-    def contains_impl(
+    def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
-        return self.dv_dict.contains_impl(tx, item)
+        return self.dv_dict.sq_contains(tx, item)
 
     @property
     def set_items(self) -> set[VariableTracker]:
@@ -1915,8 +1976,16 @@ class DictKeysVariable(DictViewVariable):
             m = getattr(self.set_items, name)
             r = m(args[0].set_items)  # type: ignore[attr-defined]
             return SetVariable(r)
-        if name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, DictKeysVariable)):
+        elif name in cmp_name_to_op_mapping:
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
@@ -1951,6 +2020,13 @@ class DictItemsVariable(DictViewVariable):
     kv = "items"
 
     @property
+    def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
+        return {
+            ConstDictVariable._HashableTracker(variables.TupleVariable([k.vt, v]))
+            for k, v in self.view_items
+        }
+
+    @property
     def view_items_vt(self) -> list[VariableTracker]:
         # Returns an iterable of the unpacked items
         return [variables.TupleVariable([k.vt, v]) for k, v in self.view_items]
@@ -1971,7 +2047,7 @@ class DictItemsVariable(DictViewVariable):
                 items.append(f"({key_str}, {val_str})")
             return "dict_items([" + ",".join(items) + "])"
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         from .lists import ListIteratorVariable
 
         return ListIteratorVariable(
@@ -1992,7 +2068,49 @@ class DictItemsVariable(DictViewVariable):
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             if isinstance(args[0], DictItemsVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
+            elif isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                return VariableTracker.build(
+                    tx,
+                    len(self.set_items ^ args[0].set_items) == 0,
+                )
             return CONSTANT_VARIABLE_FALSE
+        elif name in (
+            "__and__",
+            "__iand__",
+            "__or__",
+            "__ior__",
+            "__sub__",
+            "__isub__",
+            "__xor__",
+            "__ixor__",
+        ):
+            # These methods always returns a set
+            fn_hdl = getattr(self.set_items, name)
+            ret_val = fn_hdl(args[0].set_items)  # type: ignore[attr-defined]
+            return SetVariable(ret_val)
+        elif name in cmp_name_to_op_mapping:
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                return VariableTracker.build(tx, NotImplemented)
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def is_python_hashable(self) -> Literal[False]:

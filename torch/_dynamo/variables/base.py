@@ -532,13 +532,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def iter_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def tp_iter(self, tx: "InstructionTranslator") -> "VariableTracker":
         """
         Implements PyObject_GetIter semantics (tp_iter slot).
         Subclasses override this to support iteration.
         """
         unimplemented(
-            gb_type="iter_impl not implemented",
+            gb_type="tp_iter not implemented",
             context=f"iter({self})",
             explanation=f"Dynamo does not know how to iterate over {self.python_type_name()}",
             hints=[
@@ -579,36 +579,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
-    def getitem_impl(self, tx: Any, item: "VariableTracker") -> "VariableTracker":
-        """
-        Implements sq_item / mp_item (tp_as_sequence/tp_as_mapping getitem slot).
-        Subclasses must override this to support getitem(). Reaching this base is a
-        bug — it means getitem_impl is missing for that VariableTracker subclass.
-        """
-        unimplemented(
-            gb_type="Missing getitem_impl",
-            context=f"getitem({self.python_type_name()}, {item.python_type_name()})",
-            explanation=(
-                f"Dynamo does not support getitem() on {self.python_type_name()}."
-                " Add getitem_impl to this VariableTracker subclass."
-            ),
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    def contains_impl(self, tx: Any, item: "VariableTracker") -> "VariableTracker":
-        """
-        Implements sq_contains / mp_contains (tp_as_sequence/tp_as_mapping contains slot).
-        Subclasses must override this to support `item in self`. Reaching this base is a
-        bug — it means contains_impl is missing for that VariableTracker subclass.
-        """
-        unimplemented(
-            gb_type="Missing contains_impl",
-            context=f"contains({type(self).__name__}, {item.python_type_name()})",
-            explanation=(
-                f"Dynamo does not support `x in {type(self).__name__}`."
-                " Add contains_impl to this VariableTracker subclass."
-            ),
-            hints=[*graph_break_hints.SUPPORTABLE],
+    def sq_contains(self, tx: Any, item: "VariableTracker") -> "VariableTracker":
+        """Called when sq_contains is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"argument of type '{self.python_type_name()}' is not iterable"],
         )
 
     def call_method(
@@ -883,24 +859,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def iternext_impl(self, tx: Any) -> "VariableTracker":
+    def tp_iternext(self, tx: Any) -> "VariableTracker":
         """
         Implements tp_iternext slot semantics.
         Subclasses override this to support next(). Reaching this base is a
-        bug — it means iternext_impl is missing for that VariableTracker subclass.
+        bug — it means tp_iternext is missing for that VariableTracker subclass.
         """
         unimplemented(
-            gb_type="Missing iternext_impl",
+            gb_type="Missing tp_iternext",
             context=f"next({self.python_type_name()})",
             explanation=(
                 f"Dynamo does not support next() on {self.python_type_name()}."
-                " Add iternext_impl to this VariableTracker subclass."
+                " Add tp_iternext to this VariableTracker subclass."
             ),
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
     def next_variable(self, tx: Any) -> "VariableTracker":
-        return self.iternext_impl(tx)
+        return self.tp_iternext(tx)
 
     def is_strict_mode(self, tx: Any) -> bool:
         return bool(tx.strict_checks_fn and tx.strict_checks_fn(self))
