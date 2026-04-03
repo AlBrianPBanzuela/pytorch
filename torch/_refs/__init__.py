@@ -4434,10 +4434,19 @@ def split_with_sizes(
             split_sizes[i] >= 0,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
+    # Use <= and >= instead of == to avoid producing sympy.Equality (a
+    # sympy.Boolean, not sympy.Expr) which inductor cannot handle as a
+    # graph input in backward compilations.
+    _sum = builtins.sum(split_sizes)
     torch._check_with(
         ValueError,
-        builtins.sum(split_sizes) == self.shape[dim],
-        lambda: f"Split sizes add up to {builtins.sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
+        _sum <= self.shape[dim],
+        lambda: f"Split sizes add up to {_sum} but got the tensor's size of {self.shape[dim]}",
+    )
+    torch._check_with(
+        ValueError,
+        _sum >= self.shape[dim],
+        lambda: f"Split sizes add up to {_sum} but got the tensor's size of {self.shape[dim]}",
     )
 
     splits = []
