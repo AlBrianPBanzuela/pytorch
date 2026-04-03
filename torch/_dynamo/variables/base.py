@@ -532,13 +532,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def iter_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def tp_iter(self, tx: "InstructionTranslator") -> "VariableTracker":
         """
         Implements PyObject_GetIter semantics (tp_iter slot).
         Subclasses override this to support iteration.
         """
         unimplemented(
-            gb_type="iter_impl not implemented",
+            gb_type="tp_iter not implemented",
             context=f"iter({self})",
             explanation=f"Dynamo does not know how to iterate over {self.python_type_name()}",
             hints=[

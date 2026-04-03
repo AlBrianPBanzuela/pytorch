@@ -192,7 +192,7 @@ def generic_getiter(
 ) -> "VariableTracker":
     """
     Implements PyObject_GetIter semantics for VariableTracker objects.
-    Routes to obj.iter_impl(tx), the tp_iter slot on the object's type.
+    Routes to obj.tp_iter(tx), the tp_iter slot on the object's type.
     """
     from .base import VariableTracker
 
@@ -207,7 +207,7 @@ def generic_getiter(
 
     T = maybe_get_python_type(obj)
     if type_implements_tp_iter(T):
-        return obj.iter_impl(tx)
+        return obj.tp_iter(tx)
     elif type_sequence_check(T):
         return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
             tx, [obj], {}

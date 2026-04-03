@@ -1190,7 +1190,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             return CONSTANT_VARIABLE_TRUE
         return CONSTANT_VARIABLE_FALSE
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         return self
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
@@ -3119,7 +3119,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
             grid=args[0],
-            kernel_source=variable.source,
+            kernel_source=variable.kernel_source,
         )
 
     def call_HOP(
@@ -3204,12 +3204,12 @@ class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
     kernel_idx: int | None
-    kernel_source: "AttrSource"
+    kernel_source: Source | None
 
     def __init__(
         self, kernel: Any, kernel_idx: int | None, grid: Any, **kwargs: Any
     ) -> None:
-        self.kernel_source = kwargs.pop("kernel_source", None)
+        self.kernel_source = kwargs.pop("kernel_source", kwargs.get("source"))
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 

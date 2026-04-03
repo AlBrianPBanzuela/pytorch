@@ -711,7 +711,7 @@ class RangeVariable(BaseListVariable):
             return int(re)
         return 0
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         if not all(var.is_python_constant() for var in self.items):
             # Can't represent a `range_iterator` without well defined bounds
             return variables.misc.DelayGraphBreakVariable(
@@ -1117,7 +1117,7 @@ class ListVariable(CommonListMethodsVariable):
             codegen.foreach(self.items)
             codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         self._install_list_length_guard()
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
@@ -1458,7 +1458,7 @@ class TupleVariable(BaseListVariable):
     def debug_repr(self) -> str:
         return self.debug_repr_helper("(", ")")
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         self._install_list_length_guard()
         return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
@@ -1710,7 +1710,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def items(self) -> list[VariableTracker]:
         return self._tuple_vt.items
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         """NamedTuples are iterable like regular tuples"""
         return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
@@ -2153,7 +2153,7 @@ class RangeIteratorVariable(IteratorVariable):
         self.step = step
         self.len = len_
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         """Range iterators are their own iterator."""
         return self
 

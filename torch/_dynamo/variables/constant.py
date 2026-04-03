@@ -200,14 +200,14 @@ its type to `common_constant_types`.
             raise NotImplementedError
         return member
 
-    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter(self, tx: "InstructionTranslator") -> VariableTracker:
         from .lists import ListIteratorVariable
 
         if istype(self.value, str):
             return ListIteratorVariable(
                 self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
             )
-        return super().iter_impl(tx)
+        return super().tp_iter(tx)
 
     def call_method(
         self,
@@ -250,7 +250,7 @@ its type to `common_constant_types`.
             return super().call_method(tx, name, args, kwargs)
 
         if name == "__iter__":
-            return self.iter_impl(tx)
+            return self.tp_iter(tx)
 
         if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)

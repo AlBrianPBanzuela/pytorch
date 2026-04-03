@@ -281,7 +281,7 @@ class IteratorVariable(VariableTracker):
             return variables.CONSTANT_VARIABLE_TRUE
         return super().call_obj_hasattr(tx, name)
 
-    def iter_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def tp_iter(self, tx: "InstructionTranslator") -> "VariableTracker":
         """Iterators are their own iterator."""
         return self
 
