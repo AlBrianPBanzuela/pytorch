@@ -296,9 +296,7 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
-    NamedTupleVariable,
     SourcelessGraphModuleVariable,
-    StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
@@ -824,12 +822,7 @@ class VariableBuilder:
                 source=self.source,
                 mutation_type=ValueMutationExisting(),
             )
-            vt_cls: type[UserDefinedTupleVariable]
-            if getattr(type(value), "__module__", None) == "torch.return_types":
-                vt_cls = StructSequenceVariable
-            else:
-                vt_cls = NamedTupleVariable
-            result = vt_cls(
+            result = UserDefinedTupleVariable.get_vt_cls(type(value))(
                 value,
                 source=self.source,
                 tuple_vt=tuple_vt,
@@ -3415,22 +3408,18 @@ def handle_traced_output(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, **options)
         else:
-            assert (
-                example_value.__class__.__module__ == "torch.return_types"
-                or hasattr(example_value, "_fields")
-            ), (
-                f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
+            assert is_namedtuple(example_value), (
+                f"expected namedtuple or structseq but got {type(example_value)}"
             )
             tuple_vt = TupleVariable(
                 unpacked,
                 mutation_type=options.get("mutation_type", ValueMutationNew()),
             )
-            vt_cls: type[UserDefinedTupleVariable]
-            if example_value.__class__.__module__ == "torch.return_types":
-                vt_cls = StructSequenceVariable
-            else:
-                vt_cls = NamedTupleVariable
-            return vt_cls(example_value, tuple_vt=tuple_vt, **options)  # type: ignore[arg-type]
+            return UserDefinedTupleVariable.get_vt_cls(type(example_value))(
+                example_value,
+                tuple_vt=tuple_vt,
+                **options,  # type: ignore[arg-type]
+            )
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -4352,12 +4341,9 @@ class SourcelessBuilder:
                 for name in namedtuple_fields(type(value))
             ]
             tuple_vt = TupleVariable(output, mutation_type=ValueMutationNew())
-            vt_cls: type[UserDefinedTupleVariable]
-            if getattr(type(value), "__module__", None) == "torch.return_types":
-                vt_cls = StructSequenceVariable
-            else:
-                vt_cls = NamedTupleVariable
-            return vt_cls(value, tuple_vt=tuple_vt)
+            return UserDefinedTupleVariable.get_vt_cls(type(value))(
+                value, tuple_vt=tuple_vt
+            )
         elif (
             isinstance(value, torch.SymInt)
             and value.node.expr in tx.output.bound_symbols

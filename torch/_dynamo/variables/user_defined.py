@@ -45,6 +45,7 @@ import torch._dynamo.config
 import torch.nn
 from torch._guards import Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
+from torch.utils._pytree import is_structseq_class
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_build_tuple, create_call_function
@@ -982,8 +983,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)  # type: ignore[arg-type]
-            # check if this a quasi-namedtuple or a real one
-            if self.value.__module__ == "torch.return_types":
+            # check if this is a structseq or a real namedtuple
+            if is_structseq_class(self.value):
                 if kwargs or len(args) != 1:
                     raise_args_mismatch(
                         tx,
@@ -1021,12 +1022,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import TupleVariable
 
             tuple_cls = self.value
-            if tuple_cls.__module__ == "torch.return_types":
+            vt_cls = UserDefinedTupleVariable.get_vt_cls(tuple_cls)
+            if vt_cls is StructSequenceVariable:
                 dummy_value = tuple_cls(items)  # pyrefly: ignore[bad-argument-count]
-                vt_cls = StructSequenceVariable
             else:
                 dummy_value = tuple_cls(*items)  # type: ignore[arg-type]
-                vt_cls = NamedTupleVariable
             tuple_vt = TupleVariable(items, mutation_type=ValueMutationNew())
             result = vt_cls(
                 dummy_value,
@@ -3178,6 +3178,12 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         "tuple_cls",
         *UserDefinedObjectVariable._nonvar_fields,
     }
+
+    @staticmethod
+    def get_vt_cls(cls: type) -> type["UserDefinedTupleVariable"]:
+        if is_structseq_class(cls):
+            return StructSequenceVariable
+        return NamedTupleVariable
 
     def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
         from .lists import TupleVariable

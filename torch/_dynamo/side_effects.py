@@ -534,10 +534,8 @@ class SideEffects:
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
-            if getattr(user_cls, "__module__", None) == "torch.return_types":
-                variable_cls = variables.StructSequenceVariable
-            elif is_namedtuple_cls(user_cls):
-                variable_cls = variables.NamedTupleVariable
+            if is_namedtuple_cls(user_cls):
+                variable_cls = variables.UserDefinedTupleVariable.get_vt_cls(user_cls)
             else:
                 variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, list):
