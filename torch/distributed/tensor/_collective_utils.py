@@ -48,9 +48,19 @@ _dtensor_lib.define(
 )
 
 
+_mesh_get_pg_cache: dict[tuple[int, int], tuple[object, object]] = {}
+
+
 @torch.library.impl("_dtensor::mesh_get_process_group", "CompositeExplicitAutograd")
 def _mesh_get_process_group_impl(mesh, dim):
-    return mesh.get_group(dim)
+    key = (id(mesh), dim)
+    if key in _mesh_get_pg_cache:
+        cached_mesh, cached_result = _mesh_get_pg_cache[key]
+        if cached_mesh is mesh:
+            return cached_result
+    result = mesh.get_group(dim)
+    _mesh_get_pg_cache[key] = (mesh, result)
+    return result
 
 
 @torch.library.register_fake("_dtensor::mesh_get_process_group")

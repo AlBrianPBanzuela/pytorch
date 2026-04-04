@@ -1599,6 +1599,13 @@ else:
 _distributed_opaque_types_registered = False
 
 
+# Cache for CooR _get_submesh node deduplication during make_fx tracing.
+# Keyed by (id(ancestor_proxy), tuple(mesh_dims)), stores (proxy_strong_ref, result).
+# Each unique (ancestor, dims) pair produces exactly one FX node in the
+# traced graph, regardless of how many submesh reconstructions reference it.
+_coor_get_submesh_cache: dict[tuple[int, tuple[int, ...]], tuple[Any, Any]] = {}
+
+
 def _device_mesh_reconstruct_fn(
     mesh: "OpaqueBase",
     get_tracked_proxy: Callable[["OpaqueBase"], "torch.fx.Proxy | None"],
@@ -1662,6 +1669,21 @@ def _device_mesh_reconstruct_fn(
 
     # Convert our dim names to indices into the ancestor mesh's dim names
     mesh_dims = [ancestor_dim_names.index(n) for n in dim_names]
+
+    # Under CooR, deduplicate _get_submesh nodes so each unique
+    # (ancestor, dims) pair produces exactly one FX node in the graph.
+    # This avoids O(num_collectives) redundant custom op dispatch overhead.
+    import torch.distributed as _dist
+
+    if _dist.config.compile_on_one_rank:
+        cache_key = (id(ancestor_proxy), tuple(mesh_dims))
+        if cache_key in _coor_get_submesh_cache:
+            cached_proxy, cached_result = _coor_get_submesh_cache[cache_key]
+            if cached_proxy is ancestor_proxy:
+                return cached_result
+        result = torch.ops.device_mesh._get_submesh(ancestor_proxy, mesh_dims)
+        _coor_get_submesh_cache[cache_key] = (ancestor_proxy, result)
+        return result
 
     # Dispatch through the custom op with proxy mode active so that
     # meta["val"] is set and the result is tracked in opaque_tracker.

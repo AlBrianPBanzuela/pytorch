@@ -1189,6 +1189,24 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
     return (tag, rankset, group_size)
 
 
+# Cache for CooR mesh_get_process_group node deduplication during make_fx
+# tracing. Keyed by (id(mesh), dim), stores (mesh_strong_ref, result).
+# Each unique (DeviceMesh, dim) pair produces exactly one FX node in the
+# traced graph, regardless of how many collectives reference it.
+_coor_mesh_get_pg_cache: dict[tuple[int, int], tuple[Any, Any]] = {}
+
+
+def _coor_cached_mesh_get_pg(mesh: "DeviceMesh", dim: int) -> Any:
+    key = (id(mesh), dim)
+    if key in _coor_mesh_get_pg_cache:
+        cached_mesh, cached_result = _coor_mesh_get_pg_cache[key]
+        if cached_mesh is mesh:
+            return cached_result
+    result = torch.ops._dtensor.mesh_get_process_group(mesh, dim)
+    _coor_mesh_get_pg_cache[key] = (mesh, result)
+    return result
+
+
 def _resolve_group(
     group: RANK_TYPES, tag: str = ""
 ) -> dist.ProcessGroup | c10d.GroupName:
@@ -1213,7 +1231,7 @@ def _resolve_group(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
         if dist.config.compile_on_one_rank:
-            return torch.ops._dtensor.mesh_get_process_group(group, 0)
+            return _coor_cached_mesh_get_pg(group, 0)
         return group._dim_group_names[0]
     elif isinstance(group, tuple):
         if (
@@ -1224,7 +1242,7 @@ def _resolve_group(
             dmesh = group[0]
             dim = group[1]
             if dist.config.compile_on_one_rank:
-                return torch.ops._dtensor.mesh_get_process_group(dmesh, dim)
+                return _coor_cached_mesh_get_pg(dmesh, dim)
             return dmesh._dim_group_names[dim]
         else:
             raise ValueError(
