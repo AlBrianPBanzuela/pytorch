@@ -894,11 +894,7 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         total_bytes = spec.tensor_meta.dtype.itemsize * math.prod(
             spec.tensor_meta.shape
         )
-        num_shards = 1
-        for i, p in enumerate(spec.placements):
-            if p.is_shard():
-                num_shards *= mesh_topo.mesh_dim_devices[i]
-        initial_comm_bytes_gb.append(total_bytes / num_shards / (1024**3))
+        initial_comm_bytes_gb.append(total_bytes / spec.num_shards / (1024**3))
 
     pq: list[_PQEntry] = []
     visited: set[tuple[tuple[Placement, ...], ...]] = set()
