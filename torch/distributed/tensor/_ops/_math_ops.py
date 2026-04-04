@@ -34,6 +34,7 @@ from torch.distributed.tensor._ops.utils import (
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    is_shard_like,
     Partial,
     Placement,
     Replicate,
@@ -159,9 +160,7 @@ def _replicate_dims_start_at(
 ) -> tuple[Placement, ...]:
     new_placements: list[Placement] = []
     for p in placements:
-        if p.is_partial() or (
-            isinstance(p, Shard | _StridedShard) and p.dim >= start_dim
-        ):
+        if p.is_partial() or (is_shard_like(p) and p.dim >= start_dim):
             new_placements.append(Replicate())  # make it replicate
         else:
             new_placements.append(p)  # keep the placement
@@ -192,7 +191,7 @@ def replicate_reduction_dims(
     for p in placements:
         if p.is_partial():
             new_placements.append(Replicate())
-        elif isinstance(p, Shard | _StridedShard) and p.dim in reduction_dims:
+        elif is_shard_like(p) and p.dim in reduction_dims:
             new_placements.append(Replicate())
         else:
             new_placements.append(p)
@@ -214,7 +213,7 @@ def map_placements_after_reduction(
         if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
-            if not isinstance(placement, Shard | _StridedShard):
+            if not is_shard_like(placement):
                 raise AssertionError(
                     f"Expected Shard/_StridedShard, got {type(placement)}"
                 )

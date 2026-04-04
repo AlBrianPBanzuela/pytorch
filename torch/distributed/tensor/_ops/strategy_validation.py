@@ -46,7 +46,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor.placement_types import (
-    _StridedShard,
+    is_shard_like,
     Partial,
     Placement,
     Shard,
@@ -163,11 +163,7 @@ def is_fully_replicated(placements: tuple[Placement, ...]) -> bool:
 
 def is_trivial_shard(p: Placement, tensor_shape: tuple[int, ...]) -> bool:
     """Check if placement is a Shard on a size-1 dimension."""
-    return (
-        isinstance(p, Shard | _StridedShard)
-        and p.dim < len(tensor_shape)
-        and tensor_shape[p.dim] == 1
-    )
+    return is_shard_like(p) and p.dim < len(tensor_shape) and tensor_shape[p.dim] == 1
 
 
 def normalize_placement(p: Placement, tensor_shape: tuple[int, ...]) -> Placement:

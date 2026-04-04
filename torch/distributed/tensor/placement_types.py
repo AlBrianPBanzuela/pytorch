@@ -4,7 +4,7 @@
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast, TypeVar
+from typing import cast, TypeGuard, TypeVar
 
 import torch
 import torch._C
@@ -1172,6 +1172,17 @@ class _StridedShard(torch._C._distributed.StridedShard):
             offsets = offsets[0] if len(offsets) > 0 else -1
 
         return local_shard_size, offsets
+
+
+def is_shard_like(p: "Placement") -> TypeGuard[Shard | _StridedShard]:
+    """Check if a placement is Shard or _StridedShard.
+
+    Use this instead of ``isinstance(p, Shard)`` to avoid silently missing
+    ``_StridedShard``.  When ``_StridedShard`` is unified with ``Shard``
+    (see TODO on the class), this helper can be collapsed to a single
+    ``isinstance`` check.
+    """
+    return isinstance(p, Shard | _StridedShard)
 
 
 class Replicate(torch._C._distributed.Replicate):

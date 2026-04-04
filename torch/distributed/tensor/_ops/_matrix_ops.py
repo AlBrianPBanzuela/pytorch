@@ -37,6 +37,7 @@ from torch.distributed.tensor._utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    is_shard_like,
     Partial,
     Placement,
     Replicate,
@@ -212,7 +213,7 @@ def _scaled_mm_scale_placement(
         if data_placement.dim == contracting_dim:
             return None
         return _ShardingPlaceholder(0)
-    elif isinstance(data_placement, Shard | _StridedShard):
+    elif is_shard_like(data_placement):
         if data_placement.dim == contracting_dim:
             return None
         return Shard(0)

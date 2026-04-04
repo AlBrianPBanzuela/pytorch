@@ -35,7 +35,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
-    _StridedShard,
+    is_shard_like,
     Partial,
     Placement,
     Replicate,
@@ -499,7 +499,7 @@ def slice_backward_rules(op_schema: OpSchema) -> OpStrategy:
         new_placements: list[Placement] = []
         for placement in output_spec.placements:
             # Redistribute to replicate only if the dim is sharded and matches the slice dim
-            if isinstance(placement, Shard | _StridedShard) and placement.dim == dim:
+            if is_shard_like(placement) and placement.dim == dim:
                 new_placements.append(Replicate())
             else:
                 new_placements.append(placement)
@@ -517,8 +517,7 @@ def unshard_tensor_dim(
 ) -> tuple[Placement, ...]:
     """Disallow the given tensor dimension to be sharded."""
     return tuple(
-        p if (not isinstance(p, Shard | _StridedShard) or p.dim != dim) else Replicate()
-        for p in placements
+        p if (not is_shard_like(p) or p.dim != dim) else Replicate() for p in placements
     )
 
 
@@ -529,9 +528,7 @@ def replicate_tensor_dim(
     # Not using p.is_shard() to avoid mypy complain about Placement not having
     # attribute dim.
     return tuple(
-        Replicate()
-        if p.is_partial() or (isinstance(p, Shard | _StridedShard) and p.dim == dim)
-        else p
+        Replicate() if p.is_partial() or (is_shard_like(p) and p.dim == dim) else p
         for p in placements
     )
 

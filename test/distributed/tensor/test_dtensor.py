@@ -34,6 +34,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -1719,6 +1720,41 @@ class TestDTensorSpec(DTensorTestBase):
         self.assertFalse(
             DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
         )
+
+    @with_comms
+    def test_num_shards_with_strided_shard(self):
+        """DTensorSpec.num_shards must count _StridedShard placements."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        full = torch.randn(4, self.world_size * 2, 6, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(1)])
+        dt_flat = dt.flatten(0, 1)
+
+        self.assertIsInstance(dt_flat.placements[0], _StridedShard)
+        self.assertEqual(dt_flat._spec.num_shards, self.world_size)
+
+    @with_comms
+    def test_dim_map_with_strided_shard(self):
+        """DTensorSpec.dim_map must map _StridedShard dims to mesh dims."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        full = torch.randn(4, self.world_size * 2, 6, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(1)])
+        dt_flat = dt.flatten(0, 1)
+
+        self.assertIsInstance(dt_flat.placements[0], _StridedShard)
+        shard_dim = dt_flat.placements[0].dim
+        self.assertEqual(dt_flat._spec.dim_map[shard_dim], 0)
+
+    @with_comms
+    def test_num_shards_map_with_strided_shard(self):
+        """DTensorSpec.num_shards_map must count _StridedShard placements per dim."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        full = torch.randn(4, self.world_size * 2, 6, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(1)])
+        dt_flat = dt.flatten(0, 1)
+
+        self.assertIsInstance(dt_flat.placements[0], _StridedShard)
+        shard_dim = dt_flat.placements[0].dim
+        self.assertEqual(dt_flat._spec.num_shards_map[shard_dim], self.world_size)
 
 
 TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
