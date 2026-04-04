@@ -500,9 +500,12 @@ class SideEffects:
             mutation_type=AttributeMutationNew(cls_source),
             **options,
         )
+        self.register_new(obj, variable)
+        return variable
+
+    def register_new(self, obj: Any, variable: VariableTracker) -> None:
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
-        return variable
 
     def get_variable_cls(self, user_cls: type) -> type:
         from torch.overrides import TorchFunctionMode
@@ -827,7 +830,8 @@ class SideEffects:
                 (variables.NamedTupleVariable, variables.StructSequenceVariable),
             ):
                 # Namedtuples/structseqs have their own reconstruct() that
-                # handles the specific calling convention (_make vs direct call).
+                # handles the specific calling convention (_make vs direct call)
+                # rather than the generic __new__ + init_args pattern.
                 var.reconstruct(cg)
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
