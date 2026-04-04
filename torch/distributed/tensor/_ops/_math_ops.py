@@ -168,6 +168,8 @@ def _replicate_dims_start_at(
 
 
 # return new_placements which align with placements but skip the skipped_dim
+# Precondition: no shard-like placement on skipped_dim (callers must
+# replicate it first via replicate_reduction_dims).
 def _skip_dim(
     placements: tuple[Placement, ...], skipped_dim: int
 ) -> tuple[Placement, ...]:
