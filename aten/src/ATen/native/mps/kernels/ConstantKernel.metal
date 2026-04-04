@@ -1,3 +1,4 @@
+#include <c10/metal/indexing.h>
 #include <metal_stdlib>
 
 using namespace metal;
@@ -35,9 +36,12 @@ kernel void fill_scalar_dense_vec4(
 REGISTER_FILL_OP(float);
 REGISTER_FILL_OP(half);
 REGISTER_FILL_OP(bfloat);
-REGISTER_FILL_OP(int);
 REGISTER_FILL_OP(long);
+REGISTER_FILL_OP(ulong);
+REGISTER_FILL_OP(int);
+REGISTER_FILL_OP(uint);
 REGISTER_FILL_OP(short);
+REGISTER_FILL_OP(ushort);
 REGISTER_FILL_OP(float2);
 REGISTER_FILL_OP(half2);
 
@@ -54,9 +58,10 @@ REGISTER_FILL_BYTE_OP(bool);
 // dims 1..ndim-1. For an N-dim tensor this requires N-1 divisions instead of N,
 // and consecutive threads in x access consecutive addresses in the innermost
 // dimension (coalesced writes).
+// Strides from TensorIterator are in bytes, use ref_at_offs<T>(out+offs)
 template <typename T>
 kernel void fill_scalar_strided(
-    device T* out [[buffer(0)]],
+    device void* out [[buffer(0)]],
     constant T& fill_val [[buffer(1)]],
     constant long* sizes [[buffer(2)]],
     constant long* strides [[buffer(3)]],
@@ -68,13 +73,13 @@ kernel void fill_scalar_strided(
     offset += long(inner % uint(sizes[i])) * strides[i];
     inner /= uint(sizes[i]);
   }
-  out[offset] = fill_val;
+  c10::metal::ref_at_offs<T>(out, offset) = fill_val;
 }
 
 #define REGISTER_FILL_STRIDED_OP(T)                             \
   template [[host_name("fill_scalar_strided_" #T)]] kernel void \
   fill_scalar_strided<T>(                                       \
-      device T*,                                                \
+      device void*,                                             \
       constant T&,                                              \
       constant long*,                                           \
       constant long*,                                           \
@@ -84,9 +89,12 @@ kernel void fill_scalar_strided(
 REGISTER_FILL_STRIDED_OP(float);
 REGISTER_FILL_STRIDED_OP(half);
 REGISTER_FILL_STRIDED_OP(bfloat);
-REGISTER_FILL_STRIDED_OP(int);
 REGISTER_FILL_STRIDED_OP(long);
+REGISTER_FILL_STRIDED_OP(ulong);
+REGISTER_FILL_STRIDED_OP(int);
+REGISTER_FILL_STRIDED_OP(uint);
 REGISTER_FILL_STRIDED_OP(short);
+REGISTER_FILL_STRIDED_OP(ushort);
 REGISTER_FILL_STRIDED_OP(char);
 REGISTER_FILL_STRIDED_OP(uchar);
 REGISTER_FILL_STRIDED_OP(bool);
