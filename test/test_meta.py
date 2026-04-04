@@ -1951,21 +1951,27 @@ class TestMetaKernelConv(TestCase):
 
 class TestMetaKernelRegistrations(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_make_dep_token_shape(self):
-        result = torch.ops.aten._make_dep_token(device=torch.device("meta"))
-        self.assertEqual(result.dim(), 0)
-        self.assertEqual(result.shape, torch.Size([]))
+    def test_make_dep_token(self):
+        cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
+        meta_result = torch.ops.aten._make_dep_token(device=torch.device("meta"))
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.dtype, meta_result.dtype)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_rrelu_backward_small_range(self):
         from torch._decomp.decompositions import rrelu_with_noise_backward
+
         x = torch.randn(5, requires_grad=True)
         lower, upper = 0.125, 0.125 + 1e-7
         noise = torch.rand(5)
         grad = torch.ones(5)
-        expected = noise * grad
-        result = rrelu_with_noise_backward(grad, x, noise, lower, upper, True, False)
-        self.assertEqual(result, expected)
+        cpp_result = torch.ops.aten.rrelu_with_noise_backward(
+            grad, x, noise, lower, upper, True, False
+        )
+        decomp_result = rrelu_with_noise_backward(
+            grad, x, noise, lower, upper, True, False
+        )
+        self.assertEqual(cpp_result, decomp_result)
 
 
 instantiate_device_type_tests(TestMeta, globals())
