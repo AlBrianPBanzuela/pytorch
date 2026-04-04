@@ -1721,6 +1721,55 @@ class TestViewOps(DTensorContinuousTestBase):
         )._local_tensor
         self.assertEqual(unflattened._local_tensor, expected_local)
 
+    def test_flatten_then_sum_non_shard_dim(self):
+        """Verify _StridedShard correctness through sum on a non-shard dim.
+
+        sum uses map_placements_after_reduction which must preserve
+        _StridedShard (with split_factor) when remapping dims after
+        the reduced dim is removed.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        shape = (4, self.world_size * 2, 6)
+        full = torch.randn(*shape, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(1)])
+        dt_flat = dt.flatten(0, 1)  # _StridedShard(dim=0)
+        flat_full = full.flatten(0, 1)
+
+        self.assertIsInstance(dt_flat.placements[0], _StridedShard)
+
+        # reduce dim 1 (non-shard): _StridedShard(dim=0) stays at dim 0
+        result = dt_flat.sum(dim=1)
+        self.assertIsInstance(result.placements[0], _StridedShard)
+        self.assertEqual(result.placements[0].dim, 0)
+        self.assertEqual(
+            result.placements[0].split_factor, dt_flat.placements[0].split_factor
+        )
+        self.assertEqual(result.full_tensor(), flat_full.sum(dim=1))
+
+        # reduce dim 0 (shard dim): should produce Partial
+        result2 = dt_flat.sum(dim=0)
+        self.assertTrue(result2.placements[0].is_partial())
+        self.assertEqual(result2.full_tensor(), flat_full.sum(dim=0))
+
+        # _StridedShard on higher dim: reduce a dim below it to trigger remap
+        shape2 = (3, 5, self.world_size * 2)
+        full2 = torch.randn(*shape2, device=self.device_type)
+        dt2 = distribute_tensor(full2, mesh, [Shard(2)])
+        dt2_flat = dt2.flatten(1, 2)  # _StridedShard(dim=1)
+        flat_full2 = full2.flatten(1, 2)
+
+        self.assertIsInstance(dt2_flat.placements[0], _StridedShard)
+        self.assertEqual(dt2_flat.placements[0].dim, 1)
+
+        # reduce dim 0: _StridedShard(dim=1) remaps to _StridedShard(dim=0)
+        result3 = dt2_flat.sum(dim=0)
+        self.assertIsInstance(result3.placements[0], _StridedShard)
+        self.assertEqual(result3.placements[0].dim, 0)
+        self.assertEqual(
+            result3.placements[0].split_factor, dt2_flat.placements[0].split_factor
+        )
+        self.assertEqual(result3.full_tensor(), flat_full2.sum(dim=0))
+
     def test_flatten_then_softmax(self):
         """Verify _StridedShard correctness through softmax.
 

@@ -1783,6 +1783,8 @@ class Redistribute(torch.autograd.Function):
 
         # for backward shard -> partial, we just do shard -> replicate
         # for backward replicate -> partial, we skip the transformation
+        # NOTE: is_shard_like covers _StridedShard defensively; currently
+        # unreachable because Partial -> _StridedShard is not implemented.
         normalized_placements: list[Placement] = []
         for current, target in zip(current_spec.placements, previous_spec.placements):
             if (

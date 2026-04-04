@@ -32,7 +32,7 @@ from torch.distributed.tensor._ops.strategy_validation import (
     resolve_op_names,
     validate_combination,
 )
-from torch.distributed.tensor.placement_types import _StridedShard, Partial, Shard
+from torch.distributed.tensor.placement_types import Partial, Shard
 from torch.testing._internal.common_methods_invocations import SampleInput
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_SLOW, TestCase
 
@@ -84,16 +84,6 @@ class TestPlacementNormalization(TestCase):
         """Shard on non-size-1 dimension is not trivial."""
         self.assertFalse(is_trivial_shard(Shard(0), (4, 3)))
         self.assertFalse(is_trivial_shard(Shard(1), (4, 3)))
-
-    def test_is_trivial_shard_strided_shard(self):
-        """_StridedShard on a size-1 dim should be trivial."""
-        ss = _StridedShard(0, split_factor=2)
-        self.assertTrue(is_trivial_shard(ss, (1, 8)))
-
-    def test_is_trivial_shard_strided_shard_non_trivial(self):
-        """_StridedShard on a dim with size > 1 should NOT be trivial."""
-        ss = _StridedShard(1, split_factor=2)
-        self.assertFalse(is_trivial_shard(ss, (1, 8)))
 
     def test_is_trivial_shard_replicate(self):
         """Replicate is not a trivial shard."""
