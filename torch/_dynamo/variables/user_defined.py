@@ -48,7 +48,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from torch.utils._pytree import is_structseq_class
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_build_tuple, create_call_function
+from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
@@ -1025,13 +1025,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             vt_cls = UserDefinedTupleVariable.get_vt_cls(tuple_cls)
             if vt_cls is StructSequenceVariable:
                 dummy_value = tuple_cls(items)  # pyrefly: ignore[bad-argument-count]
+                base_cls_vt = self
             else:
                 dummy_value = tuple_cls(*items)  # type: ignore[arg-type]
+                base_cls_vt = SourcelessBuilder.create(tx, tuple)
             tuple_vt = TupleVariable(items, mutation_type=ValueMutationNew())
             result = vt_cls(
                 dummy_value,
                 tuple_vt=tuple_vt,
-                mutation_type=AttributeMutationNew(),
+                base_cls_vt=base_cls_vt,
+                init_args=[tuple_vt],
+                mutation_type=AttributeMutationNew(self.source),
             )
             tx.output.side_effects.register_new(dummy_value, result)
             return result
@@ -3230,6 +3234,28 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return self._tuple_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Sourceless namedtuples/structseqs (e.g. tensor subclass metadata from
+        # SourcelessBuilder) aren't in id_to_variable so codegen_save_tempvars
+        # never processes them. When they appear in return values, codegen falls
+        # through to call_reconstruct. This is the same pattern as other
+        # sourceless containers (ConstDictVariable, TupleVariable, etc.).
+        # UserDefinedDictVariable doesn't need this because it's never created
+        # sourceless — it only comes from VariableBuilder which always has a
+        # source.
+        assert self.source is None
+        create_fn = self.get_construct_fn()
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(create_fn)
+            )
+        )
+        codegen(self._tuple_vt)
+        codegen.extend_output(create_call_function(1, False))
+
+    def get_construct_fn(self) -> Callable[..., Any]:
+        raise NotImplementedError
+
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         assert self._tuple_vt is not None
         if type(self.value).__iter__ is tuple.__iter__:  # type: ignore[attr-defined]
@@ -3272,6 +3298,9 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             return self._tuple_vt.items[idx]  # type: ignore[union-attr]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
 
+    def get_construct_fn(self) -> Callable[..., Any]:
+        return self.tuple_cls._make  # type: ignore[attr-defined]
+
     def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self._tuple_vt.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
@@ -3279,21 +3308,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self._tuple_vt.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        create_fn = self.tuple_cls._make  # type: ignore[attr-defined]
-        codegen.add_push_null(
-            lambda: codegen.append_output(
-                codegen.create_load_const_unchecked(create_fn)
-            )
-        )
-        codegen.foreach(self._tuple_vt.items)
-        codegen.extend_output(
-            [
-                create_build_tuple(len(self._tuple_vt.items)),
-            ]
-            + create_call_function(1, False)
-        )
 
 
 class StructSequenceVariable(UserDefinedTupleVariable):
@@ -3318,6 +3332,9 @@ class StructSequenceVariable(UserDefinedTupleVariable):
                 return self._tuple_vt.items[fields.index(name)]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
 
+    def get_construct_fn(self) -> Callable[..., Any]:
+        return self.tuple_cls
+
     def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self._tuple_vt.items]
         return self.tuple_cls(items)
@@ -3325,21 +3342,6 @@ class StructSequenceVariable(UserDefinedTupleVariable):
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self._tuple_vt.items]
         return self.tuple_cls(items)
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        create_fn = self.tuple_cls
-        codegen.add_push_null(
-            lambda: codegen.append_output(
-                codegen.create_load_const_unchecked(create_fn)
-            )
-        )
-        codegen.foreach(self._tuple_vt.items)
-        codegen.extend_output(
-            [
-                create_build_tuple(len(self._tuple_vt.items)),
-            ]
-            + create_call_function(1, False)
-        )
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

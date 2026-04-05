@@ -780,6 +780,19 @@ class SideEffects:
                 assert var.source is not None
                 continue
 
+            # Namedtuples/structseqs with no pending mutations should skip
+            # codegen_save_tempvars so that restore_stack handles them. In
+            # export, restore_stack uses value_from_source=False which makes
+            # child tensors become graph outputs. If we processed them here,
+            # add_cache would assign a TempLocalSource and restore_stack would
+            # load from cache with value_from_source=True, hiding the tensors
+            # from export.
+            if isinstance(
+                var,
+                (variables.NamedTupleVariable, variables.StructSequenceVariable),
+            ) and not self.has_pending_mutation(var):
+                continue
+
             if isinstance(var, variables.CellVariable):
                 # Cells created in the root frame are created either by
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
@@ -823,23 +836,6 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
-            elif isinstance(
-                var,
-                (variables.NamedTupleVariable, variables.StructSequenceVariable),
-            ):
-                # Namedtuples/structseqs have their own reconstruct() that
-                # handles the specific calling convention (_make vs direct call)
-                # rather than the generic __new__ + init_args pattern.
-                #
-                # Only reconstruct here if there are pending mutations that
-                # codegen_update_mutated needs to replay. Otherwise, let
-                # restore_stack handle reconstruction with the correct
-                # value_from_source setting (needed for export).
-                if not self.has_pending_mutation(var):
-                    continue
-                var.reconstruct(cg)
-                cg.add_cache(var)
-                var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
