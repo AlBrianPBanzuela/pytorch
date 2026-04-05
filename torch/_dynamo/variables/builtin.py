@@ -35,7 +35,7 @@ from collections.abc import Callable, Iterable, KeysView, Sequence
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
-from torch import sym_float, sym_int
+from torch import sym_float
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -43,6 +43,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     ObservedAttributeError,
+    ObservedException,
     ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented,
@@ -1560,32 +1561,57 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def _call_int_float(
+    def call_int(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
-        # Handle cases like int(torch.seed())
-        # Also handle sym_float to sym_int cases
+        # int(x) calls PyNumber_Long which is more than just the nb_int
+        # slot — it also handles str/bytes parsing, __index__ fallback,
+        # __trunc__ deprecation, etc.
+        # https://github.com/python/cpython/blob/01af34a3649b/Objects/abstract.c#L1520-L1632
+        # For constants, constant folding already implements the full
+        # PyNumber_Long semantics correctly, so let it handle everything.
+        if isinstance(arg, ConstantVariable):
+            return None
+        # PyNumber_Long step 2: if nb_int exists, call it.
+        if arg.has_nb_int():
+            return arg.nb_int_impl(tx)
+        # Step 3: fall back to nb_index. If nb_index also fails, raise
+        # the final PyNumber_Long TypeError.
+        try:
+            return arg.nb_index_impl(tx)
+        except ObservedException:
+            tx.exn_vt_stack.clear_current_exception()
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"int() argument must be a string, a bytes-like object "
+                    f"or a real number, not '{arg.python_type_name()}'"
+                ],
+            )
+
+    def call_float(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker | None:
+        # Handle cases like float(torch.seed())
+        # Also handle sym_int to sym_float cases
         if arg.is_tensor() or isinstance(arg, SymNodeVariable):
             if arg.is_tensor():
                 item = arg.call_method(tx, "item", [], {})
             else:
                 item = arg
-            fn_ = sym_int if self.fn is int else sym_float
             from torch._dynamo.variables.builder import wrap_fx_proxy
 
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    fn_,
+                    sym_float,
                     (item.as_proxy(),),
                     {},
                 ),
             )
         return None
-
-    call_int = _call_int_float
-    call_float = _call_int_float
 
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker

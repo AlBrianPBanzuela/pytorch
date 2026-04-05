@@ -567,6 +567,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.var_getattr(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
+        elif name == "__int__" and not args and not kwargs:
+            return self.nb_int_impl(tx)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -925,6 +927,36 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tx,
             args=[
                 f"'{self.python_type_name()}' object cannot be interpreted as an integer"
+            ],
+        )
+
+    def has_nb_int(self) -> bool:
+        """Returns True if this type has a non-NULL nb_int slot.
+
+        Mirrors CPython's check `m && m->nb_int` in PyNumber_Long
+        (abstract.c:1537). Used by call_int to decide whether to call
+        nb_int_impl or fall back to nb_index.
+        """
+        return False
+
+    def nb_int_impl(
+        self,
+        tx: Any,
+    ) -> "VariableTracker":
+        """Mirrors CPython's tp_as_number->nb_int slot.
+
+        The base implementation raises TypeError matching PyNumber_Long's
+        final fallback (abstract.c:1630). This error is the constructor-level
+        message, not a slot-level one — it's used here because call_int
+        (which implements PyNumber_Long) tries nb_int then nb_index before
+        reaching this fallback, so any type that reaches here truly has no
+        conversion path.
+        """
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                f"int() argument must be a string, a bytes-like object or a real number, not '{self.python_type_name()}'"
             ],
         )
 

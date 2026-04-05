@@ -1467,6 +1467,40 @@ class TensorVariable(VariableTracker):
             ],
         )
 
+    def has_nb_int(self) -> bool:
+        return True
+
+    def nb_int_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: THPVariable_integral_scalar handles both integer and float
+        # tensors (floats are truncated to int). Complex tensors raise
+        # RuntimeError at runtime.
+        if self.dtype is not None and self.dtype.is_complex:
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=["value cannot be converted to type int64_t without overflow"],
+            )
+        # For known non-complex dtypes and unknown dtype (None), emit the
+        # proxy and let it fail at runtime if the dtype is unsupported.
+        item = self.call_method(tx, "item", [], {})
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_int,
+                (item.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___int__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_int_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -2144,6 +2178,30 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def has_nb_int(self) -> bool:
+        return True
+
+    def nb_int_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_int,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___int__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_int_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True
