@@ -296,6 +296,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self) -> bool:
         return self.value in self._constant_fold_classes()
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython's type.__or__ implements _Py_union_type_or (type unions).
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        # pyrefly: ignore[bad-argument-count]
+        result = type(self.value).__or__(self.value, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from . import ConstantVariable
 
@@ -1392,6 +1409,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             random.uniform,
         }
         return fns
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        dunder = "__ror__" if reverse else "__or__"
+        type_attr = inspect.getattr_static(type(self.value), dunder, None)
+        if type_attr is None:
+            return VariableTracker.build(tx, NotImplemented)
+        method_var = self.resolve_type_attr(tx, dunder, type_attr, source=None)
+        return method_var.call_function(tx, [other], {})
+
+    def nb_ior_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        type_attr = inspect.getattr_static(type(self.value), "__ior__", None)
+        if type_attr is None:
+            return VariableTracker.build(tx, NotImplemented)
+        method_var = self.resolve_type_attr(tx, "__ior__", type_attr, source=None)
+        return method_var.call_function(tx, [other], {})
 
     def call_method(
         self,
@@ -2840,6 +2882,29 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             self._dict_vt = dict_vt
         self._dict_methods = dict_methods
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        dunder = "__ror__" if reverse else "__or__"
+        method = self._maybe_get_baseclass_method(dunder)
+        if method in self._dict_methods:
+            return self._dict_vt.nb_or_impl(tx, other, reverse)
+        return super().nb_or_impl(tx, other, reverse)
+
+    def nb_ior_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__ior__")
+        if method in self._dict_methods:
+            return self._dict_vt.nb_ior_impl(tx, other, reverse)
+        return super().nb_ior_impl(tx, other, reverse)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -2936,6 +3001,29 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 )
         else:
             self._set_vt = set_vt
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        dunder = "__ror__" if reverse else "__or__"
+        method = self._maybe_get_baseclass_method(dunder)
+        if method in self._set_methods:
+            return self._set_vt.nb_or_impl(tx, other, reverse)
+        return super().nb_or_impl(tx, other, reverse)
+
+    def nb_ior_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__ior__")
+        if method in self._set_methods:
+            return self._set_vt.nb_ior_impl(tx, other, reverse)
+        return super().nb_ior_impl(tx, other, reverse)
 
     def call_method(
         self,
