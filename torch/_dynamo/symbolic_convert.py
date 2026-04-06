@@ -2121,12 +2121,27 @@ class InstructionTranslatorBase(
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def FOR_ITER(self, inst: Instruction) -> None:
+        # https://github.com/python/cpython/blob/6024d3c6dadf73bcd0b234d2d97365486253f0ee/Python/generated_cases.c.h#L5832
+        # https://github.com/python/cpython/blob/6024d3c6dadf73bcd0b234d2d97365486253f0ee/Python/ceval.c#L3724
+        if sys.version_info >= (3, 15):
+            null_or_idx = self.pop()
         it = self.pop().realize()
         self.push(it)
         try:
-            val = it.next_variable(self)
-            self.push(val)
-        except (StopIteration, exc.ObservedUserStopIteration) as e:
+            if sys.version_info >= (3, 15) and isinstance(
+                null_or_idx, ConstantVariable
+            ):
+                val = it.call_method(self, "__getitem__", [null_or_idx], {})
+                self.push(
+                    VariableTracker.build(self, null_or_idx.as_python_constant() + 1)
+                )
+                self.push(val)
+            else:
+                val = it.next_variable(self)
+                if sys.version_info >= (3, 15):
+                    self.push(NullVariable())
+                self.push(val)
+        except (StopIteration, exc.ObservedUserStopIteration, exc.ObservedIndexError) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
                 exc.handle_observed_exception(self)
 
@@ -2614,7 +2629,16 @@ class InstructionTranslatorBase(
             self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst: Instruction) -> None:
-        self.call_function(VariableTracker.build(self, iter), [self.pop()], {})
+        if sys.version_info >= (3, 15):
+            obj = self.pop()
+            if isinstance(obj, (ListVariable, TupleVariable)):
+                self.push(obj)
+                self.push(VariableTracker.build(self, 0))
+            else:
+                self.call_function(VariableTracker.build(self, iter), [obj], {})
+                self.push(NullVariable())
+        else:
+            self.call_function(VariableTracker.build(self, iter), [self.pop()], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -4084,7 +4108,11 @@ class InstructionTranslatorBase(
         self.append_prefix_inst(inst)
 
     def RETURN_GENERATOR(self, inst: Instruction) -> None:
-        self.append_prefix_inst(inst)
+        # no longer the first instruction in 3.15, see https://github.com/python/cpython/issues/143493
+        if sys.version_info >= (3, 15):
+            pass
+        else:
+            self.append_prefix_inst(inst)
 
     # 3.12 opcodes
     # BINARY/STORE_SLICE opcodes are broken down into
@@ -4640,6 +4668,7 @@ class InstructionTranslatorBase(
             CO_ITERABLE_COROUTINE,
         )
 
+        # wrong in 3.15?
         if f_code.co_flags & (
             CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
         ):
@@ -5553,6 +5582,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.symbolic_result = top
             # Stop tracing
             raise YieldValueOp
+
+    def RETURN_GENERATOR(self, inst: Instruction):
+        self.symbolic_result = self.funcvar
+        raise ReturnValueOp
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
