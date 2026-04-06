@@ -365,25 +365,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     return null;
   }
 
-  // --- Phase 1: Match alloc/free events from the trace ---
-  // The C++ allocator emits 'free_requested' then 'free_completed' for each
-  // deallocation. We match against 'free_completed' only ('free' is legacy/dead).
-  // plot_segments selects which event types to match:
-  //   false/'alloc'       → alloc / free_completed (sub-allocations)
-  //   true/'segment'      → segment_alloc / segment_free (cudaMalloc segments)
-  //   'segment_map'       → segment_map / segment_unmap (expandable segment pages)
-  let alloc, free, free_completed;
-  if (plot_segments === 'segment_map') {
-    alloc = 'segment_map';
-    free = free_completed = 'segment_unmap';
-  } else if (plot_segments) {
-    alloc = 'segment_alloc';
-    free = free_completed = 'segment_free';
-  } else {
-    alloc = 'alloc';
-    free = 'free';
-    free_completed = 'free_completed';
-  }
+  const alloc = plot_segments ? 'segment_alloc' : 'alloc';
+  const [free, free_completed] = plot_segments
+    ? ['segment_free', 'segment_free']
+    : ['free', 'free_completed'];
   for (const e of snapshot.device_traces[device]) {
     switch (e.action) {
       case alloc:
@@ -411,14 +396,12 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     }
   }
 
-  // --- Phase 2: Add segments from the snapshot (segment_alloc/segment_free view only) ---
-  // Only applies when matching segment_alloc/segment_free (plot_segments === true).
-  // Not for segment_map mode or block-level views.
-  if (plot_segments === true) {
-    for (const seg of snapshot.segments) {
-      if (seg.device !== device) {
-        continue;
-      }
+  // --- Phase 2: Add elements from the snapshot ---
+  for (const seg of snapshot.segments) {
+    if (seg.device !== device) {
+      continue;
+    }
+    if (plot_segments) {
       if (!(seg.address in addr_to_alloc)) {
         const element = {
           action: 'alloc',
@@ -430,6 +413,25 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         };
         elements.push(element);
         initially_allocated.push(elements.length - 1);
+      }
+    } else {
+      const seg_is_private = isPrivatePoolId(seg.segment_pool_id);
+      for (const b of seg.blocks) {
+        const is_active = b.state === 'active_allocated';
+        const is_private_inactive = include_private_inactive && seg_is_private && b.state === 'inactive';
+        if ((is_active || is_private_inactive) && !(b.addr in addr_to_alloc)) {
+          const element = {
+            action: 'alloc',
+            addr: b.addr,
+            size: b.requested_size,
+            frames: b.frames,
+            stream: seg.stream,
+            version: b.version,
+            segment_pool_id: seg.segment_pool_id,
+          };
+          elements.push(element);
+          initially_allocated.push(elements.length - 1);
+        }
       }
     }
   }
