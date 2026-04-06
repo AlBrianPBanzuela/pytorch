@@ -410,6 +410,7 @@ dtensor_fails_no_strategy = {
     xfail("multinomial"),
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
+    xfail("nn.functional.glu"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
     xfail("nn.functional.interpolate", "nearest"),
