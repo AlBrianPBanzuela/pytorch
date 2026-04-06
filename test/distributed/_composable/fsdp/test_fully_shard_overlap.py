@@ -562,8 +562,6 @@ class TestFullyShardCPUOffloadOverlap(FSDPTest):
                     with torch.no_grad():
                         p.copy_(cpu_params[f"{i}.{pname}"])
                 x = layer(x)
-                for pname, p in layer.named_parameters():
-                    cpu_params[f"{i}.{pname}"].copy_(p.data)
             return x
 
         serialized_fwd()  # warmup
