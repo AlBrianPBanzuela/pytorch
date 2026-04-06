@@ -609,3 +609,16 @@ _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
 torch._dynamo.disallow_in_graph(
     torch.ops.aten._flash_attention_forward_no_dropout_inplace
 )
+
+# Register flop counter formulas for varlen_attn ops.
+# This must happen after the custom ops are defined above.
+from torch.utils.flop_counter import (
+    _varlen_attn_backward_flop,
+    _varlen_attn_forward_flop,
+    _varlen_attn_out_flop,
+    flop_registry,
+)
+
+flop_registry[torch.ops.torch_attn._varlen_attn] = _varlen_attn_forward_flop
+flop_registry[torch.ops.torch_attn._varlen_attn_out] = _varlen_attn_out_flop
+flop_registry[torch.ops.torch_attn._varlen_attn_backward] = _varlen_attn_backward_flop
