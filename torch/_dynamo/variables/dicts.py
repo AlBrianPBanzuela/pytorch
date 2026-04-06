@@ -117,6 +117,9 @@ def is_hashable(x: VariableTracker) -> bool:
 
 
 class ConstDictVariable(VariableTracker):
+    # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
+    _cpython_type = dict
+
     CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
 
@@ -1024,6 +1027,9 @@ class ConstDictVariable(VariableTracker):
 
 
 class MappingProxyVariable(VariableTracker):
+    # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
+    _cpython_type = types.MappingProxyType
+
     # proxies to the original dict_vt
     def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -1115,6 +1121,8 @@ class NNModuleHooksDictVariable(ConstDictVariable):
 
 
 class DefaultDictVariable(ConstDictVariable):
+    _cpython_type = collections.defaultdict
+
     def __init__(
         self,
         items: dict[VariableTracker, VariableTracker],
@@ -1242,6 +1250,9 @@ class DefaultDictVariable(ConstDictVariable):
 # implementation, which is almost assuredly wrong
 class SetVariable(ConstDictVariable):
     """We model a sets as dictionary with None values"""
+
+    # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
+    _cpython_type = set
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
@@ -1716,6 +1727,9 @@ class OrderedSetVariable(SetVariable):
 
 
 class FrozensetVariable(SetVariable):
+    # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
+    _cpython_type = frozenset
+
     def debug_repr(self) -> str:
         if not self.items:
             return "frozenset()"
@@ -1914,6 +1928,9 @@ class DictViewVariable(VariableTracker):
 
 
 class DictKeysVariable(DictViewVariable):
+    # PyDictKeys_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6365
+    _cpython_type = dict_keys
+
     kv = "keys"
 
     @property
@@ -1982,6 +1999,9 @@ class DictKeysVariable(DictViewVariable):
 
 
 class DictValuesVariable(DictViewVariable):
+    # PyDictValues_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6567
+    _cpython_type = dict_values
+
     # DictValuesVariable is an iterable but cannot be compared.
     kv = "values"
 
@@ -2004,6 +2024,9 @@ class DictValuesVariable(DictViewVariable):
 
 
 class DictItemsVariable(DictViewVariable):
+    # PyDictItems_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6477
+    _cpython_type = dict_items
+
     kv = "items"
 
     @property
