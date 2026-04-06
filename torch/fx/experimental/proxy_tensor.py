@@ -1461,7 +1461,10 @@ class PythonKeyTracer(Tracer):
             val = v.meta["val"]
             # other subclasses like FunctionalTensor error on `extract_val`
             # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
-            if isinstance(val, torch.Tensor) and not is_fake(val):
+            # NB: intentionally isinstance(FakeTensor), NOT is_fake() — is_fake recurses
+            # into subclass attrs via getattr, which triggers proxy tracking during export.
+            # Also accept C++ fake tensors.
+            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor) and not torch._C._is_fake_tensor(val):
                 return None
             return extract_val(v.meta["val"])
 
