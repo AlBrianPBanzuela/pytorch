@@ -338,7 +338,6 @@ class StreamVariable(StreamContextVariable):
     # THPStreamType: torch/csrc/Stream.cpp:492
     _cpython_type = torch.Stream
     _has_instance_dict = False
-    _has_instance_dict = False
 
     def __init__(
         self,
@@ -481,7 +480,6 @@ class CudaStreamVariable(StreamVariable):
 
     # THCPStreamType: torch/csrc/cuda/Stream.cpp:159
     _cpython_type = torch.cuda.Stream
-    _has_instance_dict = False
     _has_instance_dict = False
 
     def python_type(self) -> type:
