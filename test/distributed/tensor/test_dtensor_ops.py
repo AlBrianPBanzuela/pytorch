@@ -133,6 +133,7 @@ dtensor_fails = {
     # the view decomposition path.
     xfail("flatten"),
     xfail("ravel"),
+    xfail("repeat_interleave"),
     xfail("reshape"),
     xfail("reshape_as"),
     xfail("unbind"),
@@ -325,12 +326,22 @@ dtensor_multi_threaded_fails = {
     skip("nn.functional.max_unpool1d", "grad"),
     skip("nn.functional.max_unpool2d", "grad"),
     xfail("nn.functional.max_unpool3d", "grad"),
+    xfail("nn.functional.threshold"),
     skip("nn.functional.multi_head_attention_forward"),
 }
 
 # Ops that fail to compile with DTensor + torch.compile(fullgraph=True).
 # These are compile-time failures, NOT numeric correctness issues.
 dtensor_compiled_fails = {
+    xfail("cartesian_prod"),
+    xfail("flatten"),
+    xfail("kron"),
+    xfail("linalg.tensorsolve"),
+    xfail("nn.functional.instance_norm"),
+    xfail("ravel"),
+    xfail("reshape_as"),
+    xfail("take_along_dim"),
+    xfail("view_as"),
     # View-type ops that decompose into as_strided (at autograd level).
     # DTensor doesn't have a sharding strategy for as_strided.
     xfail("atleast_1d"),
@@ -390,6 +401,7 @@ dtensor_compiled_fails = {
     xfail("lu_unpack"),
     xfail("scatter"),
     xfail("scatter_add"),
+    xfail("take_along_dim"),
     # batch_norm variants decompose through squeeze.dims → as_strided under
     # compilation, and DTensor has no as_strided strategy.
     xfail("_native_batch_norm_legit"),
@@ -397,7 +409,6 @@ dtensor_compiled_fails = {
     xfail("nn.functional.batch_norm"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
-    xfail("nn.functional.margin_ranking_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
 }
 
@@ -411,10 +422,10 @@ dtensor_numeric_only_fails = {
     xfail("full_like"),
     xfail("linspace"),
     xfail("logspace"),
-    xfail("nn.functional.hardshrink"),
     xfail("nn.functional.huber_loss"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.softshrink"),
+    xfail("nn.functional.threshold"),
     xfail("ones"),
     xfail("randint"),
     xfail("randn"),
@@ -815,7 +826,6 @@ ops_unbacked_dtensor_dde = {
     xfail("fliplr"),
     xfail("flipud"),
     xfail("float"),
-    xfail("frexp"),
     xfail("gather"),
     xfail("histc"),
     xfail("index_put"),
@@ -844,7 +854,6 @@ ops_unbacked_dtensor_dde = {
     xfail("native_batch_norm"),
     xfail("new_zeros"),
     xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.celu"),
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
     xfail("nn.functional.conv3d"),
@@ -852,22 +861,15 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.conv_transpose2d"),
     xfail("nn.functional.conv_transpose3d"),
     xfail("nn.functional.cosine_embedding_loss"),
-    xfail("nn.functional.elu"),
-    xfail("nn.functional.hardsigmoid"),
-    xfail("nn.functional.hardtanh"),
     xfail("nn.functional.hinge_embedding_loss"),
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.linear"),
     xfail("nn.functional.logsigmoid"),
     xfail("nn.functional.margin_ranking_loss"),
-    xfail("nn.functional.mish"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.poisson_nll_loss"),
-    xfail("nn.functional.relu6"),
-    xfail("nn.functional.selu"),
-    xfail("nn.functional.softplus"),
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
@@ -886,11 +888,6 @@ ops_unbacked_dtensor_dde = {
     xfail("scatter_add"),
     xfail("slice"),
     xfail("sort"),
-    xfail("special.bessel_j0"),
-    xfail("special.bessel_j1"),
-    xfail("special.log_ndtr"),
-    xfail("special.ndtri"),
-    xfail("special.spherical_bessel_j0"),
     xfail("squeeze_copy"),
     xfail("std_mean"),
     xfail("topk"),
@@ -1047,6 +1044,16 @@ class TestSingleDimStrategies(DTensorOpTestBase):
 
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        op_db,
+        "TestSingleDimStrategies",
+        "test_single_dim_strategy",
+        {
+            # Stochastic: each shard gets independent RNG, so
+            # op(full) != cat(op(shard0), op(shard1)).
+            skip("exponential"),
+        },
+    )
     def test_single_dim_strategy(self, dtype, op):
         torch.manual_seed(42)
         mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
