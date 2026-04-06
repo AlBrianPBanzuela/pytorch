@@ -1360,6 +1360,37 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     return _wrap_tensor_autograd(self)
 
 
+def _maybe_unwrap_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    If tensor is an AsyncCollectiveTensor, wait on the underlying collective
+    and return the plain result. Otherwise return the tensor unchanged.
+    This is the inverse of _maybe_wrap_tensor and should be used to resolve
+    ACTs at graph boundaries (e.g. before AOT autograd tracing).
+    """
+    if isinstance(tensor, AsyncCollectiveTensor):
+        return tensor.trigger_wait()
+    return tensor
+
+
+def _maybe_unwrap_tensor_list(args: list[Any]) -> list[Any]:
+    """
+    Resolve any AsyncCollectiveTensors in a list of args. Returns the
+    original list unmodified if no ACTs are present, avoiding a list
+    allocation in the common case.
+    """
+    # Written as an explicit loop with `type(a) is` instead of
+    # `any(isinstance(...) for ...)` to avoid generator overhead and
+    # MRO walks. This is on the runtime hot path for every compiled
+    # graph invocation, and the vast majority of calls have no ACTs.
+    for a in args:
+        if type(a) is AsyncCollectiveTensor:
+            return [
+                _maybe_unwrap_tensor(a) if isinstance(a, torch.Tensor) else a
+                for a in args
+            ]
+    return args
+
+
 @contextlib.contextmanager
 def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     """

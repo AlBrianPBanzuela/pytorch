@@ -35,6 +35,16 @@ def process_inputs(
     shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
 ) -> FakifiedFlatArgs:
+    # Resolve AsyncCollectiveTensors before tracing. ACTs are transient
+    # eager-mode wrappers for async collective overlap; if they leak into the
+    # traced graph as input types, AOT autograd records them in tangent
+    # metadata and then hits a type mismatch at runtime because autograd
+    # produces plain-tensor tangents. Must happen before entering fake_mode
+    # because trigger_wait() calls wait_tensor() which is a real op.
+    from torch.distributed._functional_collectives import _maybe_unwrap_tensor_list
+
+    flat_args = _maybe_unwrap_tensor_list(flat_args)
+
     with fake_mode:
 
         def convert(idx: int, x: Any) -> Any:
