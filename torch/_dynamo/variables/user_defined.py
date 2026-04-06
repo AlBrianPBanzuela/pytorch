@@ -2887,6 +2887,11 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         self._base_methods = dict_methods
         assert self._base_vt is not None
 
+    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+        # Dict implements __len__ via mp_length (mapping protocol), not
+        # sq_length (sequence protocol). Redirect so generic_len works.
+        return self.mp_length(tx)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
