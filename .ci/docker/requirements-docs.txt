@@ -2,7 +2,7 @@ sphinx==7.2.6
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 7.2.6
 
-pytorch_sphinx_theme2 @ git+https://github.com/pytorch/pytorch_sphinx_theme.git@57606c33a8a4c0247e958b0765f930466c869cc5
+-e git+https://github.com/pytorch/pytorch_sphinx_theme.git@57606c33a8a4c0247e958b0765f930466c869cc5#egg=pytorch_sphinx_theme2
 #pytorch_sphinx_theme2==0.4.7
 #Description: This is needed to generate PyTorch docs
 #Pinned versions: 0.4.7
