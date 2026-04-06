@@ -1,11 +1,9 @@
 import ast
 import copy
 import csv
-import functools
 import json
 import os
 import platform
-import timeit
 from collections import namedtuple
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -352,7 +350,7 @@ class BenchmarkRunner:
         ) and curr_test_total_time > self.args.min_time_per_test
 
     def _launch_forward(self, test_case, iters, print_per_iter):
-        """Use Python's timeit module to measure execution time (unit: second)."""
+        """Measure forward execution time using Timer for stable results."""
         cuda_sync = "cuda" in test_case.test_config.test_name
         func = test_case.run_forward
         if self.use_jit:
@@ -360,12 +358,6 @@ class BenchmarkRunner:
         if self.use_compile:
             func = test_case.run_compile_forward
 
-        if not cuda_sync:
-            forward_time = timeit.timeit(
-                functools.partial(func, iters, print_per_iter, cuda_sync), number=1
-            )
-            return forward_time
-        # Stable timing with Timer
         timer = Timer(
             stmt="func(iters, print_per_iter, cuda_sync)",
             globals={
@@ -379,15 +371,19 @@ class BenchmarkRunner:
         return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
-        """This function runs forward path of an op to get an output. Then the backward path is executed
-        and the execution time is reported
-        """
+        """Measure backward execution time using Timer for stable results."""
         test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
         test_case._output_mean()
-        backward_time = timeit.timeit(
-            functools.partial(test_case.run_backward, iters, print_per_iter), number=1
+        timer = Timer(
+            stmt="backward_func(iters, print_per_iter)",
+            globals={
+                "backward_func": test_case.run_backward,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+            },
         )
-        return backward_time
+        result = timer.adaptive_autorange(min_run_time=0.0001)
+        return result.median * iters
 
     def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
         """
