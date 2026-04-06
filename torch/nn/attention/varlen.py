@@ -218,7 +218,10 @@ def varlen_attn(
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
             or (W, 0) for causal attention with sliding window of size W.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA)
-            and allows key/value to have fewer heads than query. Default is False.
+            and allows key/value to have fewer heads than query.
+            Each KV head is shared by a group of :math:`H_q / H_{kv}` query heads,
+            so :math:`H_q` must be divisible by :math:`H_{kv}`.
+            Default is False.
         seqused_k (Tensor, optional): Number of valid KV tokens per batch element; shape :math:`(N,)`.
             When set, only the first ``seqused_k[i]`` tokens in the key/value sequence for batch
             element *i* participate in attention. Useful for KV-cache decoding where the cache slot
