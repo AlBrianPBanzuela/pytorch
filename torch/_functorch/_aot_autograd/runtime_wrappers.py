@@ -116,6 +116,10 @@ zip = strict_zip
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
+def _unwrap_no_symints(args: list[Any]) -> list[Any]:
+    return runtime_unwrap_tensor_subclasses(args, append_symints=False)
+
+
 def _describe_arg_for_logging(arg: object) -> str:
     from torch._library import opaque_object
 
@@ -1334,10 +1338,6 @@ class AOTDedupeWrapper(CompilerWrapper):
         if not self.needs_post_compile:
             return compiled_fn
 
-        # keep_indices is guaranteed non-empty: post_compile only runs when
-        # needs_post_compile is True, meaning strategy 1 failed due to a
-        # duplicate mutated arg, so flat_args is non-empty and at least the
-        # first arg is always kept (enforced by remove_dupe_metadata).
         keep_indices = [i for i, keep in enumerate(self.keep_arg_mask) if keep]
         idx_list = ", ".join(f"args[{i}]" for i in keep_indices)
         source = (
@@ -2154,7 +2154,7 @@ def _backward_prologue_functional(
         if codegen_unwrap_fn is not None:
             unwrap = codegen_unwrap_fn
         else:
-            unwrap = _unwrap_tensor_subclasses_no_symints
+            unwrap = _unwrap_no_symints
         all_args = (
             unwrap(all_args[:tangents_start_idx])
             + flat_processed_tangents

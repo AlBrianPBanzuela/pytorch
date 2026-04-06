@@ -9,10 +9,7 @@ the closure-based zip + filter over keep_arg_mask.
 
 Strategy 2 (the dedup post_compile path) is triggered when duplicate args
 have mutations, so strategy 1 (leafification) can't handle them. Dynamo
-deduplicates user-level inputs, but AOT autograd can reintroduce duplicates
-via its own input transformations (e.g. synthetic bases for aliased views,
-subclass unwrapping). These tests use aot_function directly as the simplest
-way to trigger strategy 2 deterministically.
+already deduplicates inputs, so these tests use aot_function directly.
 
 Tests verify that a "dedup_wrapper" artifact is emitted via trace_structured.
 """
@@ -86,6 +83,9 @@ class TestCodegenDedup(TestCase):
             1,
             "Expected dedup_wrapper codegen artifact to be emitted",
         )
+        source = captured[0]
+        self.assertIn("args[0]", source)
+        self.assertNotIn("args[1]", source)
 
     def test_three_way_duplicate_with_mutation(self):
         """
@@ -110,6 +110,10 @@ class TestCodegenDedup(TestCase):
             1,
             "Expected dedup_wrapper codegen artifact to be emitted",
         )
+        source = captured[0]
+        self.assertIn("args[0]", source)
+        self.assertNotIn("args[1]", source)
+        self.assertNotIn("args[2]", source)
 
     def test_partial_duplicate_with_mutation(self):
         """
@@ -137,6 +141,10 @@ class TestCodegenDedup(TestCase):
             1,
             "Expected dedup_wrapper codegen artifact to be emitted",
         )
+        source = captured[0]
+        self.assertIn("args[0]", source)
+        self.assertNotIn("args[1]", source)
+        self.assertIn("args[2]", source)
 
 
 if __name__ == "__main__":
