@@ -19,8 +19,8 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
-    create_hop_call_proxy,
     create_bw_fn,
+    create_hop_call_proxy,
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
@@ -257,8 +257,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     true_subgraph, false_subgraph = trace_and_register_subgraphs(
         proxy_mode,
-        ("true_graph", true_fn, operands),
-        ("false_graph", false_fn, operands),
+        ("true_graph", true_fn, operands),  # pyrefly: ignore [bad-argument-type]
+        ("false_graph", false_fn, operands),  # pyrefly: ignore [bad-argument-type]
     )
     true_graph = true_subgraph.graph
     false_graph = false_subgraph.graph

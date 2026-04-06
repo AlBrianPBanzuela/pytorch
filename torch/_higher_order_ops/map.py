@@ -8,15 +8,18 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    track_tensor_tree,
+)
 
 from .utils import (
     _from_fun,
     _maybe_run_with_interpreter,
     _stack_pytree,
     _unstack_pytree,
-    create_hop_call_proxy,
     create_bw_fn,
+    create_hop_call_proxy,
     fill_none_with_masks,
     filter_with_masks,
     first_slice_copy,

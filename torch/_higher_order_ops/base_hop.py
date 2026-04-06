@@ -11,12 +11,15 @@ from torch._higher_order_ops.utils import (
     create_hop_call_proxy,
     HopInstance,
     materialize_as_graph,
-    register_hop_dispatches,
     reenter_make_fx,
+    register_hop_dispatches,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    track_tensor_tree,
+)
 
 
 class BaseHOP(HigherOrderOperator, abc.ABC):

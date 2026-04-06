@@ -540,10 +540,11 @@ def trace_and_register_subgraphs(
         prefixes.append(prefix)
         traced_graphs.append(graph)
 
+    # pyrefly: ignore [missing-attribute]
     _, names = unique_graph_names_with_root(proxy_mode.tracer.root, *prefixes)
     registered_subgraphs: list[RegisteredSubgraph] = []
     for name, graph in zip(names, traced_graphs):
-        proxy_mode.tracer.root.register_module(name, graph)
+        proxy_mode.tracer.root.register_module(name, graph)  # pyrefly: ignore [missing-attribute]
         registered_subgraphs.append(RegisteredSubgraph(name, graph))
 
     return tuple(registered_subgraphs)
@@ -557,8 +558,8 @@ def create_hop_call_proxy(
     *,
     name: str | None = None,
 ) -> torch.fx.Proxy:
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
-    proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs or {})
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # pyrefly: ignore [missing-attribute]
+    proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs or {})  # pyrefly: ignore [missing-attribute]
     return proxy_mode.tracer.create_proxy(
         "call_function", hop, proxy_args, proxy_kwargs, name=name
     )

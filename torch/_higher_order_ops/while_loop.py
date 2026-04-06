@@ -14,14 +14,17 @@ from torch._higher_order_ops.utils import (
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
-    register_hop_dispatches,
     reenter_make_fx,
+    register_hop_dispatches,
     trace_and_register_subgraphs,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    track_tensor_tree,
+)
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -931,8 +934,6 @@ register_hop_dispatches(
     ),
     functionalize_impl=functools.partial(while_loop_func, stack_output=True),
     proxy_mode_impl=functools.partial(while_loop_tracing, stack_output=True),
-    fake_tensor_impl=functools.partial(
-        while_loop_fake_tensor_mode, stack_output=True
-    ),
+    fake_tensor_impl=functools.partial(while_loop_fake_tensor_mode, stack_output=True),
     composite_impl=functools.partial(while_loop_dense, stack_output=True),
 )

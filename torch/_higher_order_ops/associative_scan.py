@@ -12,8 +12,8 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
-    create_hop_call_proxy,
     create_bw_fn,
+    create_hop_call_proxy,
     first_slice_copy,
     first_slice_copy_with_grad,
     materialize_as_graph,
@@ -25,7 +25,10 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    track_tensor_tree,
+)
 
 
 aten = torch._ops.ops.aten
