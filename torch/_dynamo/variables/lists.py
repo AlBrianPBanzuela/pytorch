@@ -436,6 +436,7 @@ class BaseListVariable(VariableTracker):
 class RangeVariable(BaseListVariable):
     # PyRange_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L767
     _cpython_type = range
+    _has_instance_dict = False
 
     def __init__(self, items: Sequence[VariableTracker], **kwargs: Any) -> None:
         items_to_map = items
@@ -1141,6 +1142,7 @@ class ListVariable(CommonListMethodsVariable):
 class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     _cpython_type = collections.deque
+    _has_instance_dict = False
 
     def __init__(
         self,
@@ -1319,6 +1321,7 @@ class DequeVariable(CommonListMethodsVariable):
 class TupleVariable(BaseListVariable):
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
     _cpython_type = tuple
+    _has_instance_dict = False
 
     def python_type(self) -> type[tuple]:  # type: ignore[type-arg]
         return tuple
@@ -1364,6 +1367,7 @@ class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
     _cpython_type = torch.Size
+    _has_instance_dict = False
 
     _nonvar_fields = {
         "proxy",
@@ -1855,6 +1859,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 class SliceVariable(VariableTracker):
     # PySlice_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c#L689
     _cpython_type = slice
+    _has_instance_dict = False
 
     def __init__(
         self,
@@ -1930,6 +1935,7 @@ class SliceVariable(VariableTracker):
 class ListIteratorVariable(IteratorVariable):
     # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
     _cpython_type = type(iter([]))
+    _has_instance_dict = False
 
     _nonvar_fields = {
         "index",
@@ -2008,11 +2014,13 @@ class ListIteratorVariable(IteratorVariable):
 class TupleIteratorVariable(ListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
+    _has_instance_dict = False
 
 
 class RangeIteratorVariable(IteratorVariable):
     # PyRangeIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L896
     _cpython_type = type(iter(range(0)))
+    _has_instance_dict = False
 
     # only needed for isinstance(..., range_iterator) to work
     _nonvar_fields = {
