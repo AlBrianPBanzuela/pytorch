@@ -22,7 +22,6 @@ RUN yum install -y \
   file \
   git \
   make \
-  openssl-devel \
   patch \
   perl \
   unzip \
