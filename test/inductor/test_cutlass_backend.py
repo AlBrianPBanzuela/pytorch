@@ -716,7 +716,7 @@ class TestCutlassBackend(TestCase):
         """
         Main test for addmm.
         """
-        if dtype == torch.bfloat16:
+        if dtype == torch.bfloat16 and GPU_TYPE == "cuda":
             # Mismatched elements: 4539 / 16384 (27.7%)
             # Greatest absolute difference: 0.125 at index (12, 33) (up to 0.001 allowed)
             # Greatest relative difference: inf at index (15, 7) (up to 0.002 allowed)
