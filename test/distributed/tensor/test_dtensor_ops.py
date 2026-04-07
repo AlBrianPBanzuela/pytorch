@@ -199,10 +199,6 @@ dtensor_fails = {
     # DTensorConverter can't convert sparse tensor inputs
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
-    # bug in squeeze.dims strategy: TypeError with empty dims arg
-    xfail("squeeze", "multiple"),
-    # interpolation ops: Partial strategy triggers errors during sharding prop
-    xfail("nn.functional.grid_sample"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
     # output_specs count mismatch in unsafe_split strategy
@@ -421,16 +417,6 @@ dtensor_fails_no_strategy = {
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
     xfail("nn.functional.group_norm"),
-    xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.interpolate", "nearest"),
-    xfail("nn.functional.interpolate", "nearest-exact"),
-    xfail("nn.functional.max_unpool1d"),
-    xfail("nn.functional.max_unpool1d", "grad"),
-    xfail("nn.functional.max_unpool2d"),
-    xfail("nn.functional.max_unpool2d", "grad"),
-    xfail("nn.functional.max_unpool3d"),
-    xfail("nn.functional.max_unpool3d", "grad"),
     xfail("nn.functional.multi_margin_loss"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
