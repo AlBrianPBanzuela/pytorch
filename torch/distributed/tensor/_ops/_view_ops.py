@@ -1117,6 +1117,11 @@ class _ViewShardingPropagator:
                     f"{tgt_shard_dims} for Shard(dim={p.dim}) on mesh dim {mesh_dim}."
                 )
         cmd = self.rule[tgt_shard_dim]
+        if isinstance(cmd, Split) and isinstance(cmd.input_dim, Flatten):
+            raise RuntimeError(
+                f"Shard(dim={p.dim}) through Split(Flatten(...), {cmd.group_shape}) "
+                f"is not supported yet."
+            )
         if isinstance(cmd, (Split, InputDim)):
             # Split/InputDim: 1:1 dim mapping, sharding transfers directly.
             # Flatten needs stride computation below (multiple dims merge).
