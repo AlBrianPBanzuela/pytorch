@@ -658,17 +658,35 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
             real_fn_callable, include_keys, exclude_keys
         )
 
+        input_tensor_meta = tuple(
+            (arg.size(), arg.dtype, arg.device)
+            if isinstance(arg, torch.Tensor)
+            else None
+            for arg in flat_args
+        )
+
         def real_backward(*grads):
             if real_state["inputs"] is None or real_state["outputs"] is None:
                 raise RuntimeError(
                     "invoke_leaf_function backward expects inputs/outputs to be set in forward."
                 )
-            return autograd_grad_with_gradient_info(
+            result = autograd_grad_with_gradient_info(
                 output_infos=real_state["outputs"],
                 input_infos=real_state["inputs"],
                 grad_outputs=grads,
                 allow_unused=True,
             )
+            result = tuple(
+                g
+                if g is not None
+                else (
+                    torch.zeros(meta[0], dtype=meta[1], device=meta[2])
+                    if meta is not None
+                    else None
+                )
+                for g, meta in zip(result, input_tensor_meta)
+            )
+            return result
 
         input_infos_for_fake = tuple(
             GradientInfo(
@@ -684,14 +702,19 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
         )
 
         def fake_backward(*grads):
-            return tuple(
-                torch.empty_strided(
-                    info.size, info.stride, dtype=info.dtype, device=info.device
-                )
-                if info is not None
-                else None
-                for info in input_infos_for_fake
-            )
+            result: list[torch.Tensor | None] = []
+            for info, meta in zip(input_infos_for_fake, input_tensor_meta):
+                if info is not None:
+                    result.append(
+                        torch.empty_strided(
+                            info.size, info.stride, dtype=info.dtype, device=info.device
+                        )
+                    )
+                elif meta is not None:
+                    result.append(torch.zeros(meta[0], dtype=meta[1], device=meta[2]))
+                else:
+                    result.append(None)
+            return tuple(result)
 
         new_real_fn_callable = _LeafCallable(real_forward)
 
