@@ -87,7 +87,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.weak import WeakTensorKeyDictionary
 from torch.utils.checkpoint import (
     checkpoint,
     checkpoint_sequential,
@@ -95,6 +94,7 @@ from torch.utils.checkpoint import (
     create_selective_checkpoint_contexts,
 )
 from torch.utils.flop_counter import FlopCounterMode
+from torch.utils.weak import WeakTensorKeyDictionary
 
 
 if TYPE_CHECKING:
@@ -15260,6 +15260,7 @@ class _AutoNamingMode(TorchDispatchMode):
 
     def __init__(self):
         from torch.utils.module_tracker import ModuleTracker
+
         self._tracker = ModuleTracker()
         self._func_counter: dict = defaultdict(int)
         self.names = WeakTensorKeyDictionary()
@@ -15280,9 +15281,10 @@ class _AutoNamingMode(TorchDispatchMode):
         key = (fqn, func)
         count = self._func_counter[key]
         self._func_counter[key] += 1
-        multi_output = isinstance(out, (tuple, list)) and sum(
-            isinstance(o, torch.Tensor) for o in out
-        ) > 1
+        multi_output = (
+            isinstance(out, (tuple, list))
+            and sum(isinstance(o, torch.Tensor) for o in out) > 1
+        )
         if isinstance(out, torch.Tensor):
             self.names[out] = f"{fqn}_{op_name}_{count}"
         elif isinstance(out, (tuple, list)):
@@ -15718,8 +15720,10 @@ class TestSelectiveActivationCheckpoint(TestCase):
     def test_checkpoint_name_skips_recomputation(self):
         from torch.utils.checkpoint import checkpoint_name
 
-        with _counter_op("name_a") as (op_a, counts_a, _), \
-             _counter_op("name_b") as (op_b, counts_b, _):
+        with (
+            _counter_op("name_a") as (op_a, counts_a, _),
+            _counter_op("name_b") as (op_b, counts_b, _),
+        ):
 
             def policy_fn(ctx, op, *args, **kwargs):
                 if ctx.tensor_name == "keep_this":
@@ -15732,7 +15736,9 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 return op_b(y, 0)
 
             x = torch.randn(4, requires_grad=True)
-            context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
             out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
             self.assertEqual(counts_a[0], 1)
             self.assertEqual(counts_b[0], 1)
@@ -15798,21 +15804,25 @@ class TestSelectiveActivationCheckpoint(TestCase):
             )
             with naming:
                 out = checkpoint(
-                    lambda x: mod(x), x,
-                    use_reentrant=False, context_fn=context_fn,
+                    lambda x: mod(x),
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
                 )
                 out.sum().backward()
 
-            self.assertEqual(idx_log, {
-                0: 2,  # Model.layers.0_my_op.default_0 -> recomputed
-                1: 1,  # Model.layers.0_my_op.default_1 -> saved
-                2: 2,  # Model.layers.0_my_op.default_2 -> recomputed
-                3: 1,  # Model.layers.1_my_op.default_0 -> saved
-                4: 2,  # Model.layers.1_my_op.default_1 -> recomputed
-                5: 1,  # Model.layers.1_my_op.default_2 -> saved
-            })
+            self.assertEqual(
+                idx_log,
+                {
+                    0: 2,  # Model.layers.0_my_op.default_0 -> recomputed
+                    1: 1,  # Model.layers.0_my_op.default_1 -> saved
+                    2: 2,  # Model.layers.0_my_op.default_2 -> recomputed
+                    3: 1,  # Model.layers.1_my_op.default_0 -> saved
+                    4: 2,  # Model.layers.1_my_op.default_1 -> recomputed
+                    5: 1,  # Model.layers.1_my_op.default_2 -> saved
+                },
+            )
             self.assertEqual(my_count[0], 9)
-
 
 
 class TestAutogradMultipleDispatch(TestCase):
