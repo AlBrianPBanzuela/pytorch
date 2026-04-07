@@ -746,7 +746,7 @@ class Tracer(TracerBase):
 
             # TODO: annotate return type. inspect.get_annotations(flatten_fn)
             # leaks the return annotation into the generated forward() code.
-            def flatten_fn(*args: Any):  # pyrefly: ignore[unannotated-parameter]
+            def flatten_fn(*args: Any) -> Any:  # pyrefly: ignore[unannotated-parameter]
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
