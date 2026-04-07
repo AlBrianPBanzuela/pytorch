@@ -142,16 +142,24 @@ void clearCublasWorkspacesForStream(cudaStream_t stream) {
   {
     auto& workspace = cublas_handle_stream_to_workspace();
     std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
-      return std::get<1>(entry.first) == stream_ptr;
-    });
+    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
+      if (std::get<1>(it->first) == stream_ptr) {
+        it = workspace.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
   {
     auto& workspace = cublaslt_handle_stream_to_workspace();
     std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
-      return std::get<1>(entry.first) == stream_ptr;
-    });
+    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
+      if (std::get<1>(it->first) == stream_ptr) {
+        it = workspace.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
 }
 
