@@ -705,6 +705,49 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                 requires_grad_indices=requires_grad_indices,
             )
 
+        # Register backward hooks if the leaf function has a hook registered.
+        # Uses register_multi_grad_hook (mode="all") to fire the user hook
+        # exactly once when all gradients are available. This correctly handles
+        # partial backward (e.g. backward(inputs=...)) where some tensors are
+        # skipped by the autograd engine — those positions receive None.
+        hook_real = getattr(real_fn_callable, "_leaf_hook_real_fn", None)
+        hook_fake = getattr(real_fn_callable, "_leaf_hook_fake_fn", None)
+        if hook_real is not None:
+            assert hook_fake is not None  # noqa: S101
+            hook_captured_out_spec: list[pytree.TreeSpec | None] = [None]
+            wrapped_hook_real, wrapped_hook_fake = make_leaf_function_wrappers(
+                hook_real, hook_fake, hook_captured_out_spec
+            )
+            hook_real_callable = _LeafCallable(wrapped_hook_real)
+            hook_fake_callable = _LeafCallable(wrapped_hook_fake)
+
+            grad_indices = [
+                i
+                for i, arg in enumerate(flat_args)
+                if isinstance(arg, torch.Tensor) and arg.requires_grad
+            ]
+            if grad_indices:
+                grad_tensors = [flat_args[i] for i in grad_indices]
+
+                def _multi_grad_callback(
+                    grads: Sequence[torch.Tensor | None],
+                ) -> None:
+                    new_flat_args = list(flat_args)
+                    for idx, g in zip(grad_indices, grads):
+                        if g is not None:
+                            new_flat_args[idx] = g
+                    invoke_leaf_function(
+                        hook_real_callable,
+                        hook_fake_callable,
+                        input_spec,
+                        "",
+                        *new_flat_args,
+                    )
+
+                torch.autograd.graph.register_multi_grad_hook(
+                    grad_tensors, _multi_grad_callback
+                )
+
         ctx.real_backward = real_backward
         ctx.fake_backward = fake_backward
 
