@@ -1327,24 +1327,26 @@ class DecompOneOffTests(TestCase):
             in generated_codes[1]
         )
 
-    @onlyCPU
+    @onlyCUDA
+    @skipIfCrossRef
     def test_addmm_out_dtype_decomp(self, device):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         cases = [
             {"beta": 1, "alpha": 1},
             {"beta": 0, "alpha": 1},
             {"beta": 2, "alpha": 3},
         ]
         for kwargs in cases:
-            with FakeTensorMode():
-                a = torch.randn(4, 8, dtype=torch.bfloat16)
-                b = torch.randn(8, 4, dtype=torch.bfloat16)
-                c = torch.zeros(4, 4, dtype=torch.float32)
-                out = torch.addmm(c, a, b, out_dtype=torch.float32, **kwargs)
+            a = torch.randn(4, 8, dtype=torch.bfloat16, device=device)
+            b = torch.randn(8, 4, dtype=torch.bfloat16, device=device)
+            c = torch.randn(4, 4, dtype=torch.float32, device=device)
 
-            self.assertEqual(out.dtype, torch.float32)
-            self.assertEqual(out.shape, (4, 4))
+            ref = torch.ops.aten.addmm.dtype(c, a, b, torch.float32, **kwargs)
+            res = torch._decomp.decompositions.addmm_dtype(
+                c, a, b, out_dtype=torch.float32, **kwargs
+            )
+
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res, ref)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
