@@ -2713,6 +2713,18 @@ instantiate_device_type_tests(
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
     """Tests for non-strict tracing flag interaction with checkpoint."""
 
+    def test_patch_autograd_grad_requires_non_strict_tracing(self):
+        x = torch.randn(2, 4, requires_grad=True)
+        loss = torch.sin(x).sum()
+
+        with torch.compiler._patch_autograd_grad():
+            with self.assertRaisesRegex(
+                AssertionError,
+                "_patch_autograd_grad\\(\\) must be used under "
+                "_non_strict_tracing_context\\(\\)",
+            ):
+                torch.autograd.grad(loss, (x,))
+
     def _trace_train_step(self, mod, x):
         import torch.utils._pytree as pytree
         from torch.fx.experimental.proxy_tensor import make_fx
