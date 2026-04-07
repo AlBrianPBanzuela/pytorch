@@ -10,7 +10,6 @@ from pathlib import Path
 from packaging.version import Version
 from setuptools import distutils  # type: ignore[import,attr-defined]
 
-
 UNKNOWN = "Unknown"
 RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
@@ -37,7 +36,8 @@ def get_tag(pytorch_root: str | Path) -> str:
     try:
         tag = subprocess.run(
             ["git", "describe", "--tags", "--exact"],
-            check=False, cwd=pytorch_root,
+            check=False,
+            cwd=pytorch_root,
             encoding="ascii",
             capture_output=True,
         ).stdout.strip()

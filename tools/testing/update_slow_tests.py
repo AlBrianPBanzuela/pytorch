@@ -8,7 +8,6 @@ from typing import Any, cast
 import requests
 from clickhouse import query_clickhouse  # type: ignore[import]
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 QUERY = """
 WITH most_recent_strict_commits AS (
@@ -194,9 +193,13 @@ if __name__ == "__main__":
 
     subprocess.run(["git", "checkout", "-b", branch_name], check=False, cwd=REPO_ROOT)
     subprocess.run(["git", "add", "test/slow_tests.json"], check=False, cwd=REPO_ROOT)
-    subprocess.run(["git", "commit", "-m", "Update slow tests"], check=False, cwd=REPO_ROOT)
     subprocess.run(
-        f"git push --set-upstream origin {branch_name} -f".split(), check=False, cwd=REPO_ROOT
+        ["git", "commit", "-m", "Update slow tests"], check=False, cwd=REPO_ROOT
+    )
+    subprocess.run(
+        f"git push --set-upstream origin {branch_name} -f".split(),
+        check=False,
+        cwd=REPO_ROOT,
     )
 
     params = {

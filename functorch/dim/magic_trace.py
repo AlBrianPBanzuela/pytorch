@@ -24,7 +24,8 @@ def magic_trace(
                 magic_trace_cache,
                 "-q",
                 "https://github.com/janestreet/magic-trace/releases/download/v1.0.2/magic-trace",
-            ], check=False
+            ],
+            check=False,
         )
         subprocess.run(["chmod", "+x", magic_trace_cache], check=False)
     args = [magic_trace_cache, "attach", "-pid", str(pid), "-o", output]

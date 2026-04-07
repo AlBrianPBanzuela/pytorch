@@ -15,7 +15,6 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 from torch.utils._triton import has_triton
 
-
 if torch.distributed.is_available():
     from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
     from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -185,7 +184,11 @@ class FxGraphRunnableTest(TestCase):
             tmp.write(payload)
             tmp.flush()
             res = subprocess.run(
-                [sys.executable, tmp.name], check=False, capture_output=True, text=True, timeout=45
+                [sys.executable, tmp.name],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=45,
             )
 
             self.assertEqual(
@@ -633,7 +636,8 @@ class TestFxGraphRunnableMultiProcessGroup(TestCase):
                 tmp.flush()
                 result = subprocess.run(
                     [sys.executable, tmp.name],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     timeout=60,
                 )

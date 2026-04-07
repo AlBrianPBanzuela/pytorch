@@ -827,7 +827,8 @@ torch.cuda.synchronize()
 """
             p = subprocess.run(
                 [sys.executable, "-c", script],
-                check=False, cwd=os.path.dirname(os.path.realpath(__file__)),
+                check=False,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
                 capture_output=True,
                 text=True,
             )

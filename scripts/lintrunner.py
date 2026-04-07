@@ -89,7 +89,8 @@ def check_lintrunner_installed(venv_dir: Path) -> None:
             str(venv_dir / "bin" / "python"),
             "lintrunner",
         ],
-        check=False, stdout=subprocess.DEVNULL,
+        check=False,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     if result.returncode != 0:

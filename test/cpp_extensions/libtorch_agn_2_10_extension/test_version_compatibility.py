@@ -28,7 +28,6 @@ from torch.utils.cpp_extension import (
     ROCM_HOME,
 )
 
-
 GPU_HOME = CUDA_HOME or ROCM_HOME
 
 # TODO: Fix this error in Windows:
@@ -97,7 +96,9 @@ if not IS_WINDOWS:
 
             cmd.extend([str(source_file), "-o", str(output_file)])
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                cmd, check=False, capture_output=True, text=True, timeout=30
+            )
 
             if result.returncode == 0:
                 return True, ""
@@ -131,7 +132,9 @@ if not IS_WINDOWS:
 
             cmd.extend([str(source_file), "-o", str(output_file)])
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                cmd, check=False, capture_output=True, text=True, timeout=30
+            )
 
             if result.returncode == 0:
                 return True, ""

@@ -62,7 +62,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.custom_op_db import numpy_nonzero
 from torch.testing._internal.two_tensor import TwoTensor
 
-
 # Shadowed by `torch.testing._internal.common_utils.custom_op`
 from torch._custom_op.impl import custom_op  # usort: skip
 
@@ -4577,7 +4576,8 @@ except RuntimeError as e:
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

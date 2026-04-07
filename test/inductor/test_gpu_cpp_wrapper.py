@@ -21,7 +21,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
-
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 try:
@@ -265,7 +264,8 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             # First run: cold compile, populates on-disk caches.
             r1 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
-                check=False, capture_output=True,
+                check=False,
+                capture_output=True,
                 text=True,
                 env=env,
             )
@@ -273,7 +273,8 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             # Second run: warm caches trigger the collision without the fix.
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
-                check=False, capture_output=True,
+                check=False,
+                capture_output=True,
                 text=True,
                 env=env,
             )

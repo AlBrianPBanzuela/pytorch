@@ -80,7 +80,6 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-
 aten = torch.ops.aten
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
@@ -837,7 +836,7 @@ class FakeTensorTest(TestCase):
                 h_0 = torch.randn((num_layers * D, N, H_out), device="cuda")
                 c_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
                 inp = torch.randn((L, N, H_in), device="cuda")
-                (output, (h_n, c_n)) = lstm(inp, (h_0, c_0))
+                output, (h_n, c_n) = lstm(inp, (h_0, c_0))
                 output.sum().backward()
 
                 self.assertEqual(output.shape, (L, N, D * H_out))
@@ -1303,7 +1302,8 @@ for t in threads:
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             timeout=60,
         )
         self.assertEqual(
