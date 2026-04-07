@@ -872,6 +872,38 @@ class TestRealProxyTensor(TestCase):
         )
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
+    def test_create_arg_graphmodule(self):
+        # Test that PythonKeyTracer.create_arg handles GraphModule objects
+        # by converting them to get_attr nodes. This is needed when HOPs
+        # like flex_attention store subgraph GraphModules as submodules
+        # and pass them as arguments during tracing.
+        from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+
+        class Inner(nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        tracer = PythonKeyTracer()
+        tracer.root = nn.Module()
+        tracer.graph = torch.fx.Graph(tracer_cls=type(tracer))
+
+        subgraph = torch.fx.GraphModule(Inner(), torch.fx.Graph())
+
+        # Case 1: GraphModule already registered as submodule
+        tracer.root.register_module("my_subgraph", subgraph)
+        node = tracer.create_arg(subgraph)
+        self.assertIsInstance(node, torch.fx.Node)
+        self.assertEqual(node.op, "get_attr")
+        self.assertEqual(node.target, "my_subgraph")
+
+        # Case 2: unregistered GraphModule gets auto-registered
+        subgraph2 = torch.fx.GraphModule(Inner(), torch.fx.Graph())
+        node2 = tracer.create_arg(subgraph2)
+        self.assertIsInstance(node2, torch.fx.Node)
+        self.assertEqual(node2.op, "get_attr")
+        self.assertIn("_subgraph", node2.target)
+
+
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
         x = nn.Parameter(torch.randn(3, 3))

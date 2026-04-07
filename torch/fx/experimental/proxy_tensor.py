@@ -1434,6 +1434,19 @@ class PythonKeyTracer(Tracer):
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
+        elif isinstance(a, torch.fx.GraphModule):
+            # Higher-order ops like flex_attention store subgraph
+            # GraphModules as submodules of the tracer root (registered
+            # in their trace_* functions). Convert them to get_attr
+            # nodes so they survive re-tracing (e.g. when compile_fx
+            # re-enters aot_autograd on a scooped backward submodule).
+            for n, m in self.root.named_modules():
+                if m is a and n:
+                    return self.create_node("get_attr", n, (), {})
+
+            qualname = self.get_fresh_qualname("_subgraph")
+            self.root.register_module(qualname, a)
+            return self.create_node("get_attr", qualname, (), {})
         elif isinstance(a, py_sym_types):
             if a.node.constant is None:
                 raise AssertionError("a.node.constant should not be None")
