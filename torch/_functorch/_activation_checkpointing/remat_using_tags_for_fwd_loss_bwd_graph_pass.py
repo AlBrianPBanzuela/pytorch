@@ -55,26 +55,36 @@ def _has_user_phase_annotation(gm: fx.GraphModule) -> bool:
     )
 
 
-def _count_backward_regions(gm: fx.GraphModule, use_phase_only: bool = False) -> int:
-    """Count the number of contiguous backward regions in the graph."""
-    count = 0
+def _collect_backward_region_data(
+    gm: fx.GraphModule,
+) -> tuple[bool, int | None, set[fx.Node], int]:
+    use_phase_only = _has_user_phase_annotation(gm)
+    bwd_start: int | None = None
+    bwd_node_set: set[fx.Node] = set()
+    num_regions = 0
     in_backward = False
-    for node in gm.graph.nodes:
+
+    for idx, node in enumerate(gm.graph.nodes):
         is_bwd = _is_backward_node(node, use_phase_only=use_phase_only)
+        if is_bwd:
+            bwd_node_set.add(node)
+            if bwd_start is None:
+                bwd_start = idx
         if is_bwd and not in_backward:
-            count += 1
+            num_regions += 1
         in_backward = is_bwd
-    return count
+
+    return use_phase_only, bwd_start, bwd_node_set, num_regions
 
 
 def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModule:
     """
     Duplicate recompute nodes for backward use. DCE removes unused forward versions.
 
-    Backward nodes are identified by custom["phase"] == "backward" (user annotation)
-    or custom["autograd_backward"] == True (set automatically when Dynamo traces
-    torch.autograd.grad).
-    When the user provides phase annotations, only those are used.
+    Backward regions are identified by custom["phase"] == "backward" (user
+    annotation) or custom["autograd_backward"] == True (set automatically when
+    Dynamo traces torch.autograd.grad). When the user provides phase
+    annotations, only those annotated regions are used.
 
     Only a single contiguous backward region is supported. If multiple disjoint
     backward regions are detected, an error is raised. Consecutive backward
@@ -84,9 +94,9 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     if not has_recomputable_ops(gm):
         return gm
 
-    use_phase_only = _has_user_phase_annotation(gm)
-
-    num_regions = _count_backward_regions(gm, use_phase_only=use_phase_only)
+    use_phase_only, bwd_start, bwd_node_set, num_regions = (
+        _collect_backward_region_data(gm)
+    )
     if num_regions > 1:
         if use_phase_only:
             raise RuntimeError(
@@ -101,20 +111,10 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
             'torch.fx.traceback.annotate({"phase": "backward"}).'
         )
 
-    # Find backward boundary and build ordering
-    bwd_start: int | None = None
-    bwd_node_set: set[fx.Node] = set()
-    order = {}
-    for idx, node in enumerate(gm.graph.nodes):
-        order[node] = idx
-        if _is_backward_node(node, use_phase_only=use_phase_only):
-            if use_phase_only:
-                bwd_node_set.add(node)
-            if bwd_start is None:
-                bwd_start = idx
-
     if bwd_start is None:
         return gm
+
+    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     if has_recomputable_rng_ops(gm):
         raise RuntimeError(
@@ -164,10 +164,8 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
         return deps
 
     # Insert backward nodes
-    # When use_phase_only, only process nodes explicitly tagged with phase: backward.
-    # Otherwise, treat everything from bwd_start onwards as backward.
     for node in list(gm.graph.nodes)[bwd_start:]:
-        if use_phase_only and node not in bwd_node_set:
+        if node not in bwd_node_set:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
             continue
         # Gather all deps that need to be recomputed for this node
