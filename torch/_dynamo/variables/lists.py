@@ -245,14 +245,12 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # list_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L3689-L3710
         # _PyIndex_Check: https://github.com/python/cpython/blob/62a6e898e01/Include/internal/pycore_abstract.h#L13-L17
-        # TODO(follow-up): replace hasattr(key_type, "__index__") with
-        # has_slot(num_slots, PyNumberSlots.NB_INDEX) for C extension types.
         try:
             key_type = key.python_type()
         except NotImplementedError:
             key_type = None
         if key_type not in (int, bool, slice):
-            if key_type is not None and not hasattr(key_type, "__index__"):
+            if key_type is not None and not type_implements_nb_index(key_type):
                 container_name = self.python_type_name()
                 raise_observed_exception(
                     TypeError,
@@ -671,13 +669,12 @@ class RangeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
-        # CPython: range_subscript checks _PyIndex_Check → PyNumber_Index for non-slice keys
         try:
             key_type = key.python_type()
         except NotImplementedError:
             key_type = None
         if key_type not in (int, bool, slice):
-            if key_type is not None and not hasattr(key_type, "__index__"):
+            if key_type is not None and not type_implements_nb_index(key_type):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1160,11 +1157,6 @@ class ListVariable(CommonListMethodsVariable):
         return False
 
 
-# TODO(follow-up): DequeVariable inherits BaseListVariable.mp_subscript_impl which
-# accepts slices. CPython's deque only has sq_item (Modules/_collectionsmodule.c:1888),
-# not mp_subscript — deque[slice] should raise TypeError. Override mp_subscript_impl
-# to reject slices and only accept integer-like keys via _PyIndex_Check → nb_index_impl.
-# Also add tests for: negative index, __index__ object key, invalid type key.
 class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     _cpython_type = collections.deque
@@ -1188,6 +1180,15 @@ class DequeVariable(CommonListMethodsVariable):
 
     def python_type(self) -> type:
         return collections.deque
+
+    def sq_item_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # deque_item: https://github.com/python/cpython/blob/62a6e898e01/Modules/_collectionsmodule.c#L1888
+        # Key has already been converted to int by vt_getitem.
+        return self.getitem_const(tx, key)
 
     def debug_repr(self) -> str:
         if self.maxlen.as_python_constant() is None:
@@ -1505,13 +1506,12 @@ class SizeVariable(TupleVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # tuple_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/tupleobject.c#L877-L930
-        # CPython: tuplesubscript checks _PyIndex_Check → PyNumber_AsSsize_t for non-slice keys
         try:
             key_type = key.python_type()
         except NotImplementedError:
             key_type = None
         if key_type not in (int, bool, slice):
-            if key_type is not None and not hasattr(key_type, "__index__"):
+            if key_type is not None and not type_implements_nb_index(key_type):
                 raise_observed_exception(
                     TypeError,
                     tx,
