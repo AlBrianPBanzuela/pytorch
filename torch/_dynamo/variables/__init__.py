@@ -173,6 +173,7 @@ from .user_defined import (
     RemovableHandleVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
