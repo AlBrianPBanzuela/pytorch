@@ -58,10 +58,13 @@ from torch._subclasses.fake_tensor import (
 )
 
 
+_has_cpp_fake_tensor = hasattr(torch._C, "_is_fake_tensor")
+
+
 def is_fake(x: object) -> bool:
     if _is_fake_python(x):
         return True
-    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+    if _has_cpp_fake_tensor and isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         return True
     return False
 
@@ -681,7 +684,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
-            if torch._C._is_cpp_fake_tensor_mode_active():
+            if _has_cpp_fake_tensor and torch._C._is_cpp_fake_tensor_mode_active():
                 return torch.empty_strided(  # revist this
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
                 )
@@ -1464,7 +1467,7 @@ class PythonKeyTracer(Tracer):
             # NB: intentionally isinstance(FakeTensor), NOT is_fake() — is_fake recurses
             # into subclass attrs via getattr, which triggers proxy tracking during export.
             # Also accept C++ fake tensors.
-            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor) and not torch._C._is_fake_tensor(val):
+            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor) and not (_has_cpp_fake_tensor and torch._C._is_fake_tensor(val)):
                 return None
             return extract_val(v.meta["val"])
 

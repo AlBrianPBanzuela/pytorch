@@ -28,6 +28,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -2943,18 +2944,31 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_create_and_enter_fake_tensor_mode",
-      [](py::object converter, py::object shape_env) {
+      [](py::object converter, py::object shape_env,
+         py::object fallback_mode) {
         Py_INCREF(shape_env.ptr());
         Py_INCREF(converter.ptr());
+
+        std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> fallback =
+            nullptr;
+        if (!fallback_mode.is_none()) {
+          Py_INCREF(fallback_mode.ptr());
+          fallback =
+              std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
+                  fallback_mode.ptr(), getPyInterpreter());
+        }
+
         auto mode = std::make_shared<c10::FakeTensorMode>(
             std::make_shared<c10::SafePyObject>(
                 shape_env.ptr(), getPyInterpreter()),
             std::make_shared<c10::SafePyObject>(
-                converter.ptr(), getPyInterpreter()));
+                converter.ptr(), getPyInterpreter()),
+            std::move(fallback));
         c10::impl::FakeTensorModeTLS::set_state(std::move(mode));
       },
       py::arg("converter"),
-      py::arg("shape_env") = py::none());
+      py::arg("shape_env") = py::none(),
+      py::arg("fallback_mode") = py::none());
   py_module.def("_exit_fake_tensor_mode", []() {
     c10::impl::FakeTensorModeTLS::reset_state();
   });
