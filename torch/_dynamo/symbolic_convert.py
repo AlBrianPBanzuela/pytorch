@@ -608,9 +608,7 @@ def get_node_source_info(n: torch.fx.Node) -> str:
     return f"{file_line}" + (f", code: {code}" if code else "")
 
 
-def format_tensor_computation_trace(
-    value: VariableTracker, max_lines: int = 20
-) -> str:
+def format_tensor_computation_trace(value: VariableTracker, max_lines: int = 20) -> str:
     """Walk the FX graph backwards from a TensorVariable to show how it was
     computed, with user source locations. Graph inputs (placeholders) are always
     shown first, followed by operations in dataflow order ending at the branch
@@ -685,10 +683,15 @@ def generic_jump(
         if isinstance(value, TensorVariable):
             try:
                 example = value.proxy.node.meta.get("example_value")
-                if example is not None and example.dim() == 0 and example.dtype in (
-                    torch.bool,
-                    torch.int32,
-                    torch.int64,
+                if (
+                    example is not None
+                    and example.dim() == 0
+                    and example.dtype
+                    in (
+                        torch.bool,
+                        torch.int32,
+                        torch.int64,
+                    )
                 ):
                     hints.append(
                         "The branch condition uses a scalar integer tensor. "
@@ -705,8 +708,7 @@ def generic_jump(
             gb_type="Data-dependent branching",
             context=f"attempted to jump with {value}",
             explanation="Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
-            "Dynamo does not support tracing dynamic control flow."
-            + trace_info,
+            "Dynamo does not support tracing dynamic control flow." + trace_info,
             hints=hints,
         )
 
