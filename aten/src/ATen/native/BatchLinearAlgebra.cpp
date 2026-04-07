@@ -3892,7 +3892,8 @@ Tensor& linalg_solve_triangular_out(
       // NOTE: This is the only place A is copied!
       //
       // Conj materialization optimizations:
-      // (A.is_conj() != B.is_conj()) might imply materialized conj in memory, see solve_with_matching_layout.
+      // (A.is_conj() != B.is_conj()) might imply materialized conj in memory,
+      // see solve_by_layout_match and  solve_with_matching_layout.
       // So, we make a copy of A such that (A_clone.is_conj() == B.is_conj().
       auto A_clone = cloneMatrix(
         B.is_conj() ? A.conj() : A,
@@ -3908,9 +3909,8 @@ Tensor& linalg_solve_triangular_out(
   auto pOut = [&]() -> c10::MaybeOwned<Tensor> {
     // Out is borrowed when
     // - out is empty, or
-    // - out.is_same(B), or
-    // - out is a BLAS-compatible (here: contiguous rows or cols and no memory overlaps across all dims).
-    if ((out.numel() == 0) || out.is_same(B_) || (isColMajorLike(out) || isRowMajorLike(out))) {
+    // - out is BLAS-compatible (here: contiguous rows or cols and no memory overlaps across all dims).
+    if ((out.numel() == 0) || (isColMajorLike(out) || isRowMajorLike(out))) {
       return c10::MaybeOwned<Tensor>::borrowed(out);
     } else {
       return c10::MaybeOwned<Tensor>::owned(at::empty({0}, A.options()));
@@ -3938,8 +3938,8 @@ Tensor& linalg_solve_triangular_out(
   // Run solve_kernel on
   // (op(A), B) if A is col-major, or
   // (op(A^T), B^T), otherwise.
-  // *^T is done on the strides before the kernel call,
-  // op(*) is done in the kernel.
+  // *^T is applied to the strides before the kernel call,
+  // op(*) is applied in the kernel.
   const auto solve = [&left, &upper, &solve_kernel](
     const Tensor& A,
     const Tensor& B,
