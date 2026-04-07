@@ -1488,7 +1488,12 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
                 f"storage. {_SAC_MISMATCH_MSG}"
             )
         entry = func_storage.get(idx)
-        if entry is _CONSUMED:
+        if entry is None:
+            raise RuntimeError(
+                f"{func} invocation index {idx} encountered during backward "
+                f"but not found in storage. {_SAC_MISMATCH_MSG}"
+            )
+        elif entry is _CONSUMED:
             raise RuntimeError(
                 "Trying to backward an extra time. You are only allowed to backward once "
                 "on any region computed under selective activation checkpoint."
@@ -1496,15 +1501,9 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         elif entry is _RECOMPUTE:
             kwargs = {} if kwargs is None else kwargs
             return func(*args, **kwargs)
-        elif entry is not None:
+        else:
             func_storage[idx] = _CONSUMED
             return tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), entry)
-        else:
-            assert entry is None
-            raise RuntimeError(
-                f"{func} invocation index {idx} encountered during backward "
-                f"but not found in storage. {_SAC_MISMATCH_MSG}"
-            )
 
 
 def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mutation=False):
