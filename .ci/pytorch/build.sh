@@ -102,30 +102,6 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
 
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
-  POSSIBLE_JAVA_HOMES=()
-  POSSIBLE_JAVA_HOMES+=(/usr/local)
-  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
-  # Add the Windows-specific JNI
-  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
-  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-    if [[ -e "$JH/include/jni.h" ]] ; then
-      # Skip if we're not on Windows but haven't found a JAVA_HOME
-      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
-        break
-      fi
-      echo "Found jni.h under $JH"
-      export JAVA_HOME="$JH"
-      export BUILD_JNI=ON
-      break
-    fi
-  done
-  if [ -z "$JAVA_HOME" ]; then
-    echo "Did not find jni.h"
-  fi
-fi
-
 # Use special scripts for Android builds
 
 if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
@@ -198,14 +174,9 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr '
   export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
-  export CC=clang
-  export CXX=clang++
-  # TODO: Removeme once all the wrappers are gone
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    sudo rm -f /opt/cache/bin/clang++
-  fi
-
+# TODO: Removeme once all the wrappers are gone
+if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  sudo rm -f /opt/cache/bin/clang++
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then

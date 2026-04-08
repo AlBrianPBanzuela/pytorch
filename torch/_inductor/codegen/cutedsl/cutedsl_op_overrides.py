@@ -71,7 +71,7 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def _node_tensor_flags() -> tuple[bool, bool] | None:
         node = V.current_node
-        if node is None or len(node.args) < 2:
+        if not isinstance(node, torch.fx.Node) or len(node.args) < 2:
             return None
 
         def _is_tensor(raw_arg: object) -> bool:
@@ -181,7 +181,7 @@ class CuteDSLOpOverrides(OpOverrides):
     def _expected_tensor_val() -> torch.Tensor | None:
         """Return the fake-tensor value from the current FX node's metadata, if any."""
         node = V.current_node
-        if node is None:
+        if not isinstance(node, torch.fx.Node):
             return None
         val = node.meta.get("val")
         return val if isinstance(val, torch.Tensor) else None
@@ -254,6 +254,7 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CuteDSLArg) -> CuteDSLArg:
         """Exponential using CuteDSL cute.math.exp2 with log2(e) scaling."""
         if CuteDSLOpOverrides._get_cse_var(x) is None:
@@ -263,26 +264,31 @@ class CuteDSLOpOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x: CuteDSLArg) -> CuteDSLArg:
         """Square root using CuteDSL cute.math.sqrt function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.sqrt({x})")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x: CuteDSLArg) -> CuteDSLArg:
         """Natural logarithm using CuteDSL cute.math.log function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.log({x})")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x: CuteDSLArg) -> CuteDSLArg:
         """Cosine using CuteDSL cute.math.cos function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.cos({x})")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x: CuteDSLArg) -> CuteDSLArg:
         """Sine using CuteDSL cute.math.sin function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.sin({x})")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erf(x: CuteDSLArg) -> CuteDSLArg:
         """Error function using CuteDSL cute.math.erf function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.erf({x})")
@@ -338,14 +344,17 @@ class CuteDSLOpOverrides(OpOverrides):
         return f"({lhs} if {lhs} {op} {rhs} else {rhs})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._minmax(a, b, op=">")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._minmax(a, b, op="<")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(
         condition: CuteDSLArg,
         a: CuteDSLArg,
@@ -384,6 +393,7 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} ** {b})")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x: CuteDSLArg) -> CuteDSLArg:
         """Absolute value using CuteDSL cute.math.abs function."""
         if isinstance(x, CSEVariable):

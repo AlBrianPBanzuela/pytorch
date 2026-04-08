@@ -36,6 +36,7 @@ from torch._inductor.codecache import (
     ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
+    XPUCodeCache,
 )
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
@@ -47,6 +48,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
+    _set_triton_libdevice_path,
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
@@ -401,9 +403,15 @@ class AsyncCompile:
 
         # Cache miss
         if is_parallel:
+            # Ensure libdevice path is set in os.environ before passing to workers
+            _set_triton_libdevice_path()
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+            env_vars = [
+                "TORCHINDUCTOR_CACHE_DIR",
+                "TRITON_CACHE_DIR",
+                "TRITON_LIBDEVICE_PATH",
+            ]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             extra_config = {
                 "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
@@ -478,6 +486,7 @@ class AsyncCompile:
                 try:
                     start_ns = time_ns()
                     _set_triton_ptxas_path()
+                    _set_triton_libdevice_path()
                     kernel = load_kernel()
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(
@@ -527,18 +536,24 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cuda(self, source_code, dst_file_ext, aot_compile=False):
-        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-
+    def cutlass(self, cache_cls, source_code, dst_file_ext, aot_compile=False):
         def task():
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
-                output_path, *_ = CUDACodeCache.compile(source_code, "o")
-                CUDACodeCache.aot_kernels_o.append(output_path)
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+                output_path, *_ = cache_cls.compile(source_code, "o")
+                cache_cls.aot_kernels_o.append(output_path)
+            return cache_cls.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
+
+    def cuda(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+        return self.cutlass(CUDACodeCache, source_code, dst_file_ext, aot_compile)
+
+    def xpu(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("XPU Kernel:\n%s", source_code)
+        return self.cutlass(XPUCodeCache, source_code, dst_file_ext, aot_compile)
 
     def rocm(
         self,
