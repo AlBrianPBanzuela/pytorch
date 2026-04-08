@@ -12664,8 +12664,6 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.float64,), device_type='xpu'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad',
                             dtypes=(torch.float64,), device_type='xpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad',
-                            dtypes=(torch.float64,), device_type='xpu'),
                # https://github.com/intel/torch-xpu-ops/issues/1893
                DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view',
                             device_type='xpu', dtypes=(torch.float64,)),
@@ -18828,8 +18826,6 @@ op_db: list[OpInfo] = [
                             device_type='cpu', dtypes=(torch.long,)),
                # Jacobian mismatch, https://github.com/intel/torch-xpu-ops/issues/2360
                # Exception: Jacobian computed with forward mode mismatch for output 0 with respect to input 1
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
-                            dtypes=(torch.float64,), device_type='xpu'),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
                             dtypes=(torch.float64,), device_type='xpu'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad',
@@ -21436,11 +21432,12 @@ op_db: list[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_inner,
-           # "dot_xpu_mkl" not implemented for 'Long'
            skips=(
+               # "dot_xpu_mkl" not implemented for 'Long', torch-xpu-ops: #3247
+               DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive",
+                            device_type="xpu", dtypes=torch.int64),
                DecorateInfo(unittest.skip("Skipped! torch-xpu-ops #3247"), 'TestCommon',
-                            'test_noncontiguous_samples', device_type='xpu', dtypes=(torch.int64,)),
-           )),
+                            'test_noncontiguous_samples', device_type='xpu', dtypes=torch.int64))),
     OpInfo('tensordot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -26996,11 +26993,7 @@ python_ref_db = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16,)
-            ),
-            # The dtyeps of _refs.stft is not aligned to stft
-            # # https://github.com/intel/torch-xpu-ops/issues/3238
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='xpu'),
+                device_type='mps', dtypes=(torch.float16,)),
         ],
     ),
     PythonRefInfo(
