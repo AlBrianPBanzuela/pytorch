@@ -27,11 +27,15 @@ PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = cdata;
+  self_->weakreflist = nullptr;
   return self.release();
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
+  if (self->weakreflist != nullptr) {
+    PyObject_ClearWeakRefs(_self);
+  }
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
@@ -51,6 +55,7 @@ static PyObject* THPGenerator_pynew(
 
   THPGeneratorPtr self(
       reinterpret_cast<THPGenerator*>(type->tp_alloc(type, 0)));
+  self->weakreflist = nullptr;
 
   c10::DeviceType device_type = device.type();
   if (device_type == at::kCPU) {
@@ -278,6 +283,50 @@ static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPGenerator_richcompare(
+    PyObject* self,
+    PyObject* other,
+    int op) {
+  if (op == Py_EQ) {
+    if (self == other) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+  }
+  if (op == Py_NE) {
+    if (self != other) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+  }
+  Py_RETURN_NOTIMPLEMENTED;
+}
+
+static Py_hash_t THPGenerator_hash(PyObject* self) {
+  return reinterpret_cast<Py_hash_t>(self);
+}
+
+static PyObject* THPGenerator_fxRepr(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
+  auto device = gen.device();
+  auto repr = fmt::format(
+      "torch.cuda.default_generators[{}].clone_state()", device.index());
+  auto repr_str = THPObjectPtr(THPUtils_packString(repr));
+  if (!repr_str)
+    throw python_error();
+  auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
+  if (!torch_module)
+    throw python_error();
+  auto globals_dict = THPObjectPtr(PyDict_New());
+  if (!globals_dict)
+    throw python_error();
+  PyDict_SetItemString(globals_dict, "torch", torch_module);
+  auto result = PyTuple_Pack(2, repr_str.get(), globals_dict.get());
+  return result;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
     {"device",
@@ -304,6 +353,7 @@ static PyMethodDef THPGenerator_methods[] = {
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
+    {"__fx_repr__", THPGenerator_fxRepr, METH_NOARGS, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -325,7 +375,7 @@ static PyTypeObject THPGeneratorType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
+    THPGenerator_hash, /* tp_hash  */
     nullptr, /* tp_call */
     nullptr, /* tp_str */
     nullptr, /* tp_getattro */
@@ -336,8 +386,8 @@ static PyTypeObject THPGeneratorType = {
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
-    nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    THPGenerator_richcompare, /* tp_richcompare */
+    offsetof(THPGenerator, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPGenerator_methods, /* tp_methods */
@@ -354,6 +404,16 @@ static PyTypeObject THPGeneratorType = {
 };
 
 bool THPGenerator_init(PyObject* module) {
+  // Set OpaqueBaseMeta as the metaclass so Generator can be registered as an
+  // opaque type for FX tracing (same pattern as ProcessGroup).
+  PyObject* opaque_module = PyImport_ImportModule("torch._opaque_base");
+  TORCH_CHECK(opaque_module, "Failed to import torch._opaque_base");
+  PyObject* opaque_base_meta = PyObject_GetAttrString(opaque_module, "OpaqueBaseMeta");
+  TORCH_CHECK(opaque_base_meta, "Failed to get OpaqueBaseMeta");
+  Py_SET_TYPE(&THPGeneratorType, (PyTypeObject*)opaque_base_meta);
+  // opaque_base_meta ref is now owned by THPGeneratorType.ob_type
+  Py_DECREF(opaque_module);
+
   THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
   if (PyType_Ready(&THPGeneratorType) < 0)
     return false;
@@ -404,6 +464,7 @@ PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   if (obj) {
     auto g = reinterpret_cast<THPGenerator*>(obj);
     new (&g->cdata) Generator(std::move(gen));
+    g->weakreflist = nullptr;
     set_pyobj(g->cdata, obj);
   }
   return obj;

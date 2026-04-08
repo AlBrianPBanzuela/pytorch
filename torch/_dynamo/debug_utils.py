@@ -684,9 +684,7 @@ class InputReader:
         self.args.append(None)
 
     def generator(self, device_type: str, device_index: int) -> Any:
-        from torch._prims.rng_prims import OpaqueGenerator
-
-        gen = OpaqueGenerator(torch.cuda.default_generators[device_index].clone_state())
+        gen = torch.cuda.default_generators[device_index].clone_state()
         self.args.append(gen)
         return gen
 
