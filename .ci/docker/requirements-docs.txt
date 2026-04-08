@@ -2,11 +2,9 @@ sphinx==7.2.6
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 7.2.6
 
-git+https://github.com/pytorch/pytorch_sphinx_theme.git@c222c6204225e8cd9bb01e9fe59c61bdedd622b9#egg=pytorch_sphinx_theme2
-
-#pytorch_sphinx_theme2==0.4.7
+#pytorch_sphinx_theme2==0.4.8
 #Description: This is needed to generate PyTorch docs
-#Pinned versions: 0.4.7
+#Pinned versions: 0.4.8
 
 # TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
 # but it doesn't seem to work and hangs around idly. The initial thought that it is probably
