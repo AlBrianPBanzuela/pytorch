@@ -21435,9 +21435,9 @@ op_db: list[OpInfo] = [
            skips=(
                # "dot_xpu_mkl" not implemented for 'Long', torch-xpu-ops: #3247
                DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive",
-                            device_type="xpu", dtypes=torch.int64),
+                            device_type="xpu", dtypes=(torch.int64,)),
                DecorateInfo(unittest.skip("Skipped! torch-xpu-ops #3247"), 'TestCommon',
-                            'test_noncontiguous_samples', device_type='xpu', dtypes=torch.int64))),
+                            'test_noncontiguous_samples', device_type='xpu', dtypes=(torch.int64,)))),
     OpInfo('tensordot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
