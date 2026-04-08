@@ -396,6 +396,14 @@ bool THPGenerator_init(PyObject* module) {
   THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
   if (PyType_Ready(&THPGeneratorType) < 0)
     return false;
+  // PyType_Ready inherits __module__ from the metaclass (OpaqueBaseMeta lives
+  // in torch._opaque_base). Override it so pickle can find the class at
+  // torch._C.Generator.
+  PyObject* module_name = PyUnicode_FromString("torch._C");
+  if (!module_name)
+    return false;
+  PyDict_SetItemString(THPGeneratorType.tp_dict, "__module__", module_name);
+  Py_DECREF(module_name);
   Py_INCREF(&THPGeneratorType);
   PyModule_AddObject(
       module, "Generator", reinterpret_cast<PyObject*>(&THPGeneratorType));

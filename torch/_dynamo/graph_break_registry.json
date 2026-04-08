@@ -3859,14 +3859,6 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
-    },
-    {
-      "Gb_type": "Generator",
-      "Context": "Generator objects as inputs",
-      "Explanation": "torch.Generator is not supported as an input to compiled functions.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
     }
   ],
   "GB2078": [
