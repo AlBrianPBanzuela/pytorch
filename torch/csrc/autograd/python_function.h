@@ -146,7 +146,7 @@ struct THPFunction {
   // for it.  We can't enforce this directly in the constructor of
   // THPFunction though, because there's no way to keep it live long enough
   // to save an owning reference to PyNode into the grad_fn of a Variable.
-  std::weak_ptr<torch::autograd::PyNode> cdata;
+  c10::weak_intrusive_ptr<torch::autograd::PyNode> cdata{c10::intrusive_ptr<torch::autograd::PyNode>()};
 };
 
 bool THPFunction_initModule(PyObject* module);
