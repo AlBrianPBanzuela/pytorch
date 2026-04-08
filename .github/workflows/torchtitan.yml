@@ -1,6 +1,9 @@
 name: torchtitan-test
 
 on:
+  pull_request:
+    paths:
+      - .github/ci_commit_pins/torchtitan.txt‎
   push:
     branches:
       - main
