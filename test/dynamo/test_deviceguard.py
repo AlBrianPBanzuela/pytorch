@@ -7,6 +7,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.device_interface import CudaInterface, DeviceGuard
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_utils import TEST_XPU
 
 
 class TestDeviceGuard(torch._dynamo.test_case.TestCase):
@@ -46,7 +47,7 @@ class TestDeviceGuard(torch._dynamo.test_case.TestCase):
         self.assertEqual(device_guard.idx, None)
 
 
-@unittest.skipIf(not TEST_CUDA, "No CUDA available.")
+@unittest.skipIf(not TEST_CUDA and not TEST_XPU, "No CUDA and XPU available.")
 class TestCUDADeviceGuard(torch._dynamo.test_case.TestCase):
     """
     Unit tests for the DeviceGuard class using a CudaInterface.
@@ -58,26 +59,35 @@ class TestCUDADeviceGuard(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
     def test_device_guard(self):
-        current_device = torch.cuda.current_device()
+        current_device = torch.cuda.current_device() if TEST_CUDA else torch.xpu.current_device()
 
         device_guard = DeviceGuard(self.device_interface, 1)
 
         with device_guard as _:
-            self.assertEqual(torch.cuda.current_device(), 1)
+            if TEST_CUDA:
+                self.assertEqual(torch.cuda.current_device(), 1)
+            else:
+                self.assertEqual(torch.xpu.current_device(), 1)
             self.assertEqual(device_guard.prev_idx, 0)
             self.assertEqual(device_guard.idx, 1)
 
-        self.assertEqual(torch.cuda.current_device(), current_device)
+        if TEST_CUDA:
+            self.assertEqual(torch.cuda.current_device(), current_device)
+        else:
+            self.assertEqual(torch.xpu.current_device(), current_device)
         self.assertEqual(device_guard.prev_idx, 0)
         self.assertEqual(device_guard.idx, 1)
 
     def test_device_guard_no_index(self):
-        current_device = torch.cuda.current_device()
+        current_device = torch.cuda.current_device() if TEST_CUDA else torch.xpu.current_device()
 
         device_guard = DeviceGuard(self.device_interface, None)
 
         with device_guard as _:
-            self.assertEqual(torch.cuda.current_device(), current_device)
+            if TEST_CUDA:
+                self.assertEqual(torch.cuda.current_device(), current_device)
+            else:
+                self.assertEqual(torch.xpu.current_device(), current_device)
             self.assertEqual(device_guard.prev_idx, -1)
             self.assertEqual(device_guard.idx, None)
 
