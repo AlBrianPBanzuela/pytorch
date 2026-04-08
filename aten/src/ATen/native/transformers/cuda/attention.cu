@@ -489,9 +489,6 @@ _flash_attention_forward_impl(
     std::optional<int64_t> num_splits
     ) {
 #if defined(USE_FLASH_ATTENTION)
-  TORCH_CHECK(
-      !num_splits.has_value(),
-      "num_splits requires FA3. Register FA3 with `register_flash_attention_fa3()` to set num_splits.");
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).expect_float();
 
@@ -554,7 +551,8 @@ _flash_attention_forward_impl(
             window_right,
             softcap,
             return_debug_mask,
-            std::nullopt /*gen_*/);
+            std::nullopt /*gen_*/,
+            num_splits.value_or(0));
   } else {
     std::tie(
         output,
