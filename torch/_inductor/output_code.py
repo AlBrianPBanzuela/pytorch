@@ -490,6 +490,7 @@ class CompiledFxGraph(OutputCode):
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
     _defers_input_alignment: bool = False
+    _original_gm: torch.fx.GraphModule | None = None
     # Lambda for FakeTensor warmup - returns output shapes given fake inputs
     compiled_meta: Callable[[Sequence[Any]], tuple[Any, ...]] | None = None
 
@@ -706,6 +707,8 @@ class CompiledFxGraph(OutputCode):
         # warmup where we compile with FakeTensors to pre-populate the
         # cache, then run with real tensors later.
         if self._has_fake_tensor_inputs(inputs):
+            if self.compiled_meta is None:
+                raise RuntimeError("compiled_meta is not set")
             return self.compiled_meta(inputs)
 
         if (

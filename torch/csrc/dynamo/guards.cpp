@@ -287,13 +287,11 @@ std::string TensorCheck::check_verbose(
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
                 << v.dtype().toScalarType();
     return fail_reason.str();
-  }
-  else if (device_index_ != v.device().index()) {
+  } else if (device_index_ != v.device().index()) {
     fail_reason << "Tensor device index mismatch. Expected device index to be "
                 << device_index_ << ", actual " << v.device().index();
     return fail_reason.str();
-  }
-  else if (requires_grad_ != v.requires_grad()) {
+  } else if (requires_grad_ != v.requires_grad()) {
     // return fmt::format("tensor requires_grad mismatch. expected {}",
     // requires_grad_);
     fail_reason << "requires_grad mismatch. expected requires_grad="
