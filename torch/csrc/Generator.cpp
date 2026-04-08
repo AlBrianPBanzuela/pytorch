@@ -364,9 +364,7 @@ bool THPGenerator_init(PyObject* module) {
   auto opaque_base_meta =
       THPObjectPtr(PyObject_GetAttrString(opaque_module, "OpaqueBaseMeta"));
   TORCH_CHECK(opaque_base_meta, "Failed to get OpaqueBaseMeta");
-  Py_SET_TYPE(&THPGeneratorType, (PyTypeObject*)opaque_base_meta.get());
-  // Prevent THPObjectPtr from decref-ing; the ref is now owned by ob_type.
-  opaque_base_meta.release();
+  Py_SET_TYPE(&THPGeneratorType, (PyTypeObject*)opaque_base_meta.release());
 
   THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
   if (PyType_Ready(&THPGeneratorType) < 0)
