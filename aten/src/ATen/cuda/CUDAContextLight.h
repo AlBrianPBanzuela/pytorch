@@ -9,6 +9,8 @@
 #include <cusparse.h>
 #include <cublas_v2.h>
 
+// cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
+// added bf16 support
 #include <cublasLt.h>
 
 #ifdef CUDART_VERSION
@@ -83,7 +85,7 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
-TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
+TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();

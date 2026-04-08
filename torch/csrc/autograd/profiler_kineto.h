@@ -31,7 +31,8 @@ struct TORCH_API KinetoEvent {
   uint8_t activityType() const;
   uint64_t fwdThreadId() const;
   bool hasShapes() const;
-  const c10::ArrayRef<std::vector<int64_t>> shapes() const;
+  const c10::ArrayRef<torch::profiler::impl::shape> shapes() const;
+  const c10::ArrayRef<torch::profiler::impl::shape> strides() const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
   bool hasConcreteInputs() const;
@@ -58,9 +59,16 @@ struct TORCH_API KinetoEvent {
   bool isAsync() const;
   uint64_t correlationId() const;
   uint64_t linkedCorrelationId() const;
+  uint32_t flowId() const;
+  uint32_t flowType() const;
+  bool flowStart() const;
+  int64_t externalId() const;
   int64_t deviceResourceId() const;
   std::string backend() const;
   bool isPythonFunction() const;
+  int64_t pythonId() const;
+  int64_t pythonParentId() const;
+  int64_t pythonModuleId() const;
   int64_t cudaElapsedUs() const;
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
@@ -75,7 +83,8 @@ struct TORCH_API KinetoEvent {
   std::vector<std::string> python_stack_;
 
   // Copy fields from result so we can return ArrayRefs.
-  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<torch::profiler::impl::shape> shapes_;
+  std::vector<torch::profiler::impl::shape> strides_;
   std::vector<std::string> dtypes_;
   std::vector<c10::IValue> concrete_inputs_;
   std::unordered_map<std::string, c10::IValue> kwinputs_;
@@ -179,9 +188,13 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+using ActivityFilter = std::unordered_map<
+    torch::profiler::impl::ActivityType,
+    std::unordered_set<std::string>>;
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities);
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter = {});
 
 TORCH_API void toggleCollectionDynamic(
     const bool enable,

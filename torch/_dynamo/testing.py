@@ -207,19 +207,19 @@ def debug_insert_nops(
 
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
+        from .compile_options import DynamoCompileOptions
+
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
-            export=False,
-            export_constraints=[],
+            compile_options=DynamoCompileOptions(),
             frame_state={"_id": 0},
             # TODO: shouldn't this be f_locals/f_globals from frame?
             local_scope=locals(),
             global_scope=globals(),
             f_code=frame.f_code,
             torch_function_mode_stack=[],
-            package=None,
         )
 
         return wrap_guarded_code(
@@ -450,7 +450,11 @@ def rand_strided(
             sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
         )
     if dtype.is_floating_point:
-        if dtype.itemsize == 1:
+        if dtype == torch.float4_e2m1fn_x2:
+            buffer = torch.randint(
+                0, 256, (needed_size,), dtype=torch.uint8, device=device
+            ).view(torch.float4_e2m1fn_x2)
+        elif dtype.itemsize == 1:
             """
             normal distribution kernel is not implemented for fp8..
             Workaround that by creating a fp16 tensor and then cast.
@@ -600,6 +604,7 @@ def _testing_capture_invoke_subgraph_inductor_compile_gms() -> Generator[
         # captured_gms will contain the list of captured graph modules
     """
     global _testing_invoke_subgraph_inductor_compile_captured_gms
+    # pyrefly: ignore [implicit-any]
     _testing_invoke_subgraph_inductor_compile_captured_gms = []
     try:
         yield _testing_invoke_subgraph_inductor_compile_captured_gms
