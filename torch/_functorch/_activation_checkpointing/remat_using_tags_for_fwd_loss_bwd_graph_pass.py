@@ -1,7 +1,6 @@
 """AC rematerialize pass: Duplicates recompute nodes for backward, then DCE removes unused forward versions."""
 
 import logging
-from dataclasses import dataclass
 from typing import Any, overload
 
 import torch
@@ -18,14 +17,6 @@ from torch._functorch.partitioners import (
 
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _BackwardRegionData:
-    use_phase_only: bool
-    bwd_start: int | None
-    bwd_node_set: set[fx.Node]
-    num_regions: int
 
 
 def is_impure_node_for_dce(node: fx.Node) -> bool:
@@ -66,7 +57,7 @@ def _has_user_phase_annotation(gm: fx.GraphModule) -> bool:
 
 def _collect_backward_region_data(
     gm: fx.GraphModule,
-) -> _BackwardRegionData:
+) -> tuple[bool, int | None, set[fx.Node], int]:
     use_phase_only = _has_user_phase_annotation(gm)
     bwd_start: int | None = None
     bwd_node_set: set[fx.Node] = set()
@@ -83,12 +74,7 @@ def _collect_backward_region_data(
             num_regions += 1
         in_backward = is_bwd
 
-    return _BackwardRegionData(
-        use_phase_only=use_phase_only,
-        bwd_start=bwd_start,
-        bwd_node_set=bwd_node_set,
-        num_regions=num_regions,
-    )
+    return use_phase_only, bwd_start, bwd_node_set, num_regions
 
 
 def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModule:
@@ -108,22 +94,24 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     if not has_recomputable_ops(gm):
         return gm
 
-    backward_region_data = _collect_backward_region_data(gm)
-    if backward_region_data.num_regions > 1:
-        if backward_region_data.use_phase_only:
+    use_phase_only, bwd_start, bwd_node_set, num_regions = (
+        _collect_backward_region_data(gm)
+    )
+    if num_regions > 1:
+        if use_phase_only:
             raise RuntimeError(
-                f"Detected {backward_region_data.num_regions} disjoint backward regions annotated with "
+                f"Detected {num_regions} disjoint backward regions annotated with "
                 'phase: "backward" but remat only supports a single backward region. '
                 "Please ensure only one contiguous region is annotated."
             )
         raise RuntimeError(
-            f"Detected {backward_region_data.num_regions} disjoint backward regions in the graph but remat only supports "
+            f"Detected {num_regions} disjoint backward regions in the graph but remat only supports "
             "a single backward region. This can happen when non-backward computation appears "
             "between backward sections. Please annotate the real backward with "
             'torch.fx.traceback.annotate({"phase": "backward"}).'
         )
 
-    if backward_region_data.bwd_start is None:
+    if bwd_start is None:
         return gm
 
     order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
@@ -145,7 +133,7 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     recomputed_nodes: dict[fx.Node, fx.Node] = {}
 
     # Insert forward nodes
-    for node in list(gm.graph.nodes)[: backward_region_data.bwd_start]:
+    for node in list(gm.graph.nodes)[:bwd_start]:
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     @overload
@@ -176,8 +164,8 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
         return deps
 
     # Insert backward nodes
-    for node in list(gm.graph.nodes)[backward_region_data.bwd_start :]:
-        if node not in backward_region_data.bwd_node_set:
+    for node in list(gm.graph.nodes)[bwd_start:]:
+        if node not in bwd_node_set:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
             continue
         # Gather all deps that need to be recomputed for this node
