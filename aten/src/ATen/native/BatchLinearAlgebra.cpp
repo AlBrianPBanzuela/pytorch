@@ -3975,6 +3975,8 @@ Tensor& linalg_solve_triangular_out(
     const bool conj_physical = A.is_conj() ^ B.is_conj();
 
     // Compute [-1]B[*]*
+    // FIXME: can be deterred with `alpha` enabled in triangular_solve kernel,
+    // to be able to solve (A, alpha * B)
     if (neg_physical) { B.neg_(); }
     if (conj_physical) { B.conj_physical_(); }
 
