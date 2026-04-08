@@ -312,11 +312,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslator",
     ) -> "VariableTracker":
-        from .constant import ConstantVariable
+        from .constant import CONSTANT_VARIABLE_TRUE
 
-        # bool() on a class consults the metaclass __bool__ (e.g. type(cls).__bool__).
-        # Since the class object is a compile-time constant, evaluate directly.
-        return ConstantVariable.create(bool(self.value))
+        # bool() on a class consults the metaclass __bool__.
+        # If the metaclass is the default `type`, all classes are truthy.
+        metaclass = type(self.value)
+        if hasattr(metaclass, "__bool__") and metaclass is not type:
+            return self.call_method(tx, "__bool__", [], {})
+        return CONSTANT_VARIABLE_TRUE
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
@@ -1407,7 +1410,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .constant import CONSTANT_VARIABLE_TRUE, ConstantVariable
         from .tensor import SymNodeVariable
 
-        if self.call_obj_hasattr(tx, "__bool__").value:
+        if self._maybe_get_baseclass_method("__bool__"):
             result = self.call_method(tx, "__bool__", [], {})
             if result.is_python_constant():
                 result_value = result.as_python_constant()
@@ -1420,15 +1423,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         ],
                     )
             return result
-        elif self.call_obj_hasattr(tx, "__len__").value:
+        if self._maybe_get_baseclass_method("__len__"):
             length = self.call_method(tx, "__len__", [], {})
             if length.is_python_constant():
                 return ConstantVariable.create(length.as_python_constant() > 0)
+            # SymNodeVariable arises when __len__ returns a symbolic integer
+            # (e.g. under dynamic shapes), so we emit a symbolic boolean.
             if isinstance(length, SymNodeVariable):
                 return SymNodeVariable.create(tx, length.as_proxy() > 0)
             return None
-        else:
-            return CONSTANT_VARIABLE_TRUE
+        return CONSTANT_VARIABLE_TRUE
 
     def nb_index_impl(
         self,
