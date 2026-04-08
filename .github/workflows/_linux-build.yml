@@ -584,7 +584,7 @@ jobs:
 
       - name: Store build artifacts
         if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true')
-        uses: pytorch/pytorch/.github/actions/upload-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/upload-build-artifacts@huydhn/testing-179654
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
