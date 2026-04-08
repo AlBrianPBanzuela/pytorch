@@ -3573,8 +3573,6 @@ class TestOpaqueGenerator(TestCase):
         """make_fx should trace through Generator inputs as opaque values."""
         from torch._prims.rng_prims import graphsafe_run_with_rng_state
 
-        torch.cuda.init()
-
         class M(torch.nn.Module):
             def forward(self, q, k, v, rng_state):
                 out = graphsafe_run_with_rng_state(
@@ -3628,6 +3626,29 @@ class TestOpaqueGenerator(TestCase):
         gen3 = torch.cuda.default_generators[0].clone_state()
         actual = gm0(q, k, v, gen3)
         self.assertEqual(actual, expected)
+
+    def test_make_fx_randn_with_generator(self):
+        """make_fx should trace torch.randn with a Generator input."""
+
+        def fn(a, generator):
+            return torch.randn([20, 20], generator=generator, device=a.device)
+
+        gen = torch.Generator("cuda")
+        gm = make_fx(fn, tracing_mode="real")(torch.randn(4, device="cuda"), gen)
+
+        # Generator is baked in as a get_attr constant (not a placeholder input)
+        # because torch.randn passes it directly to C++ without going through
+        # proxy dispatch. The generator placeholder has 0 users.
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(False)),
+            """\
+class fn(torch.nn.Module):
+    def forward(self, a_1: "f32[4]", generator_1):
+        _opaque_obj0 = self._opaque_obj0
+        randn: "f32[20, 20]" = torch.ops.aten.randn.generator([20, 20], generator = _opaque_obj0, device = device(type='cuda', index=0), pin_memory = False);  _opaque_obj0 = None
+        return randn
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":

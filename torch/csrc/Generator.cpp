@@ -33,9 +33,7 @@ PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
 
 static void THPGenerator_dealloc(PyObject* _self) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
-  if (self->weakreflist != nullptr) {
-    PyObject_ClearWeakRefs(_self);
-  }
+  PyObject_ClearWeakRefs(_self);
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
@@ -55,7 +53,6 @@ static PyObject* THPGenerator_pynew(
 
   THPGeneratorPtr self(
       reinterpret_cast<THPGenerator*>(type->tp_alloc(type, 0)));
-  self->weakreflist = nullptr;
 
   c10::DeviceType device_type = device.type();
   if (device_type == at::kCPU) {
@@ -283,29 +280,6 @@ static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_richcompare(
-    PyObject* self,
-    PyObject* other,
-    int op) {
-  if (op == Py_EQ) {
-    if (self == other) {
-      Py_RETURN_TRUE;
-    }
-    Py_RETURN_FALSE;
-  }
-  if (op == Py_NE) {
-    if (self != other) {
-      Py_RETURN_TRUE;
-    }
-    Py_RETURN_FALSE;
-  }
-  Py_RETURN_NOTIMPLEMENTED;
-}
-
-static Py_hash_t THPGenerator_hash(PyObject* self) {
-  return reinterpret_cast<Py_hash_t>(self);
-}
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
     {"device",
@@ -353,7 +327,7 @@ static PyTypeObject THPGeneratorType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    THPGenerator_hash, /* tp_hash  */
+    nullptr, /* tp_hash  */
     nullptr, /* tp_call */
     nullptr, /* tp_str */
     nullptr, /* tp_getattro */
@@ -364,7 +338,7 @@ static PyTypeObject THPGeneratorType = {
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
-    THPGenerator_richcompare, /* tp_richcompare */
+    nullptr, /* tp_richcompare */
     offsetof(THPGenerator, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
@@ -384,14 +358,15 @@ static PyTypeObject THPGeneratorType = {
 bool THPGenerator_init(PyObject* module) {
   // Set OpaqueBaseMeta as the metaclass so Generator can be registered as an
   // opaque type for FX tracing (same pattern as ProcessGroup).
-  PyObject* opaque_module = PyImport_ImportModule("torch._opaque_base");
+  auto opaque_module =
+      THPObjectPtr(PyImport_ImportModule("torch._opaque_base"));
   TORCH_CHECK(opaque_module, "Failed to import torch._opaque_base");
-  PyObject* opaque_base_meta =
-      PyObject_GetAttrString(opaque_module, "OpaqueBaseMeta");
+  auto opaque_base_meta =
+      THPObjectPtr(PyObject_GetAttrString(opaque_module, "OpaqueBaseMeta"));
   TORCH_CHECK(opaque_base_meta, "Failed to get OpaqueBaseMeta");
-  Py_SET_TYPE(&THPGeneratorType, (PyTypeObject*)opaque_base_meta);
-  // opaque_base_meta ref is now owned by THPGeneratorType.ob_type
-  Py_DECREF(opaque_module);
+  Py_SET_TYPE(&THPGeneratorType, (PyTypeObject*)opaque_base_meta.get());
+  // Prevent THPObjectPtr from decref-ing; the ref is now owned by ob_type.
+  opaque_base_meta.release();
 
   THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
   if (PyType_Ready(&THPGeneratorType) < 0)
@@ -399,11 +374,12 @@ bool THPGenerator_init(PyObject* module) {
   // PyType_Ready inherits __module__ from the metaclass (OpaqueBaseMeta lives
   // in torch._opaque_base). Override it so pickle can find the class at
   // torch._C.Generator.
-  PyObject* module_name = PyUnicode_FromString("torch._C");
+  auto module_name = THPObjectPtr(PyUnicode_FromString("torch._C"));
   if (!module_name)
     return false;
-  PyDict_SetItemString(THPGeneratorType.tp_dict, "__module__", module_name);
-  Py_DECREF(module_name);
+  if (PyDict_SetItemString(
+          THPGeneratorType.tp_dict, "__module__", module_name) < 0)
+    return false;
   Py_INCREF(&THPGeneratorType);
   PyModule_AddObject(
       module, "Generator", reinterpret_cast<PyObject*>(&THPGeneratorType));
@@ -451,7 +427,6 @@ PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   if (obj) {
     auto g = reinterpret_cast<THPGenerator*>(obj);
     new (&g->cdata) Generator(std::move(gen));
-    g->weakreflist = nullptr;
     set_pyobj(g->cdata, obj);
   }
   return obj;

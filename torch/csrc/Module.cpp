@@ -2382,7 +2382,7 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("has_spectral", has_spectral));
 
   // force ATen to initialize because it handles
-  // setting up TH Errors so that they throw C++ exceptions // @allow-raw-throw
+  // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
   // Automatically translate errors thrown from pybind11 functions

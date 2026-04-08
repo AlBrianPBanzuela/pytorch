@@ -1542,12 +1542,14 @@ class VariableBuilder:
                 source=self.source,
             )
         elif type(value) is torch._C.Generator:
-            # TODO(shangdiy): Generator is registered as an opaque reference
-            # type for make_fx tracing. Other opaque reference types like
-            # DeviceMesh/ProcessGroup go through the TorchScriptObjectVariable
-            # path below, but that path calls maybe_to_fake_obj which doesn't
-            # handle Generator yet. Supporting Generator in dynamo would require
-            # registering a fake class for it.
+            # Generator is registered as an opaque reference type for make_fx
+            # tracing (graphsafe_run_with_rng_state). It can flow through
+            # TorchScriptObjectVariable/FakeScriptObject, but:
+            # 1. Ops like torch.randn pass the generator directly to C++
+            #    without going through proxy dispatch, so the FakeScriptObject
+            #    (not a real Generator) causes "GeneratorImpl with nullptr".
+            # 2. Inductor's placeholder handler only supports Generator inputs
+            #    connected to graphsafe_run_with_rng_state.
             unimplemented(
                 gb_type="Generator",
                 context="Generator objects as inputs",
