@@ -1278,6 +1278,33 @@ class LazyConstantVariableTests(TestCase):
         x2 = torch.tensor([5, 6])
         self.assertEqual(opt_fn(x2), fn(x2))
 
+    def test_dict_get_or_create_with_tuple_key_identity(self):
+        """Dict get-or-create with a tuple key containing lazy constant strings.
+
+        When a tuple of lazy constant strings is used as a dict key in a
+        get-or-create pattern and the value's constructor causes a graph break,
+        the second lookup must return the same object. Regression test for a bug
+        where get_python_hash() on lazy constants inside tuples installed only
+        TYPE_MATCH guards, causing the resume frame to miss the existing entry.
+        """
+        cache = {}
+
+        def get_or_create(k1, k2):
+            key = (k1, k2)
+            if key not in cache:
+                cache[key] = torch.library.Library("aten", "IMPL", k2)
+            return cache[key]
+
+        def fn():
+            cache.pop(("test", "CPU"), None)
+            val1 = get_or_create("test", "CPU")
+            val2 = get_or_create("test", "CPU")
+            return val1 is val2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertTrue(opt_fn())
+        cache.clear()
+
     def test_dict_mutation_no_recompile_on_unused_key_change(self):
         """Test that mutating a dict doesn't guard on unused keys.
 

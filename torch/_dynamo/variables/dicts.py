@@ -652,18 +652,24 @@ class ConstDictVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and args[0].is_python_constant():
-            guard_fn = (
-                type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
-            )
-            install_guard(
-                self.make_guard(
-                    functools.partial(
-                        guard_fn,
-                        key=args[0].as_python_constant(),
+        if args[0].source is None:
+            # Peek at the key value to install a DICT_CONTAINS/NOT_CONTAINS
+            # guard.  try_peek_constant avoids realizing lazy constants.
+            can_peek, _is_unrealized, peeked_value = args[0].try_peek_constant()
+            if can_peek:
+                guard_fn = (
+                    type(self).CONTAINS_GUARD
+                    if contains
+                    else type(self).NOT_CONTAINS_GUARD
+                )
+                install_guard(
+                    self.make_guard(
+                        functools.partial(
+                            guard_fn,
+                            key=peeked_value,
+                        )
                     )
                 )
-            )
         elif args[0].source:
             if contains:
                 self.realize_key_vt(args[0])
