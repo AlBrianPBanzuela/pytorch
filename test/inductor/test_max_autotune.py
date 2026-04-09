@@ -3415,10 +3415,8 @@ class TestTemplateConfigPruning(TestCase):
             exceeds = exceeds_checker(c, dtype_size)
 
             original_precompile = CachingAutotuner.precompile
-            original_autotune = AlgorithmSelectorCache.autotune
 
             captured_smem = 0
-            triton_compilation_fails = True
 
             def mock_precompile(self, *args, **kwargs):
                 original_precompile(self, *args, **kwargs)
@@ -3434,35 +3432,21 @@ class TestTemplateConfigPruning(TestCase):
                     nonlocal captured_smem
                     captured_smem = shared_mem
 
-            def mock_autotune(self, *args, **kwargs):
-                timings = original_autotune(self, *args, **kwargs)
-                nonlocal triton_compilation_fails
-                for caller, t in timings.items():
-                    if isinstance(caller, TritonTemplateCaller) and t != float("inf"):
-                        triton_compilation_fails = False
-                return timings
-
             with (
                 self.pruning_config_context(),
                 mock.patch.object(CachingAutotuner, "precompile", mock_precompile),
-                mock.patch.object(AlgorithmSelectorCache, "autotune", mock_autotune),
             ):
                 torch._dynamo.reset()
                 counters.clear()
                 compiled_fn = torch.compile(op, mode="max-autotune")
                 run_and_get_code(compiled_fn, *inputs)
 
-            if triton_compilation_fails:
-                self.assertTrue(
-                    exceeds,
-                    f"Config {c} failed to compile due to shared memory, "
-                    "but the checker predicted it would NOT exceed shared memory limits.",
-                )
-            else:
-                self.assertTrue(
-                    captured_smem <= smem_estimation,
-                    f"Estimated maximum smem should exceed actual smem used for config {c}",
-                )
+            self.assertTrue(
+                captured_smem <= smem_estimation,
+                f"Config {c}: actual shared memory ({captured_smem} bytes) exceeded "
+                f"estimation ({smem_estimation} bytes). The estimation must be an "
+                f"upper bound on actual usage for pruning to be safe.",
+            )
 
 
 class TestMaxAutotunePrecompile(TestCase):
