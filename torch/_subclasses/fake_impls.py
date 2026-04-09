@@ -1035,7 +1035,12 @@ def slice_forward(
 
         actual_start = start if start is not None else 0
         actual_end = end if end is not None else sizes[dim]
-        cache_key = (to_expr(actual_start), to_expr(actual_end), to_expr(sizes[dim]))
+        cache_key = (
+            fake_mode.epoch,
+            to_expr(actual_start),
+            to_expr(actual_end),
+            to_expr(sizes[dim]),
+        )
         if cache_key in shape_env._slice_size_cache:
             new_size = shape_env.create_symintnode(
                 shape_env._slice_size_cache[cache_key], hint=None
