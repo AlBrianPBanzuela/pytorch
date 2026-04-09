@@ -77,6 +77,8 @@ def _check_cuda_bindings(result: Any) -> Any:
     helper unpacks the tuple, raises on non-success, and returns the
     outputs (``None`` for zero outputs, scalar for one, tuple otherwise).
     """
+    if not _HAS_CUDA_BINDINGS:
+        raise RuntimeError("cuda.bindings is not available")
     err, *out = result
     if (
         err
