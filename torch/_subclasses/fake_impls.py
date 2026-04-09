@@ -1041,14 +1041,15 @@ def slice_forward(
             to_expr(actual_end),
             to_expr(sizes[dim]),
         )
+        new_size = shape_env.create_unbacked_symint()
+        torch._check(new_size >= 0)
+        torch._check(new_size <= sizes[dim])
         if cache_key in shape_env._slice_size_cache:
-            new_size = shape_env.create_symintnode(
+            existing = shape_env.create_symintnode(
                 shape_env._slice_size_cache[cache_key], hint=None
             )
+            torch._check(new_size == existing)
         else:
-            new_size = shape_env.create_unbacked_symint()
-            torch._check(new_size >= 0)
-            torch._check(new_size <= sizes[dim])
             shape_env._slice_size_cache[cache_key] = new_size.node.expr
 
     # stride
