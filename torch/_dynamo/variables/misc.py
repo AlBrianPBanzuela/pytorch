@@ -745,9 +745,6 @@ class ComptimeVariable(VariableTracker):
     Dynamo compile time
     """
 
-    def python_type(self) -> type:
-        return type(torch._dynamo.comptime)
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError("comptime is special form")
 

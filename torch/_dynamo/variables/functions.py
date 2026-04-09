@@ -3273,9 +3273,6 @@ class TritonKernelVariable(VariableTracker):
     kernel_idx: int | None
     kernel_source: Source | None
 
-    def python_type(self) -> type:
-        return type(self.kernel)
-
     def __init__(
         self, kernel: Any, kernel_idx: int | None, grid: Any, **kwargs: Any
     ) -> None:
