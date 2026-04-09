@@ -2010,6 +2010,38 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(y.requires_grad)
         self.assertFalse(z.requires_grad)
 
+    def test_locals_traced_correctly_under_compile(self):
+        def fn(x):
+            if x.dim() > 2:
+                batch_size, seq_len, hidden_dim = x.shape
+                x = x.view(-1, hidden_dim)
+
+            x = x + 1
+
+            if "batch_size" in locals() and "seq_len" in locals():
+                x = x.view(batch_size, seq_len, -1)
+            return x
+
+        x = torch.randn(2, 3, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
+    def test_vars_traced_correctly_under_compile(self):
+        def fn(x):
+            if x.dim() > 2:
+                batch_size, seq_len, hidden_dim = x.shape
+                x = x.view(-1, hidden_dim)
+
+            x = x + 1
+
+            if "batch_size" in vars() and "seq_len" in vars():
+                x = x.view(batch_size, seq_len, -1)
+            return x
+
+        x = torch.randn(2, 3, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
     def test_abc_setattr(self):
         # tests that we correctly bail out of __setattr__ calls
 
@@ -4169,7 +4201,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         opt_fn(inp1, inp2, inp3, inp4, c)
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_torch_variable_type(self):
         # from torchvision
@@ -4849,11 +4881,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         model = SimpleModel().eval()
         input_tensor = torch.randn(1, 10, dtype=torch.float32)
         opt = torch.compile(model.eval(), backend="eager", fullgraph=True)
-        actual = opt(input_tensor)
         try:
             expected = model(input_tensor)
         except Exception as e:
-            raise unittest.SkipTest("eager failed, requires Python>=3.12") from e
+            raise unittest.SkipTest(
+                "eager failed, requires Python between 3.9 and 3.12"
+            ) from e
+        actual = opt(input_tensor)
         self.assertEqual(actual, expected)
 
     def test_invalid_seq_unpack(self):
@@ -5395,11 +5429,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         obj = A()
 
-        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
+        try:
             fn(obj)
+        except Exception as e:
+            orig_str = str(e)
+        self.assertIn("no arguments", orig_str)
 
-        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
+        try:
             torch.compile(backend="eager")(fn)(obj)
+        except Exception as e:
+            compiled_str = str(e)
+        self.assertEqual(orig_str, compiled_str)
 
     def test_super_staticmethod(self):
         class Parent:
@@ -7962,6 +8002,22 @@ SavedForBackwardsAOTOutput(idx=5)""",
         expected = torch.nn.functional.one_hot(a, 3)
         self.assertEqual(one_hot(a, 3), expected)
 
+    @unittest.expectedFailure
+    def test_method_dunder_dict_setitem(self):
+        # Reproducer for: getattr(obj, method_name).__dict__['key'] = value
+        # method.__dict__ is handled specially by CPython at C level (no
+        # tp_dictoffset, no Python-visible descriptor), which caused
+        # object.__getattribute__(method, "__dict__") to raise AttributeError.
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            getattr(self, self._testMethodName).__dict__["slow_test"] = True
+            return x.sin()
+
+        x = torch.randn(2)
+        _ = fn(x)
+        self.assertTrue(getattr(self, self._testMethodName).__dict__.get("slow_test"))
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
@@ -8018,7 +8074,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
     @skipIfHpu
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
     )
     def test_flash_attn_backward_mixed_strides(self, device):
