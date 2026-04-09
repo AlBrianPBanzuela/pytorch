@@ -924,7 +924,7 @@ kernel void grid_sampler_2d_backward_nearest(
     device AtomicType_t<T>* grad_input [[buffer(0)]],
     device T* grad_grid [[buffer(1)]],
     constant T* grad_output [[buffer(2)]],
-    constant T* input [[buffer(3)]],
+    constant T* input [[buffer(3)]] __attribute__((unused)),
     constant T* grid [[buffer(4)]],
     constant GridSamplerBackwardParams<4>& params [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
