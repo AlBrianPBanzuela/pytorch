@@ -40,7 +40,7 @@ from logging import getLogger
 from typing import Any
 
 import torch
-from torch.cuda._utils import _check_cuda_bindings as _check_cuda, _HAS_CUDA_BINDINGS
+from torch.cuda._utils import _check_cuda_bindings, _HAS_CUDA_BINDINGS
 
 
 try:
@@ -90,7 +90,7 @@ def _get_tools_id(node: Any) -> int | None:
     global _tools_id_available
     if _tools_id_available is None:
         try:
-            tools_id = _check_cuda(
+            tools_id = _check_cuda_bindings(
                 _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
                     node
                 )
@@ -104,7 +104,7 @@ def _get_tools_id(node: Any) -> int | None:
             return None
         _tools_id_available = True
         return tools_id
-    return _check_cuda(
+    return _check_cuda_bindings(
         _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
             node
         )
@@ -113,7 +113,7 @@ def _get_tools_id(node: Any) -> int | None:
 
 def _get_capture_graph(stream: Any) -> Any:
     """Return the graph handle for the active capture, or None."""
-    status, _id, graph, _deps, _edge_data, _num_deps = _check_cuda(
+    status, _id, graph, _deps, _edge_data, _num_deps = _check_cuda_bindings(
         _cuda_runtime.cudaStreamGetCaptureInfo(  # pyrefly: ignore[missing-attribute]
             stream
         )
@@ -128,7 +128,7 @@ def _get_capture_graph(stream: Any) -> Any:
 
 def _get_node_count(graph: Any) -> int:
     """Return the number of nodes currently in the graph."""
-    _, num = _check_cuda(
+    _, num = _check_cuda_bindings(
         _cuda_runtime.cudaGraphGetNodes(  # pyrefly: ignore[missing-attribute]
             graph, numNodes=0
         )
@@ -237,7 +237,7 @@ def resolve_pending_annotations() -> None:
             _capture_graph = None
             return
 
-        nodes, num = _check_cuda(
+        nodes, num = _check_cuda_bindings(
             _cuda_runtime.cudaGraphGetNodes(  # pyrefly: ignore[missing-attribute]
                 graph, numNodes=num
             )
@@ -276,7 +276,7 @@ def resolve_pending_annotations() -> None:
                 continue
 
             node = nodes[i]
-            node_type = _check_cuda(
+            node_type = _check_cuda_bindings(
                 _cuda_runtime.cudaGraphNodeGetType(  # pyrefly: ignore[missing-attribute]
                     node
                 )
@@ -331,7 +331,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     exec_handle = _cuda_runtime.cudaGraphExec_t(  # pyrefly: ignore[missing-attribute]
         init_value=torch_cuda_graph.raw_cuda_graph_exec()
     )
-    exec_graph_id = _check_cuda(
+    exec_graph_id = _check_cuda_bindings(
         _cuda_runtime.cudaGraphExecGetId(  # pyrefly: ignore[missing-attribute]
             exec_handle
         )
