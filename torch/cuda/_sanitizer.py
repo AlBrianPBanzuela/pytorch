@@ -423,6 +423,10 @@ class EventHandler:
         self.syncs = StreamSynchronizations()
         self.seq_num: SeqNum = 0
         self.pending_reuse: dict[DataPtr, PendingReuse] = {}
+        # Errors detected in memory callbacks are deferred here because
+        # CallbackRegistry.fire_callbacks swallows exceptions.  They are
+        # drained and raised in the next __torch_dispatch__ call.
+        self.deferred_errors: list[SynchronizationError] = []
 
     def _handle_kernel_launch(
         self,
@@ -537,8 +541,10 @@ class EventHandler:
                     pending.dealloc_stack_trace,
                     alloc_stack_trace,
                 )
-                print(error, file=sys.stderr)
-                raise CUDASanitizerErrors([error])
+                # Cannot raise here — this runs inside
+                # CallbackRegistry.fire_callbacks which swallows exceptions.
+                # Defer the error to be raised on the next __torch_dispatch__.
+                self.deferred_errors.append(error)
 
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
         stack_trace = traceback.StackSummary.extract(
@@ -764,6 +770,12 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
             func._schema,
             argument_handler.tensor_aliases,
         )
+        # Drain any errors deferred from memory allocation/deallocation
+        # callbacks (which run inside CallbackRegistry.fire_callbacks and
+        # cannot propagate exceptions directly).
+        if self.event_handler.deferred_errors:
+            errors = list(errors) + self.event_handler.deferred_errors
+            self.event_handler.deferred_errors.clear()
         if errors:
             for error in errors:
                 print(error, file=sys.stderr)
