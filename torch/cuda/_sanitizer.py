@@ -519,9 +519,7 @@ class EventHandler:
     def _handle_event_wait(self, event: EventId, stream: StreamId) -> None:
         self.syncs.stream_wait_for_event(stream, event)
 
-    def _handle_memory_allocation(
-        self, data_ptr: DataPtr, stream: StreamId
-    ) -> None:
+    def _handle_memory_allocation(self, data_ptr: DataPtr, stream: StreamId) -> None:
         # Check for caching allocator reuse races: if this data_ptr was
         # recently freed, verify that the new allocation stream has a
         # happens-before relationship with all streams that previously
@@ -563,9 +561,7 @@ class EventHandler:
             stack_trace,
         )
 
-    def _handle_record_stream(
-        self, data_ptr: DataPtr, stream: StreamId
-    ) -> None:
+    def _handle_record_stream(self, data_ptr: DataPtr, stream: StreamId) -> None:
         """Handle tensor.record_stream(stream).
 
         The caching allocator guarantees it will not reuse a block's memory
@@ -576,9 +572,7 @@ class EventHandler:
         """
         self.recorded_streams.setdefault(data_ptr, set()).add(stream)
 
-    def _handle_memory_deallocation(
-        self, data_ptr: DataPtr, stream: StreamId
-    ) -> None:
+    def _handle_memory_deallocation(self, data_ptr: DataPtr, stream: StreamId) -> None:
         self.tensors_accessed.ensure_tensor_exists(data_ptr)
         # Condense the tensor's access history into a PendingReuse record so
         # we can detect races if the caching allocator hands this memory block
