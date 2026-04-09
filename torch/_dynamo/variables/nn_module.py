@@ -222,6 +222,19 @@ class NNModuleVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def bool_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        """nb_bool for nn.Module.
+
+        nn.Module itself has no __bool__ or __len__, so bare modules are always
+        truthy.  Subclasses like ModuleList/ModuleDict define __len__, so
+        bool(module) calls PyObject_IsTrue which falls through nb_bool (NULL)
+        to sq_length/mp_length.  We evaluate on the real module to capture this.
+        """
+        from .constant import ConstantVariable
+
+        mod = tx.output.get_submodule(self.module_key)
+        return ConstantVariable.create(bool(mod))
+
     def _wrap_submodule(
         self,
         tx: "InstructionTranslator",
@@ -819,15 +832,6 @@ class NNModuleVariable(VariableTracker):
             for name, submod in module.items():  # type: ignore[operator]
                 items_result.append(named_embed(name, submod))
             return ListIteratorVariable(items_result, mutation_type=ValueMutationNew())
-        elif name == "__len__":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return VariableTracker.build(tx, len(module))  # type: ignore[arg-type]
         elif name == "__iter__":
             return ListIteratorVariable(
                 self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
@@ -968,6 +972,11 @@ class NNModuleVariable(VariableTracker):
             return generic_call_method_helper(name)
         else:
             return super().call_method(tx, name, list(args), kwargs)
+
+    def sq_length(self, tx: "InstructionTranslator") -> "VariableTracker":
+        """Sequence length for container modules (e.g., nn.Sequential)."""
+        module = tx.output.get_submodule(self.module_key)
+        return VariableTracker.build(tx, len(module))  # type: ignore[arg-type]
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
