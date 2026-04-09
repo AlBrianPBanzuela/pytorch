@@ -1693,6 +1693,27 @@ class DictTests(torch._dynamo.test_case.TestCase):
         names_twice = [n.name for n in graph2.nodes]
         self.assertEqual(names_once, names_twice)
 
+    def test_canonical_graph_overlapping_unsqueeze_with_mutation(self):
+        # Placeholder reordering must not break synthetic base handling:
+        # when overlapping views are merged into a synthetic base, an output
+        # that was is_input must become alias_of_input so the view shape is
+        # reconstructed correctly.
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        base = torch.ones(10)
+        inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+        out_eager = f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+        base = torch.ones(10)
+        inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+        out_compiled = optf(*inputs)
+
+        self.assertEqual(out_eager, out_compiled)
+
 
 instantiate_parametrized_tests(DictTests)
 
