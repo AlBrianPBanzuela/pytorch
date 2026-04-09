@@ -1027,9 +1027,6 @@ def slice_forward(
 
         if shape_env is None:
             raise AssertionError("Must have shape_env to create symint")
-        new_size = shape_env.create_unbacked_symint()
-        torch._check(new_size >= 0)
-        torch._check(new_size <= sizes[dim])
 
         def to_expr(v: object) -> sympy.Expr:
             if isinstance(v, torch.SymInt):
@@ -1040,11 +1037,13 @@ def slice_forward(
         actual_end = end if end is not None else sizes[dim]
         cache_key = (to_expr(actual_start), to_expr(actual_end), to_expr(sizes[dim]))
         if cache_key in shape_env._slice_size_cache:
-            existing = shape_env.create_symintnode(
+            new_size = shape_env.create_symintnode(
                 shape_env._slice_size_cache[cache_key], hint=None
             )
-            torch._check(new_size == existing)
         else:
+            new_size = shape_env.create_unbacked_symint()
+            torch._check(new_size >= 0)
+            torch._check(new_size <= sizes[dim])
             shape_env._slice_size_cache[cache_key] = new_size.node.expr
 
     # stride
