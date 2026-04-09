@@ -24,7 +24,6 @@ import copy
 import dataclasses
 import enum
 import functools
-import importlib.machinery
 import inspect
 import itertools
 import logging
@@ -1543,21 +1542,6 @@ class VariableBuilder:
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
-            )
-        elif type(value) is torch._C.Generator:
-            # Generator is registered as an opaque reference type for make_fx
-            # tracing (graphsafe_run_with_rng_state). It can flow through
-            # TorchScriptObjectVariable/FakeScriptObject, but:
-            # 1. Ops like torch.randn pass the generator directly to C++
-            #    without going through proxy dispatch, so the FakeScriptObject
-            #    (not a real Generator) causes "GeneratorImpl with nullptr".
-            # 2. Inductor's placeholder handler only supports Generator inputs
-            #    connected to graphsafe_run_with_rng_state.
-            unimplemented(
-                gb_type="Generator",
-                context="Generator objects as inputs",
-                explanation="torch.Generator is not supported in dynamo.",
-                hints=[*graph_break_hints.SUPPORTABLE],
             )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
             from ..source import (
@@ -4312,28 +4296,23 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
-        elif isinstance(value, types.MethodType):
-            if isinstance(value.__self__, (type, abc.ABCMeta)):
-                # value is a classmethod
-                assert getattr(value.__self__, value.__func__.__name__) == value
-                cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
-                try:
-                    # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
-                except NotImplementedError:
-                    pass  # failthrough to unimplemented branch
-            else:
-                # Instance method — look up the VT for __self__ via side effects
-                obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
-                if obj_vt is not None:
-                    return torch._dynamo.variables.UserMethodVariable(
-                        value.__func__, obj_vt
-                    )
+        elif (
+            isinstance(value, types.MethodType)
+            # We only want to support sourceless class objects here
+            # An instance variable is not allowed and it should have source
+            and isinstance(value.__self__, (type, abc.ABCMeta))
+        ):
+            # value is a classmethod
+            assert getattr(value.__self__, value.__func__.__name__) == value
+            cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
+            try:
+                # pyrefly: ignore[bad-argument-type]
+                return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+            except NotImplementedError:
+                pass  # failthrough to unimplemented branch
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
-        ):
+        elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, re.Pattern):
             return ConstantLikeVariable(value)

@@ -2162,12 +2162,6 @@
     {
       "Gb_type": "Data-dependent branching",
       "Context": "attempted to jump with {value}",
-      "Explanation": "\"Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). \"             \"Dynamo does not support tracing dynamic control flow.\" + trace_info",
-      "Hints": []
-    },
-    {
-      "Gb_type": "Data-dependent branching",
-      "Context": "attempted to jump with {value}",
       "Explanation": "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.",
       "Hints": [
         "Use `torch.cond` to express dynamic control flow.",
@@ -3970,16 +3964,6 @@
       "Explanation": "torch.cond expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: cond(pred, cond_fn, body_fn, operands)",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB5526": [
-    {
-      "Gb_type": "Generator",
-      "Context": "Generator objects as inputs",
-      "Explanation": "torch.Generator is not supported in dynamo.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
