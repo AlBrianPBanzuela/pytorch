@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     gcIfJetson,
     get_cycles_per_ms,
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_FBCODE,
     IS_JETSON,
     IS_LINUX,
@@ -98,7 +99,7 @@ from torch.utils.viz._cycles import observe_tensor_cycles
 
 
 requiresCppContext = unittest.skipUnless(
-    IS_X86 and IS_LINUX, "cpp contexts are x86 linux only"
+    (IS_X86 or IS_ARM64) and IS_LINUX, "cpp contexts are linux x86/aarch64 only"
 )
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -362,6 +363,10 @@ print(t.is_pinned())
             if mem is not None:
                 torch.cuda.caching_allocator_delete(mem)
                 self.assertEqual(torch.cuda.memory_allocated(), prev)
+
+    def test_caching_allocator_alloc_negative_size(self):
+        with self.assertRaisesRegex(ValueError, "Invalid memory size"):
+            torch.cuda.memory.caching_allocator_alloc(-1024)
 
     def test_memory_stats(self):
         gc.collect()
@@ -4271,7 +4276,9 @@ class TestCudaAllocator(TestCase):
         x = torch.rand(64, device="cuda")
         self.assertIsNone(torch.cuda.memory._allocation_traceback(x.data_ptr()))
 
-    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipUnless(
+        (IS_X86 or IS_ARM64) and IS_LINUX, "linux x86/aarch64 only cpp unwinding"
+    )
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks  # @manual
 
@@ -4404,7 +4411,6 @@ class TestCudaAllocator(TestCase):
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
-    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_memory_plots(self):
         for context, stacks in (
             ("all", "all" if IS_LINUX else "python"),
@@ -4568,7 +4574,6 @@ class TestCudaAllocator(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @requiresCppContext
     def test_memory_plots_free_segment_stack(self):
         for context in ["alloc", "all", "state"]:
@@ -4883,6 +4888,51 @@ class TestCudaAllocator(TestCase):
                 "pinned_num_register_threads:1024"
             )
 
+        # Test throw_on_cudamalloc_oom config parsing - valid formats
+        torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:True")
+        torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:False")
+
+        # Test throw_on_cudamalloc_oom config parsing - invalid formats
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings("throw_on_cudamalloc_oom:maybe")
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "throw_on_cudamalloc_oom not supported")
+    @serialTest()
+    def test_throw_on_cudamalloc_oom(self):
+        """Test that throw_on_cudamalloc_oom + per_process_memory_fraction works correctly."""
+        torch.cuda.empty_cache()
+        device = torch._C._cuda_getDevice()
+        torch._C._cuda_resetAccumulatedMemoryStats(device)
+
+        try:
+            # Test 1: With rejection disabled (default), allocations should succeed
+            torch._C._accelerator_setAllocatorSettings("throw_on_cudamalloc_oom:False")
+            x = torch.empty(10 * 1024 * 1024, dtype=torch.int8, device="cuda")
+            del x
+            torch.cuda.empty_cache()
+
+            # Test 2: With throw_on_cudamalloc_oom enabled and a tight memory
+            # fraction, allocations that exceed the fraction limit should be
+            # preemptively rejected with OutOfMemoryError.
+            # Both settings must go through _accelerator_setAllocatorSettings so
+            # they are read from CUDAAllocatorConfig.
+            torch._C._accelerator_setAllocatorSettings(
+                "throw_on_cudamalloc_oom:True,per_process_memory_fraction:0.01"
+            )
+
+            with self.assertRaises(torch.cuda.OutOfMemoryError):
+                torch.empty(1024 * 1024 * 1024, dtype=torch.int8, device="cuda")
+
+            # Check that rejection counter was incremented
+            stats = torch.cuda.memory_stats()
+            self.assertGreater(stats["num_oom_rejections"], 0)
+
+        finally:
+            torch.cuda.empty_cache()
+            torch._C._accelerator_setAllocatorSettings(
+                "throw_on_cudamalloc_oom:False,per_process_memory_fraction:1.0"
+            )
+
     def test_allocator_backend(self):
         def check_output(script: str) -> str:
             return (
@@ -5000,7 +5050,7 @@ print(value, end="")
             torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
 
     @unittest.skipIf(
-        not (IS_LINUX and os.uname().machine == "x86_64"), "cpp traces only on linux"
+        not ((IS_X86 or IS_ARM64) and IS_LINUX), "cpp traces are linux x86/aarch64 only"
     )
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
