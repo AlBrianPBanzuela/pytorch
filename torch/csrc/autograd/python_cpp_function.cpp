@@ -298,7 +298,8 @@ PyObject* functionToPyObject(const c10::intrusive_ptr<Node>& cdata) {
   }
 
   return PyObjectPreservation::get_or_init(*cdata, [&]() {
-    auto it = cpp_function_types_map.find(std::type_index(typeid(*cdata)));
+    Node& fn = *cdata;
+    auto it = cpp_function_types_map.find(std::type_index(typeid(fn)));
     PyTypeObject* type = nullptr;
     if (it == cpp_function_types_map.end()) {
       type = get_default_type();
