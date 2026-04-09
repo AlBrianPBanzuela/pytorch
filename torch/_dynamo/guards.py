@@ -1099,12 +1099,10 @@ def check_closure(value: Any, metadata: Any) -> bool:
     return id(value) == metadata
 
 
-# Used by CONSTANT_SUBCLASS_MATCH guard check spec
-_CONSTANT_BASE_TYPES = (int, float, str, bytes)
-
-
 def _constant_subclass_base_value(value: Any) -> Any:
     """Extract the base constant value from a constant subclass instance."""
+    from .variables.user_defined import _CONSTANT_BASE_TYPES
+
     for t in _CONSTANT_BASE_TYPES:
         if isinstance(value, t):
             return t(value)  # pyrefly: ignore[bad-argument-type]

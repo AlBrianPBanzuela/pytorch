@@ -26,7 +26,7 @@ def getrecursionlimit() -> int:
     return sys.getrecursionlimit()
 
 
-if hasattr(sys, "get_int_max_str_digits"):
+if sys.version_info >= (3, 11):
 
     @substitute_in_graph(sys.get_int_max_str_digits, can_constant_fold_through=True)
     def get_int_max_str_digits() -> int:
