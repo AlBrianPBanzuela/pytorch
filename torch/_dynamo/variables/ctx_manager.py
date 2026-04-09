@@ -18,8 +18,10 @@ consistency between eager execution and compiled graph behavior by capturing and
 restoring state changes.
 """
 
+import contextlib
 import inspect
 import logging
+import types
 import warnings
 from collections.abc import Callable, Sequence, Sized
 from contextlib import AbstractContextManager, ExitStack
@@ -538,6 +540,9 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         keys = tuple(self.catch_warnings_args.keys())
         codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, False))
 
+    def python_type(self) -> type:
+        return warnings.catch_warnings
+
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch VMap increment/decrement nesting"""
@@ -663,6 +668,9 @@ class GradModeVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "set_grad_enabled"
 
+    def python_type(self) -> type:
+        return torch.set_grad_enabled
+
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
@@ -735,6 +743,9 @@ class InferenceModeVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "inference_mode"
 
+    def python_type(self) -> type:
+        return torch.inference_mode
+
 
 class CUDADeviceVariable(ContextWrappingVariable):
     """represents torch.cuda.device"""
@@ -788,6 +799,9 @@ class CUDADeviceVariable(ContextWrappingVariable):
 
     def fn_name(self) -> str:
         return "device"
+
+    def python_type(self) -> type:
+        return torch.cuda.device
 
 
 class TorchFunctionDisableVariable(ContextWrappingVariable):
@@ -862,6 +876,11 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         if self.only_subclass:
             return "DisableTorchFunctionSubclass"
         return "DisableTorchFunction"
+
+    def python_type(self) -> type:
+        if self.only_subclass:
+            return torch._C.DisableTorchFunctionSubclass
+        return torch._C.DisableTorchFunction
 
 
 class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
@@ -996,6 +1015,9 @@ class AutocastModeVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "autocast"
 
+    def python_type(self) -> type:
+        return torch.amp.autocast_mode.autocast
+
 
 class NullContextVariable(ContextWrappingVariable):
     """
@@ -1020,6 +1042,9 @@ class NullContextVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "nullcontext"
 
+    def python_type(self) -> type:
+        return contextlib.nullcontext
+
 
 class ProfilerContextVariable(ContextWrappingVariable):
     """
@@ -1032,6 +1057,9 @@ class ProfilerContextVariable(ContextWrappingVariable):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(target_values=None, **kwargs)
+
+    def python_type(self) -> type:
+        return torch.profiler.profile
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         return self
@@ -1115,6 +1143,9 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+
+    def python_type(self) -> type:
+        return torch.autograd.profiler.record_function
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         if config.capture_profiler_record_function:
@@ -1575,6 +1606,9 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
+    def python_type(self) -> type:
+        return types.MethodType
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1625,6 +1659,9 @@ class WithExitFunctionVariable(VariableTracker):
         )
         self.ctx = ctx
         self.target = target
+
+    def python_type(self) -> type:
+        return types.MethodType
 
     def call_function(
         self,

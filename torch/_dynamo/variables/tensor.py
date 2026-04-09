@@ -2348,6 +2348,11 @@ class UnspecializedPythonVariable(TensorVariable):
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
 
+    def python_type(self) -> type:
+        if self.raw_value is not None:
+            return type(self.raw_value)
+        return super().python_type()
+
     @classmethod
     def from_tensor_variable(
         cls,
@@ -2455,6 +2460,9 @@ class UntypedStorageVariable(VariableTracker):
         # Example_value will always have device="meta"
         self.example_value = example_value
 
+    def python_type(self) -> type:
+        return torch.UntypedStorage
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -2514,6 +2522,9 @@ class DataPtrVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
+
+    def python_type(self) -> type:
+        return int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
