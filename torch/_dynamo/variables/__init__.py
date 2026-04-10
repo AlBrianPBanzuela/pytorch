@@ -22,6 +22,7 @@ from .builtin import (
     BuiltinVariable,
     DictBuiltinVariable,
     IterBuiltinVariable,
+    ListBuiltinVariable,
 )
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
@@ -175,6 +176,7 @@ from .user_defined import (
     RemovableHandleVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
@@ -222,6 +224,7 @@ __all__ = [
     "LambdaVariable",
     "LazyConstantVariable",
     "LazyVariableTracker",
+    "ListBuiltinVariable",
     "ListIteratorVariable",
     "ListVariable",
     "NestedUserFunctionVariable",
