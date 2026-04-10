@@ -21436,7 +21436,7 @@ op_db: list[OpInfo] = [
            skips=(
                # "dot_xpu_mkl" not implemented for 'Long', torch-xpu-ops: #3247
                DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive",
-                            device_type="xpu", dtypes=(torch.int64,)),
+                            device_type="xpu", dtypes=(torch.int64, torch.int32, )),
                DecorateInfo(unittest.skip("Skipped! torch-xpu-ops #3247"), 'TestCommon',
                             'test_noncontiguous_samples', device_type='xpu', dtypes=(torch.int64,)))),
     OpInfo('tensordot',
@@ -23805,6 +23805,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='mps'),
         ),
     ),
     PythonRefInfo(
