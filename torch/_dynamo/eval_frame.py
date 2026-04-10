@@ -996,7 +996,10 @@ class _TorchDynamoContext:
                     if not _in_hop_compile():
                         if torch._guards.TracingContext.try_get() is not None:
                             return fn(*args, **kwargs)
-                # Skip nested compile - just inline the function
+                # Skip nested compile - just inline the function.
+                # FX symbolic tracing passes Proxy objects, not real tensors,
+                # so dynamo cannot compile. Unwrap transparently so the
+                # tracer sees the original function.
                 if (
                     is_fx_symbolic_tracing()
                     and not config.force_compile_during_fx_trace
@@ -1006,8 +1009,7 @@ class _TorchDynamoContext:
                             "Detected that you are using FX to symbolically trace "
                             "a dynamo-optimized function. This is not supported at the moment."
                         )
-                    else:
-                        return fn(*args, **kwargs)
+                    return fn(*args, **kwargs)
 
                 if is_jit_tracing():
                     raise RuntimeError(
