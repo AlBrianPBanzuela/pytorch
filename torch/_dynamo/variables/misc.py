@@ -1345,6 +1345,19 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
+    def is_callable(self) -> bool:
+        if self.py_type is not None:
+            from .object_protocol import type_implements_tp_call
+
+            return type_implements_tp_call(self.py_type)
+        # When py_type is unknown, python_type() would fall through to
+        # as_python_constant() which materializes the parent object —
+        # forcing lazy items (e.g. inside a ListVariable) to realize
+        # and install guards.  call_function delegates to
+        # obj.call_method which will raise if the attr is not callable,
+        # so returning True here is safe.
+        return True
+
     def call_function(
         self,
         tx: "InstructionTranslator",
