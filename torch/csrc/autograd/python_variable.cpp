@@ -421,8 +421,7 @@ static PyObject* THPVariable_WrapWithType(
   }
 
   c10::TensorImpl* tensor_impl = var.unsafeGetTensorImpl();
-
-  PyObject* obj = PyObjectPreservation::get_or_init(*tensor_impl, [&]() {
+  THPObjectPtr obj(PyObjectPreservation::get_or_init(*tensor_impl, [&]() {
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPVariableClass);
     if (desired_type) {
       type = *desired_type;
@@ -437,12 +436,12 @@ static PyObject* THPVariable_WrapWithType(
     auto v = reinterpret_cast<THPVariable*>(wrapper);
     new (&v->cdata) Tensor(std::forward<T>(var));
     return wrapper;
-  });
+  }));
 
   if (desired_type) {
-    check_tensor_subclass(obj, *desired_type);
+    check_tensor_subclass(obj.get(), *desired_type);
   }
-  return obj;
+  return obj.release();
 }
 
 PyObject* THPVariable_Wrap(at::TensorBase&& var) {
