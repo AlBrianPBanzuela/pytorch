@@ -1663,11 +1663,12 @@ class VariableBuilder:
             # Guard on the key order
             self.tx.output.guard_on_key_order.add(self.source)
 
-            # OrderedDict doesn't override __getitem__, so we can use the
-            # faster DictGetItemSource instead of DictSubclassGetItemSource.
-            is_ordered_dict = isinstance(value, collections.OrderedDict)
+            # Exact OrderedDict doesn't override __getitem__, so we can use
+            # the faster DictGetItemSource. Subclasses may override it, so
+            # use DictSubclassGetItemSource for safety.
+            is_exact_ordered_dict = type(value) is collections.OrderedDict
             ValueSourceType = (
-                DictGetItemSource if is_ordered_dict else DictSubclassGetItemSource
+                DictGetItemSource if is_exact_ordered_dict else DictSubclassGetItemSource
             )
 
             # We need all the keys to be hashable. We do this within the
@@ -1693,6 +1694,7 @@ class VariableBuilder:
                 for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
+            is_ordered_dict = isinstance(value, collections.OrderedDict)
             dict_vt = ConstDictVariable(
                 result,
                 user_cls=(collections.OrderedDict if is_ordered_dict else dict),
@@ -1703,7 +1705,7 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            if is_ordered_dict:
+            if isinstance(value, collections.OrderedDict):
                 result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
             else:
                 result = UserDefinedDictVariable(
