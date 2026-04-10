@@ -698,3 +698,53 @@ def group_tensors_by_device_and_dtype(
             indices.append(idx)
 
     return result
+
+
+class _AssertRaisesRegexContext:
+    def __init__(
+        self,
+        test_case: Any,
+        expected_exception: type[BaseException],
+        expected_regex: str,
+    ) -> None:
+        self.expected_regex = expected_regex
+        self.inner = test_case.assertRaises(expected_exception)
+
+    def __enter__(self) -> Any:
+        return self.inner.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> bool:
+        result = self.inner.__exit__(exc_type, exc_val, exc_tb)
+        if result and exc_val is not None:
+            # Fallback to substring match to avoid 're' C-extension graph breaks
+            expected_str = self.expected_regex
+            if hasattr(expected_str, "pattern"):
+                expected_str = expected_str.pattern
+            expected_str = str(expected_str).lstrip("^").rstrip("$")
+
+            if expected_str not in str(exc_val):
+                raise AssertionError(
+                    f"{self.expected_regex!r} not found in {str(exc_val)!r}"
+                )
+        return result
+
+
+# NOTE: This is a traceable polyfill that performs substring matching.
+# Complex regex patterns will fail; prioritize graph integrity over full regex support.
+def assert_raises_regex(
+    self_: Any,
+    expected_exception: type[BaseException],
+    expected_regex: str,
+    *args: Any,
+    **kwargs: Any,
+) -> "_AssertRaisesRegexContext | None":
+    if args or kwargs:
+        with _AssertRaisesRegexContext(self_, expected_exception, expected_regex):
+            args[0](*args[1:], **kwargs)
+        return None
+    return _AssertRaisesRegexContext(self_, expected_exception, expected_regex)
