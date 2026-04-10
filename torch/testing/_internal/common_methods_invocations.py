@@ -12662,8 +12662,6 @@ op_db: list[OpInfo] = [
                # Exception: Jacobian computed with forward mode mismatch for output 0 with respect to input 1
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
                             dtypes=(torch.float64,), device_type='xpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad',
-                            dtypes=(torch.float64,), device_type='xpu'),
                # https://github.com/intel/torch-xpu-ops/issues/1893
                DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view',
                             device_type='xpu', dtypes=(torch.float64,)),
@@ -12720,8 +12718,6 @@ op_db: list[OpInfo] = [
            skips=(
                # Jacobian mismatch, https://github.com/intel/torch-xpu-ops/issues/2360
                # Exception: Jacobian computed with forward mode mismatch for output 0 with respect to input 1
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
-                            dtypes=(torch.float64,), device_type='xpu'),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
                             dtypes=(torch.float64,), device_type='xpu'),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_inplace_forward_mode_AD',
@@ -14167,6 +14163,11 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           skips=(
+               # Exception: Tensor-likes are not close!
+               # torch-xpu-ops: #3296
+               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive',
+                            device_type='xpu', dtypes=(torch.float16,)),),
            ),
     OpInfo('istft',
            dtypes=complex_types(),
@@ -23848,6 +23849,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='mps'),
         ),
     ),
     PythonRefInfo(

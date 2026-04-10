@@ -1702,6 +1702,7 @@ def onlyPRIVATEUSE1(fn):
         return unittest.skip(reason)(fn)
     return onlyOn(device_type)(fn)
 
+
 def onlyAccelerator(fn):
     """Skip test if not running on an accelerator device (i.e., skip on CPU and meta)."""
 
@@ -1713,6 +1714,7 @@ def onlyAccelerator(fn):
         return fn(self, *args, **kwargs)
 
     return only_fn
+
 
 def onlyCUDAAndPRIVATEUSE1(fn):
     @wraps(fn)
