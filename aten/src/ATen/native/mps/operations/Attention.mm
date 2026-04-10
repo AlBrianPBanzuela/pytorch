@@ -42,9 +42,9 @@ static inline Tensor view_as_4d(const Tensor& x) {
 }
 
 // general version
-static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
-                                                   const Tensor& key,
-                                                   const Tensor& value,
+static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query_,
+                                                   const Tensor& key_,
+                                                   const Tensor& value_,
                                                    const std::optional<Tensor>& attn_mask,
                                                    double dropout_p,
                                                    bool is_causal,
@@ -63,6 +63,9 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
     MPSGraphTensor* attnTensor = nil;
   };
   const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  auto query = macOS15_0_plus ? query_ : query_.contiguous();
+  auto key = macOS15_0_plus ? key_ : key_.contiguous();
+  auto value = macOS15_0_plus ? value_ : value_.contiguous();
   int64_t batchSize = query.size(0);
   int64_t num_head = query.size(1);
   int64_t qSize = query.size(2);
