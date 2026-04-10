@@ -41,6 +41,7 @@ struct PyNode : public Node {
       const SwapSavedVariables& saved);
 
   void release_variables() override;
+  void release_resources() override;
   std::string name() const override;
   bool is_traceable() override;
 
@@ -60,9 +61,9 @@ struct PyNode : public Node {
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
     // If python is already dead, leak the wrapped python objects
-    if (Py_IsInitialized()) {
+    if (obj && Py_IsInitialized()) {
       pybind11::gil_scoped_acquire gil;
-      Py_DECREF(obj);
+      Py_CLEAR(obj);
     }
   }
 };

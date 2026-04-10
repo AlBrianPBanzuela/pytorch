@@ -322,6 +322,17 @@ auto PyNode::release_variables() -> void {
   }
 }
 
+void PyNode::release_resources() {
+  Node::release_resources();
+  // Release the Python object so that it can be freed when the C++ Node
+  // outlives all strong references (weak_intrusive_ptr may keep the
+  // allocation alive, but shouldn't prevent the PyObject from being freed).
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_CLEAR(obj);
+  }
+}
+
 auto PyNode::name() const -> std::string {
   pybind11::gil_scoped_acquire gil;
   auto f = (THPFunction*)obj;
