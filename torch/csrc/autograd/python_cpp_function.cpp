@@ -24,7 +24,10 @@ using torch::utils::PyObjectPreservation;
 
 namespace torch::autograd {
 
-int traverse_node(c10::intrusive_ptr<Node>& fn_ptr, visitproc visit, void* arg) {
+int traverse_node(
+    c10::intrusive_ptr<Node>& fn_ptr,
+    visitproc visit,
+    void* arg) {
   if (fn_ptr.use_count() != 1) {
     return 0;
   }

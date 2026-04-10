@@ -106,8 +106,10 @@ TORCH_PYTHON_API PyTypeObject* _initFunctionPyTypeObject(
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods);
 
-
-TORCH_PYTHON_API int traverse_node(c10::intrusive_ptr<Node>& fn, visitproc visit, void* arg);
+TORCH_PYTHON_API int traverse_node(
+    c10::intrusive_ptr<Node>& fn,
+    visitproc visit,
+    void* arg);
 
 TORCH_PYTHON_API PyObject* registerFunctionHook(Node& fn, PyObject* hook);
 
