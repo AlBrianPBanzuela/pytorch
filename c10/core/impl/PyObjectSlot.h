@@ -53,6 +53,10 @@ struct C10_API PyObjectSlot {
   // Used by intrusive_ptr_target subclasses (TensorImpl, StorageImpl, Node)
   // to implement their virtual pyobject refcount overrides.
   void incref() const noexcept {
+    // Because intrusive_ptr incref uses relaxed memory order, we need to
+    // do an acquire fence to ensure that the kHasPyObject bit was
+    // observed before the load of the PyObject* below.
+    // NB: This is a no-op on x86/x86-64
     std::atomic_thread_fence(std::memory_order_acquire);
     PyObject* obj = load_pyobj();
     load_pyobj_interpreter()->incref(obj);

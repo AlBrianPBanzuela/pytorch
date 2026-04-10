@@ -24,6 +24,11 @@ class PyObjectPreservation {
     TORCH_INTERNAL_ASSERT(
         target.combined_refcount_.load(std::memory_order_relaxed) ==
         c10::detail::kUniqueRef);
+
+    // Ensure that PyUnstable_TryIncref calls don't fail spuriously in
+    // free-threaded Python.
+    PyUnstable_EnableTryIncRef(pyobj);
+
     slot->pyobj_.store(pyobj, std::memory_order_relaxed);
     slot->pyobj_interpreter_.store(
         c10::impl::getGlobalPyInterpreter(), std::memory_order_relaxed);
@@ -81,6 +86,9 @@ class PyObjectPreservation {
     bool increfed = false;
     do {
       if (c10::detail::refcount(combined) > 1 && !increfed) {
+        // Preserve the invariant that if refcount > 1, the c10 object
+        // holds a reference to the PyObject. This must happen before we
+        // set the kHasPyObject bit.
         Py_INCREF(obj);
         increfed = true;
       }
