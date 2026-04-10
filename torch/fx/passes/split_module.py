@@ -692,6 +692,7 @@ def _decompose_size_nodes(m: GraphModule) -> None:
       - Dynamic dims (SymInt) -> new sym_size.int node
       - Static dims (plain int) -> inlined as literal constant
     """
+    # Collect upfront since we mutate the graph during iteration.
     size_nodes = list(m.graph.find_nodes(op="call_method", target="size"))
 
     for node in size_nodes:
@@ -702,8 +703,7 @@ def _decompose_size_nodes(m: GraphModule) -> None:
 
         dims: list[Node | int] = []
         with m.graph.inserting_after(tensor_node):
-            for i in range(ev.dim()):
-                dim_val = ev.shape[i]
+            for i, dim_val in enumerate(ev.shape):
                 if isinstance(dim_val, torch.SymInt):
                     dn = m.graph.call_function(
                         torch.ops.aten.sym_size.int, args=(tensor_node, i)
@@ -733,9 +733,15 @@ def split_module_simple(
 ) -> GraphModule:
     """Lightweight graph splitter for simple partition patterns.
 
-    A faster alternative to split_module for graphs without autocast/grad
-    regions, get_attr nodes, or non-linear partition dependencies. Typical
-    use case: inference-only graphs from torch.compile/Dynamo.
+    A faster alternative to :func:`split_module` for inference-only graphs
+    from ``torch.compile``/Dynamo. Because these graphs have no autocast/grad
+    regions, no ``get_attr`` nodes, and no non-linear partition dependencies,
+    we can skip the topological sort, autocast tracking, and ``get_attr``
+    special-casing that ``split_module`` performs. More importantly, we
+    construct partition submodules as lightweight ``_LazyGraphModule``
+    instances that bypass ``nn.Module.__init__`` and defer ``recompile()``
+    codegen — this eliminates the dominant cost when creating 70-100+
+    partition submodules for large models.
 
     Args:
         m: Graph module to split.
@@ -744,29 +750,9 @@ def split_module_simple(
         partition_affix: If set, submodule names become
             ``submod_{affix}_{idx}`` instead of ``submod_{idx}``.
     """
-    # --- Pass 1: Dependency detection + node cloning ---
+    import sympy
 
-    # Lazy imports for symbolic shape support — only needed when graph
-    # nodes carry example_value metadata with SymInt/SymFloat values
-    # (i.e. graphs from torch.compile/Dynamo, not symbolic_trace).
-    _sympy = None
-    _free_symbols = None
-
-    def _get_sympy():
-        nonlocal _sympy
-        if _sympy is None:
-            import sympy
-
-            _sympy = sympy
-        return _sympy
-
-    def _get_free_symbols():
-        nonlocal _free_symbols
-        if _free_symbols is None:
-            from torch.fx.experimental.symbolic_shapes import free_symbols
-
-            _free_symbols = free_symbols
-        return _free_symbols
+    from torch.fx.experimental.symbolic_shapes import free_symbols
 
     partition_graphs: dict[int, torch.fx.graph.Graph] = {}
     partition_env: dict[int, dict[Node, Node]] = defaultdict(dict)
@@ -783,7 +769,7 @@ def split_module_simple(
         val = node.meta.get("example_value")
         if val is not None and hasattr(val, "node") and hasattr(val.node, "expr"):
             s0 = val.node.expr
-            if isinstance(s0, _get_sympy().Symbol) and s0 not in symbol_to_node:
+            if isinstance(s0, sympy.Symbol) and s0 not in symbol_to_node:
                 symbol_to_node[s0] = node
 
         if node.op == "placeholder":
@@ -821,7 +807,7 @@ def split_module_simple(
 
                 def_val = def_node.meta.get("example_value")
                 if def_val is not None and symbol_to_node:
-                    for s in sorted(_get_free_symbols()(def_val), key=str):
+                    for s in sorted(free_symbols(def_val), key=str):
                         s_node = symbol_to_node[s]
                         partition_inputs[use_pid].setdefault(s_node.name, s_node)
                         if s_node.op != "placeholder":

@@ -1080,6 +1080,18 @@ terrible spacing
         actual = torch.compile(moe, backend=backend)(inp)
         torch.testing.assert_close(actual, expected)
 
+    @staticmethod
+    def _build_partition_map(graph, ops_per_partition=1):
+        """Build a node-to-partition dict assigning ops_per_partition ops per partition."""
+        node_to_partition = {}
+        counter = 0
+        for node in graph.nodes:
+            if node.op in ("placeholder", "get_attr", "output"):
+                continue
+            node_to_partition[node] = counter // ops_per_partition
+            counter += 1
+        return node_to_partition
+
     def test_split_module_simple_basic(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
@@ -1150,11 +1162,7 @@ terrible spacing
         expected = mod(x)
 
         traced = torch.fx.symbolic_trace(mod)
-        node_to_partition = {}
-        for node in traced.graph.nodes:
-            if node.op in ("placeholder", "get_attr", "output"):
-                continue
-            node_to_partition[node] = 0
+        node_to_partition = self._build_partition_map(traced.graph, ops_per_partition=999)
 
         split_gm = split_module_simple(traced, node_to_partition)
         self.assertEqual(split_gm(x), expected)
@@ -1167,13 +1175,7 @@ terrible spacing
                 return b
 
         traced = torch.fx.symbolic_trace(Mod())
-        node_to_partition = {}
-        counter = 0
-        for node in traced.graph.nodes:
-            if node.op in ("placeholder", "get_attr", "output"):
-                continue
-            node_to_partition[node] = counter
-            counter += 1
+        node_to_partition = self._build_partition_map(traced.graph)
 
         split_gm = split_module_simple(
             traced, node_to_partition, partition_affix="pp"
@@ -1240,19 +1242,10 @@ terrible spacing
         traced2 = torch.fx.symbolic_trace(mod)
 
         # Build partition mapping: 2 ops per partition
-        node_to_partition_simple = {}
+        node_to_partition_simple = self._build_partition_map(traced1.graph, ops_per_partition=2)
+
         counter = 0
-        partition_counter = 0
         callback_cache = {}
-
-        for node in traced1.graph.nodes:
-            if node.op in ("placeholder", "get_attr", "output"):
-                continue
-            pid = counter // 2
-            node_to_partition_simple[node] = pid
-            counter += 1
-
-        counter = 0
 
         def split_cb(node):
             nonlocal counter
