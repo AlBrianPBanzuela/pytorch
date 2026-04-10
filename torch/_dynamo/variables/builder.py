@@ -24,7 +24,6 @@ import copy
 import dataclasses
 import enum
 import functools
-import importlib.machinery
 import inspect
 import itertools
 import logging
@@ -300,6 +299,7 @@ from .user_defined import (
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
@@ -1137,6 +1137,7 @@ class VariableBuilder:
                     source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
+                py_type=type(value),
             )
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -1438,6 +1439,7 @@ class VariableBuilder:
             return GetAttrVariable(
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
+                py_type=type(value),
             )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
@@ -1832,6 +1834,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
+        from .user_defined import _CONSTANT_BASE_TYPES
+
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
             # Skip guards on inspect related variable trackers because they are
@@ -1839,6 +1843,12 @@ class VariableBuilder:
             # cause recompiles) and can cause a large number of OBJECT_ALIASING
             # guards.
             result = InspectVariable(value, source=SkipGuardSource(self.source))
+        elif (
+            isinstance(value, _CONSTANT_BASE_TYPES)
+            and type(value) not in common_constant_types
+        ):
+            self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
+            result = UserDefinedConstantVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -4273,7 +4283,7 @@ class SourcelessBuilder:
             # NamedTuple._make uses an alias of tuple.__new__
             # pyrefly: ignore[not-callable, bad-argument-count, missing-attribute]
             obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
-            return GetAttrVariable(obj, "__new__")
+            return GetAttrVariable(obj, "__new__", py_type=type(value))
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)
@@ -4288,28 +4298,23 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
-        elif isinstance(value, types.MethodType):
-            if isinstance(value.__self__, (type, abc.ABCMeta)):
-                # value is a classmethod
-                assert getattr(value.__self__, value.__func__.__name__) == value
-                cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
-                try:
-                    # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
-                except NotImplementedError:
-                    pass  # failthrough to unimplemented branch
-            else:
-                # Instance method — look up the VT for __self__ via side effects
-                obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
-                if obj_vt is not None:
-                    return torch._dynamo.variables.UserMethodVariable(
-                        value.__func__, obj_vt
-                    )
+        elif (
+            isinstance(value, types.MethodType)
+            # We only want to support sourceless class objects here
+            # An instance variable is not allowed and it should have source
+            and isinstance(value.__self__, (type, abc.ABCMeta))
+        ):
+            # value is a classmethod
+            assert getattr(value.__self__, value.__func__.__name__) == value
+            cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
+            try:
+                # pyrefly: ignore[bad-argument-type]
+                return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+            except NotImplementedError:
+                pass  # failthrough to unimplemented branch
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
-        ):
+        elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, re.Pattern):
             return ConstantLikeVariable(value)
