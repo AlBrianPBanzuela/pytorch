@@ -843,6 +843,7 @@ cpp_fake_make_fx_failures = {
     xfail('equal'),
     # empty
     skip('new_empty'),
+    skip('new_empty_strided'),
     skip('empty_like'),
     skip('empty'),
     skip('empty_permuted'),
