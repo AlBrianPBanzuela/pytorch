@@ -876,10 +876,16 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   profiler_state_info_ptr = nullptr;
 
   auto state_ptr = ProfilerStateBase::pop();
+  if (!state_ptr) {
+    LOG(WARNING)
+        << "disableProfiler called but no active profiling session found. "
+        << "This can happen if profiling was cancelled during warmup.";
+    return std::make_unique<ProfilerResult>();
+  }
   const auto& config = state_ptr->config();
   TORCH_CHECK(
-      state_ptr && isValidDisableState(config.state),
-      "Can't disable Kineto profiler when it's not running");
+      isValidDisableState(config.state),
+      "Can't disable Kineto profiler: config is not in a valid disable state");
 
   state_ptr->removeCallback();
 
@@ -1182,7 +1188,16 @@ TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
-TYPED_ATTR(TorchOp, extraMeta, e.extra_meta_)
+
+extra_meta_t KinetoEvent::extraMeta() const {
+  extra_meta_t out;
+  result_->visit(c10::overloaded(
+      [&](const ExtraFields<EventType::TorchOp>& e) { out = e.extra_meta_; },
+      [&](const ExtraFields<EventType::Kineto>& e) { out = e.extra_meta_; },
+      [](const auto&) {}));
+  return out;
+}
+
 TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)
 TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(
@@ -1197,11 +1212,32 @@ TYPED_ATTR(Kineto, linkedCorrelationId, [&]() {
   const auto linked = e.linked_activity_.lock();
   return linked ? linked->correlationID() : 0;
 }())
-TYPED_ATTR(Kineto, flowId, e.flow.id)
-TYPED_ATTR(Kineto, flowType, e.flow.type)
-TYPED_ATTR(Kineto, flowStart, static_cast<bool>(e.flow.start))
 #undef TYPED_ATTR
 #undef TYPED_ATTR_WITH_DEFAULT
+
+// Flow fields exist on both TorchOp and Kineto event types.
+uint32_t KinetoEvent::flowId() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) { return e.flow.id; },
+      [](const ExtraFields<EventType::Kineto>& e) { return e.flow.id; },
+      [](const auto&) -> uint32_t { return 0; }));
+}
+uint32_t KinetoEvent::flowType() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) { return e.flow.type; },
+      [](const ExtraFields<EventType::Kineto>& e) { return e.flow.type; },
+      [](const auto&) -> uint32_t { return 0; }));
+}
+bool KinetoEvent::flowStart() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) {
+        return static_cast<bool>(e.flow.start);
+      },
+      [](const ExtraFields<EventType::Kineto>& e) {
+        return static_cast<bool>(e.flow.start);
+      },
+      [](const auto&) { return false; }));
+}
 
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
