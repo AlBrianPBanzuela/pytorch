@@ -278,8 +278,8 @@ jobs:
           # to files.pythonhosted.org. Redirect Bazel's Java downloader through
           # the cluster-internal pypi-cache proxy.
           cat > /tmp/osdc_downloader.cfg << 'EOF'
-          rewrite files\.pythonhosted\.org/(.*) pypi-cache-cpu.pypi-cache.svc.cluster.local:8080/$1
-          rewrite pypi\.org/(.*) pypi-cache-cpu.pypi-cache.svc.cluster.local:8080/$1
+          rewrite https://files\.pythonhosted\.org/(.*) http://pypi-cache-cpu.pypi-cache.svc.cluster.local:8080/$1
+          rewrite https://pypi\.org/(.*) http://pypi-cache-cpu.pypi-cache.svc.cluster.local:8080/$1
           EOF
           echo "common --experimental_downloader_config=/tmp/osdc_downloader.cfg" >> .bazelrc
 
