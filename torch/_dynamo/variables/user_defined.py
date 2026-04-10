@@ -1518,9 +1518,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and method in self._base_methods
         ):
             return self._base_vt.mp_subscript_impl(tx, key)
-        if method is not None:
-            return self.resolve_type_attr(
-                tx, "__getitem__", method, self.source
+        if isinstance(method, types.FunctionType):
+            source_fn = self.source and self.get_source_by_walking_mro(
+                tx, "__getitem__"
+            )
+            return variables.UserMethodVariable(
+                method, self, source_fn=source_fn, source=self.source
             ).call_function(tx, [key], {})
         return super().mp_subscript_impl(tx, key)
 
