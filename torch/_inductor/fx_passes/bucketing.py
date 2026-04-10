@@ -32,7 +32,7 @@ BucketMode: TypeAlias = Literal["default", "custom_ops", "custom_ops_multidtype"
 def _default_bucket_mode() -> BucketMode:
     from torch._inductor import config
 
-    return config.aten_distributed_optimizations.bucket_mode
+    return config.aten_distributed_optimizations.bucket_mode or "default"
 
 
 # Helper functions moved to top for better organization
@@ -1192,7 +1192,7 @@ def merge_all_gather_bucket(
 
     # Choose merge function based on mode
     ag_merge_fn = all_gather_merge_fn_to_trace
-    if mode is not None and "custom_ops" in mode:
+    if mode and "custom_ops" in mode:
         ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
 
     # Process bucket with lazy input collection
