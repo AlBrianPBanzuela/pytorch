@@ -377,10 +377,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             replace_collectives_with_low_contention,
         )
 
+        ag_impl = config.aten_distributed_optimizations.low_contention_ag_impl
         GraphTransformObserver(
             gm, "replace_collectives_with_low_contention"
         ).apply_graph_pass(
-            lambda graph: replace_collectives_with_low_contention(graph, mode=lc_mode)
+            lambda graph: replace_collectives_with_low_contention(
+                graph, mode=lc_mode, ag_impl=ag_impl
+            )
         )
 
     # Keep these last, since they introduce mutation. Look at

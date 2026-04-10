@@ -1178,6 +1178,11 @@ class aten_distributed_optimizations:
     # Supersedes enable_low_contention_collectives when set.
     use_low_contention_collectives_for_fsdp: bool | None = False
 
+    # Implementation for all-gather replacement in low-contention mode.
+    #   "low_contention": copy engine P2P via symm_mem._low_contention_all_gather
+    #   "multimem": NVSwitch multicast via symm_mem._multimem_all_gather
+    low_contention_ag_impl: str = "low_contention"
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

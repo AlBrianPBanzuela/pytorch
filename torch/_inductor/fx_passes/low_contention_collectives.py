@@ -11,7 +11,12 @@ log = logging.getLogger(__name__)
 def replace_collectives_with_low_contention(
     graph: torch.fx.Graph,
     mode: bool | None = None,
+    ag_impl: str = "low_contention",
 ) -> None:
+    """Replace FSDP collectives with symm_mem variants.
+
+    ag_impl: "low_contention" (copy engine P2P) or "multimem" (multicast store).
+    """
     if mode is False:
         return
 
@@ -51,28 +56,56 @@ def replace_collectives_with_low_contention(
                 continue
 
         if is_ag:
-            _replace_all_gather(node, graph, symm_mem, _enabled_groups)
+            _replace_all_gather(node, graph, symm_mem, _enabled_groups, ag_impl)
         else:
             _replace_reduce_scatter(node, graph, symm_mem, _enabled_groups)
         replacements += 1
 
     if total > 0:
         log.info(
-            "Replaced %d/%d FSDP collectives with low-contention variants "
-            "(skipped %d critical-path)",
+            "Replaced %d/%d FSDP collectives (ag_impl=%s, "
+            "skipped %d critical-path)",
             replacements,
             total,
+            ag_impl,
             skipped,
         )
 
 
-def _replace_all_gather(node, graph, symm_mem, enabled_groups):
+def _replace_all_gather(node, graph, symm_mem, enabled_groups, ag_impl="low_contention"):
     input_node = node.args[0]
     group_name = node.args[2]
     _ensure_symm_mem_for_group(group_name, enabled_groups)
+
+    if ag_impl == "multimem":
+        _replace_all_gather_multimem(node, graph, symm_mem, input_node, group_name)
+    elif ag_impl == "multimem_inplace":
+        _replace_all_gather_multimem(
+            node, graph, symm_mem, input_node, group_name, inplace=True
+        )
+    else:
+        with graph.inserting_before(node):
+            new_node = graph.call_function(
+                symm_mem._low_contention_all_gather.default,
+                args=(input_node, group_name),
+            )
+        new_node.meta.update(node.meta)
+        node.replace_all_uses_with(new_node)
+        graph.erase_node(node)
+
+
+def _replace_all_gather_multimem(
+    node, graph, symm_mem, input_node, group_name, inplace=False
+):
+    """Replace all_gather with multimem variant."""
+    target = (
+        symm_mem._multimem_all_gather_inplace.default
+        if inplace
+        else symm_mem._multimem_all_gather.default
+    )
     with graph.inserting_before(node):
         new_node = graph.call_function(
-            symm_mem._low_contention_all_gather.default,
+            target,
             args=(input_node, group_name),
         )
     new_node.meta.update(node.meta)
