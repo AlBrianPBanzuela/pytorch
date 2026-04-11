@@ -2008,7 +2008,7 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_compare_cpu",
-                active_if=(not TEST_XPU),
+                device_type="cuda",
             ),
             # Exception: Resizing an out= argument with no elements threw a resize warning!
             DecorateInfo(
