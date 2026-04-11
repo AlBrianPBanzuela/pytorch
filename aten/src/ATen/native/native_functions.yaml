@@ -7810,7 +7810,7 @@
   dispatch:
     CPU, CUDA, MPS: dense_to_sparse
     SparseCPU, SparseCUDA, SparseMPS: sparse_coo_to_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: sparse_compressed_to_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrMPS: sparse_compressed_to_sparse
   autogen: _to_sparse.sparse_dim_out
 
 - func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
