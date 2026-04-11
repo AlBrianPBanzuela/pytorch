@@ -594,11 +594,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        unimplemented(
-            gb_type="unsupported __getitem__",
-            context=f"mp_subscript_impl {self} {key}",
-            explanation=f"Dynamo does not know how to handle __getitem__ on {self}",
-            hints=[],
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"'{self.python_type_name()}' object is not subscriptable"],
         )
 
     def call_method(
