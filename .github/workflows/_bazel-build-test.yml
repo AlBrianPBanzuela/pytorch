@@ -289,6 +289,7 @@ jobs:
           DLEOF
           echo "common --experimental_downloader_config=/tmp/osdc_downloader.cfg" >> .bazelrc
           echo "common --repo_env=PIP_INDEX_URL=${PIP_INDEX_URL}" >> .bazelrc
+          echo "common --repo_env=PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}" >> .bazelrc
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False'
