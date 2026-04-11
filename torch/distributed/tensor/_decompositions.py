@@ -236,7 +236,7 @@ class DecompShardingStrategy:
         n_outputs = len(output_placements)
         strategy_schema = self.sharding_prop._wrap_with_op_strategy(op_schema)
         # Import here to avoid circular import at module load time
-        from torch.distributed.tensor._ops.utils import (  # noqa: F811
+        from torch.distributed.tensor._ops.utils import (
             expand_to_full_mesh_op_strategy,
         )
 
