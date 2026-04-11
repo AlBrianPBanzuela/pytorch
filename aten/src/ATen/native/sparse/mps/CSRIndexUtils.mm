@@ -210,10 +210,8 @@ void expand_csr_rows_to_coo_out(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     int64_t rows_per_batch,
-    bool out_int32,
     bool transpose,
     const Tensor& coo_indices) {
-  (void)out_int32;
   TORCH_CHECK(
       crow_indices.is_mps() && col_indices.is_mps() && coo_indices.is_mps(),
       "expand_csr_rows_to_coo: expected MPS tensors");
@@ -336,7 +334,6 @@ Tensor expand_csr_rows_to_coo(
       crow_indices,
       col_indices,
       rows_per_batch,
-      out_int32,
       transpose,
       coo_indices);
   return coo_indices;

@@ -270,7 +270,6 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_mps)
       crow_indices,
       col_indices,
       rows_per_batch,
-      out_int32,
       transpose,
       result);
 }
