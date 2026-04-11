@@ -2946,6 +2946,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         assert self._base_vt is not None
 
     def len(self) -> int:
+        # Used by nn_module.py to short-circuit the nn.Module forward method
+        # when no hooks are registered.  Calling .len() directly avoids the
+        # overhead of full call_method("__len__") dispatch during tracing.
         assert self._base_vt is not None
         return self._base_vt.len()  # type: ignore[union-attr]
 

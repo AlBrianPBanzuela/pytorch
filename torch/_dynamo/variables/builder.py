@@ -898,9 +898,11 @@ class VariableBuilder:
                 dict_vt = ConstDictVariable(
                     result,  # type: ignore[arg-type]
                     user_cls=collections.OrderedDict,
+                    mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
                 result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
+                return self.tx.output.side_effects.track_object_existing(value, result)
             else:
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
@@ -1670,15 +1672,9 @@ class VariableBuilder:
             # Guard on the key order
             self.tx.output.guard_on_key_order.add(self.source)
 
-            # Exact OrderedDict doesn't override __getitem__, so we can use
-            # the faster DictGetItemSource. Subclasses may override it, so
-            # use DictSubclassGetItemSource for safety.
-            is_exact_ordered_dict = type(value) is collections.OrderedDict
-            ValueSourceType = (
-                DictGetItemSource
-                if is_exact_ordered_dict
-                else DictSubclassGetItemSource
-            )
+            # Dict subclasses may override __getitem__, so use
+            # DictSubclassGetItemSource.  Exact OrderedDict is handled
+            # earlier with DictGetItemSource.
 
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
@@ -1689,7 +1685,7 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = ValueSourceType(base, source_key)
+                source_value = DictSubclassGetItemSource(base, source_key)
                 res_value = LazyVariableTracker.create(v, source_value)
 
                 return key, res_value

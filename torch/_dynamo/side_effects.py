@@ -1213,11 +1213,16 @@ class SideEffects:
                 ):
                     continue
 
-                if isinstance(
-                    var,
-                    variables.UserDefinedDictVariable,
-                ) and self.is_modified(
-                    var._base_vt  # pyrefly: ignore[bad-argument-type]
+                if (
+                    isinstance(
+                        var,
+                        variables.UserDefinedDictVariable,
+                    )
+                    and self.is_modified(
+                        var._base_vt  # pyrefly: ignore[bad-argument-type]
+                    )
+                    and var._base_vt.has_new_items(  # pyrefly: ignore[union-attr,missing-attribute]
+                    )
                 ):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
@@ -1250,6 +1255,10 @@ class SideEffects:
                         ]
                     )
 
+                    # Reconstruct all items — _manual_dict_setitem clears
+                    # dict_to first, so we need every key/value, not just
+                    # the ones that differ from original_items.
+                    var._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
                     cg(var._base_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [

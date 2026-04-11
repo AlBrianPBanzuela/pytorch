@@ -1101,36 +1101,32 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if isinstance(forward_method, types.FunctionType):
                 globals_vt = tx.nn_modules_globals_vt
 
-                def _has_hooks(vt: VariableTracker) -> bool:
+                def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
+                    vt = obj.var_getattr(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
-                if not (
-                    _has_hooks(self.var_getattr(tx, "_backward_hooks"))
-                    or _has_hooks(self.var_getattr(tx, "_backward_pre_hooks"))
-                    or _has_hooks(self.var_getattr(tx, "_forward_hooks"))
-                    or _has_hooks(self.var_getattr(tx, "_forward_hooks_with_kwargs"))
-                    or _has_hooks(self.var_getattr(tx, "_forward_pre_hooks"))
-                    or _has_hooks(
-                        self.var_getattr(tx, "_forward_pre_hooks_with_kwargs")
+                has_hooks = any(
+                    _hooks_dict_len(self, attr)
+                    for attr in (
+                        "_backward_hooks",
+                        "_backward_pre_hooks",
+                        "_forward_hooks",
+                        "_forward_hooks_with_kwargs",
+                        "_forward_pre_hooks",
+                        "_forward_pre_hooks_with_kwargs",
                     )
-                    or _has_hooks(
-                        globals_vt.var_getattr(tx, "_global_backward_pre_hooks")
+                ) or any(
+                    _hooks_dict_len(globals_vt, attr)
+                    for attr in (
+                        "_global_backward_pre_hooks",
+                        "_global_backward_hooks",
+                        "_global_forward_hooks",
+                        "_global_forward_pre_hooks",
                     )
-                    or _has_hooks(globals_vt.var_getattr(tx, "_global_backward_hooks"))
-                    or _has_hooks(globals_vt.var_getattr(tx, "_global_forward_hooks"))
-                    or _has_hooks(
-                        globals_vt.var_getattr(tx, "_global_forward_pre_hooks")
-                    )
-                    or _has_hooks(
-                        globals_vt.var_getattr(tx, "_global_backward_pre_hooks")
-                    )
-                    or _has_hooks(globals_vt.var_getattr(tx, "_global_backward_hooks"))
-                    or _has_hooks(globals_vt.var_getattr(tx, "_global_forward_hooks"))
-                    or _has_hooks(
-                        globals_vt.var_getattr(tx, "_global_forward_pre_hooks")
-                    )
-                ):
+                )
+
+                if not has_hooks:
                     name = "forward"
                     fn = self.value_type.forward  # type: ignore[attr-defined]
 
