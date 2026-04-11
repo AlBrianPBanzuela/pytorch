@@ -381,7 +381,7 @@ class DynamoProfilerState:
 
             if gprof2dot.returncode != 0:
                 print(
-                    f"gprof2dot failed: {gprof2dot_err.decode()}"  # noqa: B950
+                    f"gprof2dot failed: {gprof2dot_err.decode()}"
                 )
                 return None
 
