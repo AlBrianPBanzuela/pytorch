@@ -78,6 +78,11 @@ myst_enable_extensions = [
     "html_image",
 ]
 
+# Don't execute notebooks during the docs build. Notebook correctness is
+# verified by the separate docs_test CI job; re-executing them here just
+# adds ~3 minutes to the build for no benefit.
+nb_execution_mode = "off"
+
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
 sitemap_excludes = [
@@ -2502,7 +2507,145 @@ def setup(app):
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
     app.config.add_last_updated = True
+
+    # Force serial reads to avoid pipe congestion from large env pickles.
+    # Sphinx's parallel read sends the entire environment (100s of MB for
+    # PyTorch) through a 64KB OS pipe per worker, which causes extreme
+    # slowdowns with many workers. Serial reads avoid this overhead while
+    # parallel writes (which send trivial payloads) remain enabled.
+    from sphinx.builders import Builder
+
+    _orig_read_serial = Builder._read_serial
+
+    def _serial_read_ignoring_nproc(self, docnames, nproc=1):
+        return _orig_read_serial(self, docnames)
+
+    Builder._read_parallel = _serial_read_ignoring_nproc
+
+    # Skip pickling doctrees to disk. This is only used for incremental
+    # rebuilds which don't apply in CI clean builds. Saves ~2 minutes by
+    # avoiding serializing large autodoc-generated doctrees.
+
+    _orig_write_doctree = Builder.write_doctree
+
+    def _write_doctree_no_disk(self, docname, doctree, *, _cache=True):
+        # Still do the cleanup and in-memory caching, just skip the disk I/O
+        doctree.reporter = None
+        doctree.transformer = None
+        doctree.settings = doctree.settings.copy()
+        doctree.settings.warning_stream = None
+        doctree.settings.env = None
+        from docutils.utils import DependencyList
+
+        doctree.settings.record_dependencies = DependencyList()
+        if _cache:
+            self.env._write_doc_doctree_cache[docname] = doctree
+
+    Builder.write_doctree = _write_doctree_no_disk
+
+    # Cache git dates for the pytorch theme. The theme calls get_git_dates()
+    # (2 subprocess invocations) for every page during the write phase. With
+    # ~3000 pages that's ~6000 subprocess calls. Pre-compute all dates with
+    # a single bulk git command so forked write workers inherit the cache.
+    _cache_git_dates(app)
+
     return {"version": "0.1", "parallel_read_safe": True}
+
+
+def _cache_git_dates(app):
+    import subprocess
+
+    try:
+        import pytorch_sphinx_theme2
+    except ImportError:
+        return
+
+    srcdir = os.path.realpath(app.srcdir)
+
+    # Check if we're in a git repo and get the repo root
+    try:
+        git_root = (
+            subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=srcdir,
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Not a git repo (e.g. sapling). Patch to skip all subprocess calls.
+        pytorch_sphinx_theme2.get_git_dates = lambda path: ("Unknown", "Unknown")
+        return
+
+    def _parse_git_log(output):
+        """Parse 'git log --name-only' output into {abs_path: date} map."""
+        result = {}
+        current_date = None
+        for line in output.split("\n"):
+            if line.startswith("DATE "):
+                current_date = line[5:]
+            elif line and current_date:
+                # git log --name-only outputs paths relative to repo root
+                abs_path = os.path.normpath(os.path.join(git_root, line))
+                result.setdefault(abs_path, current_date)
+        return result
+
+    # Last-updated: newest-first log, setdefault keeps the first (= most recent)
+    last_updated = {}
+    try:
+        out = subprocess.check_output(
+            [
+                "git",
+                "log",
+                "--format=DATE %ad",
+                "--date=format:%b %d, %Y",
+                "--name-only",
+                "--",
+                srcdir,
+            ],
+            cwd=git_root,
+            stderr=subprocess.DEVNULL,
+        ).decode()
+        last_updated = _parse_git_log(out)
+    except Exception:
+        pass
+
+    # Created-on: same log but overwrite so the last (= oldest) date wins
+    created_on = {}
+    try:
+        out = subprocess.check_output(
+            [
+                "git",
+                "log",
+                "--format=DATE %ad",
+                "--date=format:%b %d, %Y",
+                "--diff-filter=A",
+                "--name-only",
+                "--",
+                srcdir,
+            ],
+            cwd=git_root,
+            stderr=subprocess.DEVNULL,
+        ).decode()
+        current_date = None
+        for line in out.split("\n"):
+            if line.startswith("DATE "):
+                current_date = line[5:]
+            elif line and current_date:
+                abs_path = os.path.normpath(os.path.join(git_root, line))
+                created_on[abs_path] = current_date  # overwrite = oldest wins
+    except Exception:
+        pass
+
+    def _cached_get_git_dates(file_path):
+        normalized = os.path.normpath(os.path.realpath(file_path))
+        return (
+            created_on.get(normalized, "Unknown"),
+            last_updated.get(normalized, "Unknown"),
+        )
+
+    pytorch_sphinx_theme2.get_git_dates = _cached_get_git_dates
 
 
 def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):
