@@ -594,11 +594,9 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "popitem" and self.is_mutable():
-            if (
-                issubclass(self.user_cls, dict)
-                and not issubclass(self.user_cls, collections.OrderedDict)
-                and len(args)
-            ):
+            # dict.popitem() takes no args. OrderedDict.popitem(last=) is
+            # handled by OrderedDictVariable.call_method.
+            if len(args):
                 raise_args_mismatch(tx, name)
 
             if not self.items:
@@ -610,19 +608,7 @@ class ConstDictVariable(VariableTracker):
                     ],
                 )
 
-            if self.user_cls is collections.OrderedDict and (
-                len(args) == 1 or "last" in kwargs
-            ):
-                if len(args) == 1 and args[0].is_python_constant():
-                    last = args[0].as_python_constant()
-                elif (v := kwargs.get("last")) and v.is_python_constant():
-                    last = v.as_python_constant()
-                else:
-                    raise_args_mismatch(tx, name)
-                k, v = self.items.popitem(last=last)  # type: ignore[possibly-undefined]
-            else:
-                k, v = self.items.popitem()
-
+            k, v = self.items.popitem()
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
 
@@ -717,22 +703,6 @@ class ConstDictVariable(VariableTracker):
                 tx.output.side_effects.mutation(self)
                 self.items[Hashable(args[0])] = x
                 return x
-        elif name == "move_to_end":
-            self.install_dict_keys_match_guard()
-            tx.output.side_effects.mutation(self)
-            if args[0] not in self:
-                raise_observed_exception(KeyError, tx)
-
-            last = True
-            if len(args) == 2 and args[1].is_python_constant():
-                last = args[1].as_python_constant()
-
-            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
-                last = kwargs.get("last").as_python_constant()  # type: ignore[union-attr]
-
-            key = Hashable(args[0])
-            self.items.move_to_end(key, last=last)
-            return CONSTANT_VARIABLE_NONE
         elif name == "__eq__" and istype(
             self, ConstDictVariable
         ):  # don't let Set use this function
@@ -769,12 +739,11 @@ class ConstDictVariable(VariableTracker):
             # defaultdict.
 
             # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
-            if istype(
+            if isinstance(
                 other,
                 (
                     ConstDictVariable,
                     variables.UserDefinedDictVariable,
-                    variables.DefaultDictVariable,
                 ),
             ):
                 # Unwrap UserDefinedDictVariable to its underlying ConstDictVariable
@@ -802,9 +771,10 @@ class ConstDictVariable(VariableTracker):
                 )
 
                 # NB - Guard on all the keys of the other dict to ensure
-                # correctness.
-                args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
-                new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
+                # correctness. Use `other` (already unwrapped from
+                # UserDefinedDictVariable to ConstDictVariable above).
+                other.install_dict_keys_match_guard()  # type: ignore[union-attr]
+                new_dict_vt.items.update(other.items)  # type: ignore[union-attr]
                 return new_dict_vt
             else:
                 raise_observed_exception(
@@ -971,131 +941,6 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         self, tx: "InstructionTranslator", args: list[VariableTracker]
     ) -> None:
         pass
-
-
-class DefaultDictVariable(ConstDictVariable):
-    _cpython_type = collections.defaultdict
-
-    def __init__(
-        self,
-        items: dict[VariableTracker, VariableTracker],
-        user_cls: type,
-        default_factory: VariableTracker | None = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(items, user_cls, **kwargs)
-        assert user_cls is collections.defaultdict
-        if default_factory is None:
-            default_factory = CONSTANT_VARIABLE_NONE
-        self.default_factory = default_factory
-
-    def is_python_constant(self) -> bool:
-        # Return false for unsupported defaults. This ensures that a bad handler
-        # path is not taken in BuiltinVariable for getitem.
-        if self.default_factory not in [list, tuple, dict] and not self.items:
-            return False
-        return super().is_python_constant()
-
-    def debug_repr(self) -> str:
-        assert self.default_factory is not None
-        return (
-            f"defaultdict({self.default_factory.debug_repr()}, {super().debug_repr()})"
-        )
-
-    @staticmethod
-    def is_supported_arg(arg: VariableTracker) -> bool:
-        return isinstance(
-            arg,
-            (
-                variables.BaseBuiltinVariable,
-                variables.functions.BaseUserFunctionVariable,
-                variables.functions.PolyfilledFunctionVariable,
-            ),
-        ) or (isinstance(arg, variables.ConstantVariable) and arg.value is None)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__getitem__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-
-            if args[0] in self:
-                return self.getitem_const(tx, args[0])
-            else:
-                if (
-                    istype(self.default_factory, ConstantVariable)
-                    and self.default_factory.value is None
-                ):
-                    raise_observed_exception(KeyError, tx, args=[args[0]])
-                else:
-                    default_var = self.default_factory.call_function(tx, [], {})
-                    super().call_method(
-                        tx, "__setitem__", [args[0], default_var], kwargs
-                    )
-                    return default_var
-        elif name == "__setattr__" and self.is_mutable:
-            if len(args) != 2:
-                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
-            # Setting a default factory must be a callable or None type
-            if (
-                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
-            ) and self.is_supported_arg(args[1]):
-                tx.output.side_effects.mutation(self)
-                self.default_factory = args[1]
-                return CONSTANT_VARIABLE_NONE
-            return super().call_method(tx, name, args, kwargs)
-        elif name == "__eq__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-
-            return VariableTracker.build(tx, polyfills.dict___eq__).call_function(
-                tx, [self, args[0]], {}
-            )
-        else:
-            return super().call_method(tx, name, args, kwargs)
-
-    def var_getattr(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-    ) -> VariableTracker:
-        if name == "default_factory":
-            return self.default_factory
-        return super().var_getattr(tx, name)
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # emit `defaultdict(default_factory, new_dict)`
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(collections),
-                    codegen.create_load_attr("defaultdict"),
-                ]
-            )
-        )
-        codegen(self.default_factory)
-        codegen.extend_output(
-            [
-                *create_call_function(1, False),
-                create_dup_top(),
-            ]
-        )
-        codegen.add_cache(self)
-
-        codegen.append_output(create_dup_top())
-        codegen.load_method("update")
-        self.reconstruct_kvs_into_new_dict(codegen)
-        codegen.extend_output(
-            [
-                *create_call_method(1),
-                create_instruction("POP_TOP"),
-            ]
-        )
 
 
 class DictViewVariable(VariableTracker):

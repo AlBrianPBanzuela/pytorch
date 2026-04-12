@@ -56,7 +56,6 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    DefaultDictVariable,
     DictItemsVariable,
     DunderDictVariable,
     MappingProxyVariable,
@@ -169,10 +168,12 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
     NamedTupleVariable,
+    OrderedDictVariable,
     RemovableHandleVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
@@ -232,6 +233,7 @@ __all__ = [
     "NewGlobalVariable",
     "NNModuleVariable",
     "NumpyNdarrayVariable",
+    "OrderedDictVariable",
     "NumpyVariable",
     "OptimizerVariable",
     "PolyfilledFunctionVariable",
