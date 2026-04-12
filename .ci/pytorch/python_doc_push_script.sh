@@ -50,9 +50,17 @@ echo "install_path: $install_path  version: $version"
 
 build_docs () {
   set +e
-  set -o pipefail
-  make "$1" 2>&1 | tee /tmp/docs_build.txt
+  # Don't pipe through tee: sphinx -j auto forks workers that inherit
+  # the pipe fd and hold it open after sphinx exits, causing tee to
+  # block forever. Use background tail -f for real-time CI output.
+  make "$1" > /tmp/docs_build.txt 2>&1 &
+  local make_pid=$!
+  tail -f /tmp/docs_build.txt &
+  local tail_pid=$!
+  wait $make_pid
   code=$?
+  kill $tail_pid 2>/dev/null
+  wait $tail_pid 2>/dev/null
   if [ $code -ne 0 ]; then
     set +x
     echo =========================
