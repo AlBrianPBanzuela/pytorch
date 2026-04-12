@@ -8,7 +8,14 @@ import operator
 import types
 import unittest
 import weakref
-from collections import defaultdict, namedtuple, OrderedDict, UserDict
+from collections import (
+    ChainMap,
+    Counter,
+    defaultdict,
+    namedtuple,
+    OrderedDict,
+    UserDict,
+)
 from collections.abc import Callable
 from functools import partial
 from typing import Any, NamedTuple
@@ -1267,6 +1274,87 @@ class DictTests(torch._dynamo.test_case.TestCase):
             dd.default_factory = int
             val = dd["b"]  # should be 0 (int()), not []
             return x + 1, dict(dd), val
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_counter_from_iterable(self):
+        """Counter(iterable) uses _count_elements C accelerator (polyfilled)."""
+
+        def f(x):
+            c = Counter([1, 2, 2, 3, 3, 3])
+            return x + c[3]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_counter_arithmetic(self):
+        """Counter supports +, -, &, | operators (all Python)."""
+
+        def f(x):
+            c1 = Counter(a=3, b=1)
+            c2 = Counter(a=1, b=2, c=1)
+            result = c1 + c2
+            return x + result["a"]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    @unittest.expectedFailure
+    def test_counter_most_common(self):
+        """Counter.most_common uses heapq/sorted which hits untraced builtins."""
+
+        def f(x):
+            c = Counter(a=4, b=2, c=1)
+            top = c.most_common(1)
+            return x + top[0][1]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_counter_update_and_missing(self):
+        """Counter.update adds counts; __missing__ returns 0."""
+
+        def f(x):
+            c = Counter(a=1)
+            c.update({"a": 2, "b": 3})
+            return x + c["a"] + c["z"]  # z missing → 0
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_chainmap(self):
+        """ChainMap is pure Python (MutableMapping subclass)."""
+
+        def f(x):
+            m1 = {"a": 1, "b": 2}
+            m2 = {"b": 3, "c": 4}
+            cm = ChainMap(m1, m2)
+            # 'b' comes from m1 (first map wins)
+            return x + cm["a"] + cm["b"] + cm["c"]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_userdict(self):
+        """UserDict is pure Python (MutableMapping subclass)."""
+
+        def f(x):
+            ud = UserDict(a=1, b=2)
+            ud["c"] = 3
+            return x + ud["a"] + ud["c"]
 
         x = torch.ones(2)
         ref = f(x)
