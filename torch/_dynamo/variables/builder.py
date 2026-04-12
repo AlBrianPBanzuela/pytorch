@@ -1670,10 +1670,6 @@ class VariableBuilder:
             # Guard on the key order
             self.tx.output.guard_on_key_order.add(self.source)
 
-            # Dict subclasses may override __getitem__, so use
-            # DictSubclassGetItemSource.  Exact OrderedDict is handled
-            # earlier with DictGetItemSource.
-
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
