@@ -1059,6 +1059,11 @@ def xfail_if_triton_cpu(fn):
     return fn
 
 
+def xfail_if_pallas(fn):
+    fn._expected_failure_pallas = True
+    return fn
+
+
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -2679,6 +2684,8 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
+    # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
+    @xfail_if_pallas
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     def test__dyn_quant_matmul_4bit_fp32_input(self):

@@ -16,7 +16,7 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import Any, Generic, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -1645,6 +1645,32 @@ class SchedulerNode(BaseSchedulerNode):
             # lru_cache.
             SIMDScheduling.candidate_tilings.cache_clear()
 
+    def snapshot_loop_state(self) -> tuple[Any, ...]:
+        """Snapshot mutable state modified by loop transformations
+        (apply_new_loop_order, apply_loop_reindexing). Must be kept
+        in sync with those methods and restore_loop_state."""
+        return (
+            self._body,
+            self._sizes,
+            self.group,
+            self.read_writes,
+            self.unmet_dependencies,
+        )
+
+    def restore_loop_state(self, state: tuple[Any, ...]) -> None:
+        """Restore state from snapshot_loop_state."""
+        from .codegen.simd import SIMDScheduling
+
+        (
+            self._body,
+            self._sizes,
+            self.group,
+            self.read_writes,
+            self.unmet_dependencies,
+        ) = state
+        self.pointwise_read_writes.clear_cache(self)
+        SIMDScheduling.candidate_tilings.cache_clear()
+
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
             new_order,
@@ -2244,9 +2270,7 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
         return (
             not node2.is_reduction()
-            or typing.cast(
-                int, self.scheduler.score_fusion_memory(node1, node2, count_bytes=False)
-            )
+            or self.scheduler.score_fusion_memory(node1, node2, count_bytes=False)
             >= self.numel
         )
 
@@ -5576,7 +5600,7 @@ class Scheduler:
         if score >= 0:
             return score
 
-        return typing.cast(int, self.score_fusion_memory(node1, node2))
+        return self.score_fusion_memory(node1, node2)
 
     def _try_reorder_loops_for_candidates(
         self,
@@ -5642,11 +5666,7 @@ class Scheduler:
                 node2.get_name(),
             )
 
-        return (
-            typing.cast(int, self.score_fusion_memory(node1, node2))
-            if reordered
-            else -1
-        )
+        return self.score_fusion_memory(node1, node2) if reordered else -1
 
     def _try_reindex_pointwise_for_reduction(
         self,
@@ -5694,16 +5714,29 @@ class Scheduler:
         ):
             return False
 
-        # TODO: both reindexing and loop reordering mutate nodes in place
-        # before we know whether fusion will actually succeed. If a later
-        # check in can_fuse rejects the fusion, the node is left modified.
-        # We should validate that fusion will succeed, or support rollback.
+        # Snapshot state before mutation so we can rollback if the
+        # reindexed deps don't actually improve the fusion score.
+        snapshots = [(sn, sn.snapshot_loop_state()) for sn in snodes]
+        old_pw_group = (
+            pw_node.group if isinstance(pw_node, FusedSchedulerNode) else None
+        )
+
         for sn in snodes:
             sn.apply_loop_reindexing([red_numel, red_rnumel])
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
             refresh_group_node_dependencies(pw_node)
+
+        # Verify reindexing actually increases shared deps.
+        if self.score_fusion_memory(node1, node2) <= 0:
+            for sn, state in snapshots:
+                sn.restore_loop_state(state)
+            if isinstance(pw_node, FusedSchedulerNode):
+                assert old_pw_group is not None
+                pw_node.group = old_pw_group
+                refresh_group_node_dependencies(pw_node)
+            return False
 
         return True
 
@@ -6303,6 +6336,26 @@ class Scheduler:
 
     def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         return V.graph.get_dep_size_hint(dep, count_bytes)
+
+    @overload
+    def score_fusion_memory(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        count_bytes: bool = ...,
+        return_is_mix_order_reduction: Literal[False] = ...,
+        allow_mix_order_reduction: bool = ...,
+    ) -> int: ...
+
+    @overload
+    def score_fusion_memory(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        count_bytes: bool = ...,
+        return_is_mix_order_reduction: Literal[True] = ...,
+        allow_mix_order_reduction: bool = ...,
+    ) -> tuple[int, int, bool]: ...
 
     def score_fusion_memory(
         self,
