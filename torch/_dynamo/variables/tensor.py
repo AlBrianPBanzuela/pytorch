@@ -272,6 +272,19 @@ class TensorVariable(VariableTracker):
     def is_tensor(self) -> bool:
         return True
 
+    def bool_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # THPVariable_bool calls at::Tensor::is_nonzero(), i.e. .item() != 0.
+        from .constant import ConstantVariable
+
+        item = self.call_method(tx, "item", [], {})
+        if isinstance(item, SymNodeVariable) and isinstance(
+            item.sym_num, torch.SymBool
+        ):
+            return item
+        if isinstance(item, ConstantVariable):
+            return VariableTracker.build(tx, bool(item.value))
+        return SymNodeVariable.create(tx, item.as_proxy() != 0)
+
     @staticmethod
     def specialize(value: torch.Tensor) -> dict[str, Any]:
         props: dict[str, Any] = {
@@ -762,6 +775,41 @@ class TensorVariable(VariableTracker):
         return (
             torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops
         )
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # Tensor.__getitem__ is a custom C slot, not CPython's mp_subscript.
+        # TODO(follow-up): add tests for negative index, bool index, invalid key type
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if self.is_strict_mode(tx) and "__getitem__" in self._strict_mode_banned_ops():
+            unimplemented(
+                gb_type="Illegal __getitem__ invocation in strict mode",
+                context=f"mp_subscript_impl {self} {key}",
+                explanation="Dynamo currently does not support __getitem__ "
+                "invocation in strict mode.",
+                hints=[],
+            )
+
+        empty_kwargs: dict[str, VariableTracker] = {}
+        static_attr = all_tensor_attrs.get("__getitem__", None)
+        if static_attr is not None and can_dispatch_torch_function(
+            tx, (self, key), empty_kwargs
+        ):
+            if self.source:
+                func_var = VariableBuilder(
+                    tx,
+                    AttrSource(AttrSource(self.source, "__class__"), "__getitem__"),
+                )(static_attr)
+            else:
+                func_var = SourcelessBuilder.create(tx, torch.Tensor.__getitem__)
+            return dispatch_torch_function(tx, func_var, (self, key), empty_kwargs)
+
+        return self.method___getitem__(tx, key)
 
     def call_method(
         self,
@@ -1467,9 +1515,6 @@ class TensorVariable(VariableTracker):
             ],
         )
 
-    def has_nb_int(self) -> bool:
-        return True
-
     def nb_int_impl(
         self,
         tx: "InstructionTranslator",
@@ -1553,6 +1598,10 @@ class TensorVariable(VariableTracker):
         )
 
     def method___len__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.sq_length(tx)
+
+    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+        """Sequence length for tensors (size along first dimension)."""
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
     def method___iter__(self, tx: "InstructionTranslator") -> ListIteratorVariable:
@@ -2139,6 +2188,18 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return self.proxy
 
+    def bool_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        # long_bool / float_bool: non-zero check. SymBool is already boolean.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/longobject.c#L5200
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/floatobject.c#L853
+        if isinstance(self.sym_num, torch.SymBool):
+            return self
+        assert isinstance(self.sym_num, (torch.SymInt, torch.SymFloat))
+        return SymNodeVariable.create(tx, self.as_proxy() != 0)
+
     def as_tensor(self, tx: "InstructionTranslatorBase", dtype: Any) -> TensorVariable:
         if self._tensor_var is None:
             self._tensor_var = VariableTracker.build(
@@ -2179,13 +2240,13 @@ class SymNodeVariable(VariableTracker):
             ),
         )
 
-    def has_nb_int(self) -> bool:
-        return True
-
     def nb_int_impl(
         self,
         tx: "InstructionTranslator",
     ) -> VariableTracker:
+        # SymInt.__int__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L462
+        # SymFloat.__int__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L682
+        # SymBool.__int__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L784
         from .builder import wrap_fx_proxy
 
         return wrap_fx_proxy(
@@ -2261,7 +2322,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 ),
             )
 
-        if name in ["T", "real", "imag"]:
+        if name in ["T", "real", "imag", "flat"]:
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_attr_wrapper,
@@ -2509,6 +2570,9 @@ class UntypedStorageVariable(VariableTracker):
         # Example_value will always have device="meta"
         self.example_value = example_value
 
+    def python_type(self) -> type:
+        return torch.UntypedStorage
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -2568,6 +2632,9 @@ class DataPtrVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
+
+    def python_type(self) -> type:
+        return int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
