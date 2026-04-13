@@ -498,6 +498,27 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    def test_reindex_rollback_on_no_improvement(self):
+        """
+        When reindexing is attempted but doesn't improve the fusion
+        score, the node state should be rolled back. Here a reduction
+        and pointwise both read from x but at different slices (offsets).
+        They share the buffer and have the same iteration numel, so
+        reindexing is attempted, but the offset means deps still don't
+        match after reindexing. The rollback restores the original
+        node state so the pointwise isn't left with a wrong iteration
+        domain.
+        """
+        M, N = 16, 128
+
+        def f(x):
+            r = x[:, :N].sum(dim=-1)
+            p = x[:, N:] * 2
+            return r, p
+
+        x = torch.randn(M, N * 2, device=GPU_TYPE)
+        self.do_acc_test(f, x)
+
     def test_reshape_reindexing_fused_pointwise(self):
         """
         Redecomposition where the pointwise side is a FusedSchedulerNode.
