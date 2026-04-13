@@ -2457,8 +2457,6 @@ def setup(app):
     # Other builders (doctest, coverage) may need doctrees on disk.
     from sphinx.builders.html import StandaloneHTMLBuilder
 
-    _orig_write_doctree = StandaloneHTMLBuilder.write_doctree
-
     def _write_doctree_no_disk(self, docname, doctree, *, _cache=True):
         # Still do the cleanup and in-memory caching, just skip the disk I/O
         doctree.reporter = None
@@ -2496,8 +2494,6 @@ def _fix_katex_server_race(app):
     import socket as _socket
     import time as _time
 
-    _orig_start = KaTeXServer.start_server_process
-
     @classmethod
     def _start_with_retry(cls, rundir, timeout):
         from subprocess import PIPE, Popen
@@ -2516,17 +2512,21 @@ def _fix_katex_server_race(app):
 
         # Retry connect() — bind() creates the socket file but listen()
         # is async in Node.js and may not be ready yet.
-        sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
         while True:
             remaining = startup_start + timeout - _time.monotonic()
             if remaining <= 0:
                 raise cls.timeout_error(timeout)
             try:
+                sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
                 sock.settimeout(remaining)
                 sock.connect(str(socket_path))
                 break
             except ConnectionRefusedError:
+                sock.close()
                 _time.sleep(ONE_MILLISECOND)
+            except _socket.timeout:
+                sock.close()
+                raise cls.timeout_error(timeout)
 
         return process, sock
 

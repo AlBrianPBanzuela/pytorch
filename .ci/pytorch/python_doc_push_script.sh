@@ -52,15 +52,13 @@ build_docs () {
   set +e
   # Don't pipe through tee: sphinx -j auto forks workers that inherit
   # the pipe fd and hold it open after sphinx exits, causing tee to
-  # block forever. Use background tail -f for real-time CI output.
+  # block forever. Write to a file and tail with --pid so it exits
+  # (after draining) when make finishes.
   make "$1" > /tmp/docs_build.txt 2>&1 &
   local make_pid=$!
-  tail -f /tmp/docs_build.txt &
-  local tail_pid=$!
+  tail -f --pid=$make_pid /tmp/docs_build.txt
   wait $make_pid
   code=$?
-  kill $tail_pid 2>/dev/null
-  wait $tail_pid 2>/dev/null
   if [ $code -ne 0 ]; then
     set +x
     echo =========================
@@ -95,7 +93,7 @@ pushd docs
 if [ "$is_main_doc" = true ]; then
   build_docs html || exit $?
 
-  # Run coverage check without parallel workers (-j 1) since it's a quick
+  # Run coverage check without parallel workers since it's a quick
   # check that doesn't need parallelism, and avoids re-triggering the
   # expensive parallel read/write machinery.
   SPHINXOPTS="-WT --keep-going" make coverage
