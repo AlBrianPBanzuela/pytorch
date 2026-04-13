@@ -159,7 +159,7 @@ def can_pad(
             return False
 
     # In deterministic mode, we can't safely benchmark - disallow padding
-    # Check this after other basic checks so force_shape_pad can override
+    # Check this after other basic checks so force_shape_pad/autoheuristic can override
     if (
         torch._inductor.config.deterministic
         and not torch._inductor.config.force_shape_pad
@@ -459,11 +459,7 @@ def should_pad(
     op: torch._ops.OpOverloadPacket,
     input: Tensor | None = None,
 ) -> bool:
-    # if 1027 in mat1.shape or 1027 in mat2.shape:
-    #     print("?")
     _can_pad = can_pad(mat1, mat2, op, input)
-    # if can_pad:
-    #     print("?")
     # Note that if you're tempted to insert a dynamo_timed call here, this function can
     # be called enough that the dynamo_timed overhead is not negligible.
     return _can_pad and _should_pad(match, mat1, mat2, op, input)
@@ -677,10 +673,8 @@ def _should_pad(
             if ah_should_pad is not None:
                 return ah_should_pad
 
-        if (
-            torch._inductor.config.deterministic
-            and not torch._inductor.config.force_shape_pad
-        ):
+        # AH didn't make a decision, so if we're in deterministic mode, we should return false
+        if torch._inductor.config.deterministic:
             return False
 
         if ori_time is None:
