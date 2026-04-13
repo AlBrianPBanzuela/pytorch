@@ -13186,12 +13186,10 @@ class TestConsistency(TestCaseMPS):
             # Broadcast
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
-
     def test_mm_stride_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180201
-        # MPS arrayViewWithShape:strides: mishandles stride-0 tensors in mm,
-        # producing zero rows for every 16th threadgroup when M>=16 and N>=16.
-        # Fixed in macOS 26.4, but still needed for older versions.
+        # MPSGraph matrixMultiplication produces incorrect results with stride-0
+        # inputs on macOS < 26.4 (only every 16th row is correct).
         expanded = torch.ones(1, 1, device="mps").expand(64, 1)
         w = torch.randn(1, 16, device="mps")
         result = expanded.mm(w)
