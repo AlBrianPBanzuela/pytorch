@@ -188,7 +188,7 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     except ObservedTypeError:
         handle_observed_exception(tx)
 
-    return ConstantVariable.create(None)
+    return ConstantVariable.create(True)
 
 
 def vt_getitem(
