@@ -109,11 +109,11 @@ class CUDAGraphPolicy:
     def wrap_output(self, output_code: _OC) -> _OC:
         """Optional outer-level wrapping after inner post_compile completes.
 
-        Called by ``BundledOutputCodeLoadable.post_compile`` on *every*
-        ``OutputCode`` returned from ``post_compile``, not only compound
-        types like ``RegionalOutputCode``.  Subclasses that only want to
-        wrap specific output types should check ``isinstance`` and return
-        the input unchanged for types they don't handle.
+        Called by ``_compile_fx_inner``, ``BundledOutputCodeLoadable.post_compile``,
+        and ``FxGraphCacheLoadable.post_compile`` on the ``OutputCode`` returned
+        from ``post_compile``.  Subclasses that only want to wrap specific
+        output types should check ``isinstance`` and return the input
+        unchanged for types they don't handle.
 
         Default: identity (no outer wrapping).
         """

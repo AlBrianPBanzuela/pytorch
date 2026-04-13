@@ -133,10 +133,9 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
         # an entire RegionalOutputCode as a single CUDA graph instead of
         # per-inner-region).
         import torch._inductor.config as _inductor_config
-        from torch._inductor.cudagraph_utils import CUDAGraphPolicy
 
         policy = _inductor_config.cudagraph_policy
-        if isinstance(policy, CUDAGraphPolicy):
+        if policy is not None:
             result = policy.wrap_output(result)
 
         return result
@@ -231,6 +230,13 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         Called after FXGraphCacheLoadable.load, mutates fx_config
         """
         result.post_compile(self.example_inputs, self.constants, fx_config)
+
+        import torch._inductor.config as _inductor_config
+
+        policy = _inductor_config.cudagraph_policy
+        if policy is not None:
+            result = policy.wrap_output(result)
+
         return result
 
 

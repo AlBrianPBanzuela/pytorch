@@ -35,7 +35,6 @@ from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
     CudagraphMetadata,
-    CUDAGraphPolicy,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
@@ -255,7 +254,7 @@ def cudagraph_post_compile(
         )
 
         policy = config.cudagraph_policy
-        if isinstance(policy, CUDAGraphPolicy):
+        if policy is not None:
             compiled_graph.current_callable = policy.cudagraphify(
                 current_callable,
                 example_inputs,
@@ -762,7 +761,7 @@ class CompiledFxGraph(OutputCode):
         # this graph so the rest of post_compile (input realignment,
         # _wrap_compiled_regions) still runs normally.
         policy = config.cudagraph_policy
-        if isinstance(policy, CUDAGraphPolicy) and not policy.should_wrap(self):
+        if policy is not None and not policy.should_wrap(self):
             counters["inductor"]["cudagraph_skips"] += 1
             BoxedBool.disable(cudagraphs)
 
@@ -791,7 +790,7 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if config.graph_partition and not isinstance(policy, CUDAGraphPolicy):
+                if config.graph_partition and policy is None:
                     # With graph_partition=True, we skip some cudagraph checks
                     # if it's supported with partition, so we use
                     # cudagraph_partition_post_compile.  When a CUDAGraphPolicy

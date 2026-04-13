@@ -62,7 +62,6 @@ from torch._functorch.aot_autograd import (
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
-    CUDAGraphPolicy,
     cudagraphs_log,
     format_default_skip_message,
     log_cudagraph_skip_and_bump_counter,
@@ -1129,7 +1128,7 @@ def _compile_fx_inner(
         compiled_graph.post_compile(example_inputs, constants, graph_kwargs)
 
         policy = config.cudagraph_policy
-        if isinstance(policy, CUDAGraphPolicy):
+        if policy is not None:
             compiled_graph = policy.wrap_output(compiled_graph)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
