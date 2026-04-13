@@ -423,7 +423,18 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
 }
 
 at::Generator THPGenerator_Unwrap(PyObject* state) {
+  // During tracing, Generator may be wrapped in a FakeScriptObject which
+  // passes isinstance(fso, torch.Generator) via OpaqueBaseMeta but cannot
+  // be reinterpret_cast'd to THPGenerator. Unwrap to the real Generator.
   if (!Py_IS_TYPE(state, &THPGeneratorType)) {
+    PyObject* real_obj = PyObject_GetAttrString(state, "real_obj");
+    if (real_obj && Py_IS_TYPE(real_obj, &THPGeneratorType)) {
+      at::Generator gen = reinterpret_cast<THPGenerator*>(real_obj)->cdata;
+      Py_DECREF(real_obj);
+      return gen;
+    }
+    Py_XDECREF(real_obj);
+    PyErr_Clear();
     TORCH_CHECK_TYPE(
         false,
         fmt::format(

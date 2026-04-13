@@ -1144,7 +1144,7 @@ inline bool PythonArgs::isNone(int i) {
 inline std::optional<at::Generator> PythonArgs::generator(int i) {
   if (!args[i])
     return std::nullopt;
-  return reinterpret_cast<THPGenerator*>(args[i])->cdata;
+  return THPGenerator_Unwrap(args[i]);
 }
 
 inline at::Storage PythonArgs::storage(int i) {
