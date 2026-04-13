@@ -1469,6 +1469,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
     ) -> VariableTracker:
         # CPython: slot_nb_int calls __int__() and validates the return type.
+        # https://github.com/python/cpython/blob/01af34a3649b/Objects/typeobject.c#L8814-L8824
         method_var = self.resolve_type_attr(
             tx,
             "__int__",
@@ -1476,14 +1477,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source=None,
         )
         result = method_var.call_function(tx, [], {})
-        if result.is_python_constant() and not isinstance(
-            result.as_python_constant(), int
-        ):
+        if not issubclass(result.python_type(), int):
             raise_observed_exception(
                 TypeError,
                 tx,
                 args=[
-                    f"__int__ returned non-int (type {type(result.as_python_constant()).__name__})"
+                    f"__int__ returned non-int (type {result.python_type().__name__})"
                 ],
             )
         return result
