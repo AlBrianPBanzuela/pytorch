@@ -3197,6 +3197,38 @@ class DefaultDictVariable(UserDefinedDictVariable):
             return self.default_factory
         return super().var_getattr(tx, name)
 
+    def _missing_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: "VariableTracker",
+    ) -> "VariableTracker":
+        """defaultdict.__missing__: auto-vivification via default_factory.
+
+        https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2233-L2254
+        """
+        from .constant import ConstantVariable
+
+        if (
+            istype(self.default_factory, ConstantVariable)
+            and self.default_factory.value is None
+        ):
+            raise_observed_exception(KeyError, tx, args=[key])
+        default_var = self.default_factory.call_function(tx, [], {})
+        assert self._base_vt is not None
+        self._base_vt.call_method(tx, "__setitem__", [key, default_var], {})
+        return default_var
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: "VariableTracker",
+    ) -> "VariableTracker":
+        """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
+        assert self._base_vt is not None
+        if key in self._base_vt:  # type: ignore[operator]
+            return self._base_vt.getitem_const(tx, key)  # type: ignore[union-attr]
+        return self._missing_impl(tx, key)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -3222,26 +3254,14 @@ class DefaultDictVariable(UserDefinedDictVariable):
                 args = list(args[1:])
             assert self._base_vt is not None
             return self._base_vt.call_method(tx, "__init__", args, kwargs)
-        elif name in ("__getitem__", "__missing__"):
+        elif name == "__getitem__":
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            assert self._base_vt is not None
-            # __getitem__ checks the dict first; __missing__ is called
-            # by mp_subscript_impl after a KeyError.
-            if name == "__getitem__" and args[0] in self._base_vt:  # type: ignore[operator]
-                return self._base_vt.getitem_const(tx, args[0])  # type: ignore[union-attr]
-            # Auto-vivification via default_factory
-            if (
-                istype(self.default_factory, ConstantVariable)
-                and self.default_factory.value is None
-            ):
-                raise_observed_exception(KeyError, tx, args=[args[0]])
-            else:
-                default_var = self.default_factory.call_function(tx, [], {})
-                self._base_vt.call_method(
-                    tx, "__setitem__", [args[0], default_var], kwargs
-                )
-                return default_var
+            return self.mp_subscript_impl(tx, args[0])
+        elif name == "__missing__":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+            return self._missing_impl(tx, args[0])
         elif name == "__setattr__":
             if len(args) != 2:
                 raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
