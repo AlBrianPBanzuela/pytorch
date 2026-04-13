@@ -115,9 +115,7 @@ def bucket_fsdp_reduce_scatter(
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
     # reduce_scatter bucketing does not support multidtype mode;
     # resolve None to the default and strip multidtype if present.
-    from torch._inductor.fx_passes.bucketing import _default_bucket_mode
-
-    rs_bucket_mode: BucketMode = mode or _default_bucket_mode()
+    rs_bucket_mode: BucketMode = mode or "default"
     if "multidtype" in rs_bucket_mode:
         rs_bucket_mode = rs_bucket_mode.replace("_multidtype", "")  # type: ignore[assignment]
     rs_buckets = bucket_reduce_scatter_by_mb(
@@ -131,8 +129,8 @@ def bucket_fsdp_reduce_scatter(
     merge_reduce_scatter(gm, rs_buckets, mode)
 
 
-def _get_group_name(n: fx.Node) -> str:
-    """Extract group_name from a collective node's args."""
+def _get_collective_kwargs(n: fx.Node) -> dict[str, object]:
+    """Normalize a collective node's args into keyword args."""
     from torch.fx.operator_schemas import normalize_function
 
     opt = normalize_function(
@@ -143,22 +141,15 @@ def _get_group_name(n: fx.Node) -> str:
     )
     assert opt is not None
     _, kwargs = opt
-    return kwargs["group_name"]
+    return kwargs
+
+
+def _get_group_name(n: fx.Node) -> str:
+    return _get_collective_kwargs(n)["group_name"]  # type: ignore[return-value]
 
 
 def _get_group_size_from_node(n: fx.Node) -> int:
-    """Extract group_size from a collective node's args."""
-    from torch.fx.operator_schemas import normalize_function
-
-    opt = normalize_function(
-        n.target,  # type: ignore[arg-type]
-        args=n.args,
-        kwargs=n.kwargs,
-        normalize_to_only_use_kwargs=True,
-    )
-    assert opt is not None
-    _, kwargs = opt
-    return kwargs["group_size"]
+    return _get_collective_kwargs(n)["group_size"]  # type: ignore[return-value]
 
 
 def identify_fsdp_group_names(gm: torch.fx.GraphModule) -> OrderedSet[str]:
@@ -278,10 +269,16 @@ def pre_bucket_fsdp_collectives(
     else:
         cap_mb = bucket_cap_mb if bucket_cap_mb is not None else 500.0
 
-    bucket_cap_fn: Callable[[int], float] = lambda _idx: cap_mb
+    def bucket_cap_fn(_idx: int) -> float:
+        return cap_mb
 
-    bucket_fsdp_all_gather(gm, bucket_cap_mb_by_bucket_idx=bucket_cap_fn, mode=mode)
-    bucket_fsdp_reduce_scatter(gm, bucket_cap_mb_by_bucket_idx=bucket_cap_fn, mode=mode)
+    resolved_mode: BucketMode = mode or "default"
+    bucket_fsdp_all_gather(
+        gm, bucket_cap_mb_by_bucket_idx=bucket_cap_fn, mode=resolved_mode
+    )
+    bucket_fsdp_reduce_scatter(
+        gm, bucket_cap_mb_by_bucket_idx=bucket_cap_fn, mode=resolved_mode
+    )
 
     ag_count_after = sum(1 for n in gm.graph.nodes if is_all_gather(n))
     rs_count_after = sum(1 for n in gm.graph.nodes if is_reduce_scatter_tensor(n))
