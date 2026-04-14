@@ -1448,7 +1448,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         type_attr = inspect.getattr_static(type(self.value), "__index__", None)
         if type_attr is None:
             return super().nb_index_impl(tx)
-        method_var = self.resolve_type_attr(tx, "__index__", type_attr, source=None)
+        source = self.source and self.get_source_by_walking_mro(tx, "__index__")
+        method_var = self.resolve_type_attr(tx, "__index__", type_attr, source)
         result = method_var.call_function(tx, [], {})
         # CPython validates that __index__ returns an int.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1433-L1438
@@ -1468,13 +1469,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslator",
     ) -> VariableTracker:
-        # CPython: slot_nb_int calls __int__() and validates the return type.
-        # https://github.com/python/cpython/blob/01af34a3649b/Objects/typeobject.c#L8814-L8824
+        # CPython: slot_nb_int calls __int__(), PyNumber_Long validates the return type.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1538-L1550
+        source = self.source and self.get_source_by_walking_mro(tx, "__int__")
         method_var = self.resolve_type_attr(
             tx,
             "__int__",
             inspect.getattr_static(type(self.value), "__int__"),
-            source=None,
+            source,
         )
         result = method_var.call_function(tx, [], {})
         if not issubclass(result.python_type(), int):
