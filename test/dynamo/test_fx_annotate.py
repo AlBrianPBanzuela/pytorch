@@ -262,6 +262,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         def fn(q, k, v, block_mask):
             with fx_traceback.annotate({"ac_region_id": 0}):
                 y = flex_attention(q, k, v, block_mask=block_mask)
+                torch.autograd.grad(y, (q, k, v), torch.ones_like(y))
                 return y.cos()
 
         warnings.filterwarnings(
@@ -276,10 +277,10 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         ):
             gm = make_fx(fn, record_stack_traces=True)(q, k, v, block_mask)
 
-        leaked_nodes = [
+        backward_nodes = [
             node for node in gm.graph.nodes if node.meta.get("autograd_backward", False)
         ]
-        self.assertFalse(leaked_nodes)
+        self.assertTrue(backward_nodes)
 
         flex_nodes = gm.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.flex_attention
