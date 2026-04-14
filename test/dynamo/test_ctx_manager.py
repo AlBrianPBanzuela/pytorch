@@ -1636,7 +1636,7 @@ class GraphModule(torch.nn.Module):
                 torch.cuda.is_available() and torch.cuda.is_bf16_supported()
             ):
                 continue
-            if device == "xpu" and not torch.xpu.is_available():
+            if device == "xpu" and not torch.xpu.is_bf16_supported():
                 continue
             self._graph_break_inlining_autocast_test_helper(device)
 
