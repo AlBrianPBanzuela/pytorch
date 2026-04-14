@@ -302,10 +302,9 @@ def generic_float(tx: "InstructionTranslator", obj: VariableTracker) -> Variable
     if type_implements_nb_index(obj_type):
         return obj.nb_index_impl(tx)
 
-    # PyFloat_FromString fallback — handles str (and raises TypeError for
-    # everything else).
+    # PyFloat_FromString fallback — handles str and bytes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1691
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), str):
+    if obj.is_python_constant() and isinstance(obj.as_python_constant(), (str, bytes)):
         try:
             return ConstantVariable.create(float(obj.as_python_constant()))
         except ValueError as e:
