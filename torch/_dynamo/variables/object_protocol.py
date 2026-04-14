@@ -119,6 +119,12 @@ def type_implements_nb_int(obj_type: type) -> bool:
     return has_slot(number_slots, PyNumberSlots.NB_INT)
 
 
+def type_implements_nb_index(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_index slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_INDEX)
+
+
 def type_implements_nb_float(obj_type: type) -> bool:
     """Check whether obj_type implements the nb_float slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
@@ -234,7 +240,7 @@ def vt_getitem(
 def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
     """Mirrors PyNumber_Long (int(x) dispatch).
 
-    https://github.com/python/cpython/blob/01af34a3649b/Objects/abstract.c#L1520-L1632
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1520-L1565
 
     For constants, constant folding in BuiltinVariable already implements the
     full PyNumber_Long semantics (str parsing, base argument, etc.), so this
@@ -247,23 +253,21 @@ def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
     if type_implements_nb_int(obj_type):
         return obj.nb_int_impl(tx)
 
-    # Step 3: fall back to nb_index. If nb_index also fails, raise
-    # the final PyNumber_Long TypeError.
-    try:
+    # Step 3: fall back to nb_index.
+    if type_implements_nb_index(obj_type):
         return obj.nb_index_impl(tx)
-    except ObservedTypeError:
-        handle_observed_exception(tx)
-        raise_type_error(
-            tx,
-            f"int() argument must be a string, a bytes-like object "
-            f"or a real number, not '{obj.python_type_name()}'",
-        )
+
+    raise_type_error(
+        tx,
+        f"int() argument must be a string, a bytes-like object "
+        f"or a real number, not '{obj.python_type_name()}'",
+    )
 
 
 def generic_float(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
     """Mirrors PyNumber_Float (float(x) dispatch).
 
-    https://github.com/python/cpython/blob/01af34a3649b/Objects/abstract.c#L1656-L1717
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1635-L1685
 
     For constants, constant folding in BuiltinVariable already implements the
     full PyNumber_Float semantics (str parsing, etc.), so this only handles
@@ -277,13 +281,12 @@ def generic_float(tx: "InstructionTranslator", obj: VariableTracker) -> Variable
         return obj.nb_float_impl(tx)
 
     # Step 3: fall back to nb_index.
-    # https://github.com/python/cpython/blob/01af34a3649b/Objects/abstract.c#L1694-L1706
-    try:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1674-L1685
+    if type_implements_nb_index(obj_type):
         return obj.nb_index_impl(tx)
-    except ObservedTypeError:
-        handle_observed_exception(tx)
-        raise_type_error(
-            tx,
-            f"float() argument must be a string or a real number, "
-            f"not '{obj.python_type_name()}'",
-        )
+
+    raise_type_error(
+        tx,
+        f"float() argument must be a string or a real number, "
+        f"not '{obj.python_type_name()}'",
+    )
