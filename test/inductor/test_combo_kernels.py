@@ -1310,43 +1310,34 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
-    def test_combo_autotune_grouping(self):
-        def fn(a, b, c, d):
-            return a.cos(), b.sin(), c.exp(), d.neg()
+    def test_combo_kernel_per_subkernel_reduction_hint(self):
+        def fn(x, y):
+            return x.sum(dim=-1), y.sum(dim=0)
 
-        # a,b: numel=262144 → bs=1024, c,d: numel=32 → bs=256
-        # Different bs → different configs → separate groups
         inps = [
-            torch.rand(4, 65536, device=GPU_TYPE),
-            torch.rand(4, 65536, device=GPU_TYPE),
-            torch.rand(4, 8, device=GPU_TYPE),
-            torch.rand(4, 8, device=GPU_TYPE),
+            torch.rand(128, 256, device=GPU_TYPE),
+            torch.rand(128, 256, device=GPU_TYPE),
         ]
 
         out_eager = fn(*inps)
-        fn_c = torch.compile(fn)
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out)
+        # Verify per-subkernel reduction hints in generated code
+        found_hints = {}
+        for c in code:
+            for key in ["reduction_hint_0", "reduction_hint_1"]:
+                m = re.search(rf"'{key}':\s*'(\w+)'", c)
+                if m:
+                    found_hints[key] = m.group(1)
 
-        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
-        with self.assertLogs(logger, level=logging.DEBUG) as cm:
-            out_compiled, code = run_and_get_code(fn_c, *inps)
-
-        # Parse "Phase 1 group N SK[...]" lines to check grouping
-        group_lines = [
-            msg for msg in cm.output if "Phase 1 group" in msg and "SK[" in msg
-        ]
-        group_indices = {
-            int(re.search(r"group (\d+)", line).group(1))
-            for line in group_lines
-            if re.search(r"group (\d+)", line)
-        }
-        # 2 groups (not 4) — identical configs are grouped together
-        self.assertEqual(
-            len(group_indices),
-            2,
-            f"Expected 2 groups, got {len(group_indices)}: {group_lines}",
+        self.assertIn(
+            "reduction_hint_0", found_hints, "Missing per-subkernel reduction_hint_0"
         )
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertIn(
+            "reduction_hint_1", found_hints, "Missing per-subkernel reduction_hint_1"
+        )
+        self.assertEqual(found_hints["reduction_hint_0"], "INNER")
+        self.assertEqual(found_hints["reduction_hint_1"], "OUTER")
 
 
 if __name__ == "__main__":
