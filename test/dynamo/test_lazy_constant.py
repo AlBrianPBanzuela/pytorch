@@ -1319,6 +1319,41 @@ class LazyConstantVariableTests(TestCase):
         x2 = torch.tensor([5, 6])
         self.assertEqual(opt_fn(x2), fn(x2))
 
+    def test_enum_creation_with_lazy_constant_values(self):
+        """Enum class creation with lazy constant member values should constant-fold."""
+        import enum
+
+        def fn(x, values):
+            MyEnum = enum.Enum("MyEnum", [("A", values[0]), ("B", values[1])])
+            return x + MyEnum.A.value + MyEnum.B.value
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+
+        x = torch.randn(3)
+        eager = fn(x, [1.0, 2.0])
+        compiled = opt_fn(x, [1.0, 2.0])
+        self.assertTrue(same(eager, compiled))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_namedtuple_type_creation_with_lazy_constant_fields(self):
+        """namedtuple type creation with lazy constant field names should constant-fold."""
+        import collections
+
+        def fn(x, fields):
+            MyTuple = collections.namedtuple("MyTuple", fields)
+            t = MyTuple(1, 2)
+            return x + t[0] + t[1]
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+
+        x = torch.randn(3)
+        eager = fn(x, ["a", "b"])
+        compiled = opt_fn(x, ["a", "b"])
+        self.assertTrue(same(eager, compiled))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_dict_mutation_no_recompile_on_unused_key_change(self):
         """Test that mutating a dict doesn't guard on unused keys.
 
@@ -1414,7 +1449,6 @@ class LazyConstantVariableTests(TestCase):
             self.assertTrue(same(eager3, compiled3))
             self.assertEqual(d3_copy["counter"], 501)  # 500 + 1 = 501
             self.assertEqual(counter.frame_count, 1)  # Still no recompile!
-
 
     def test_namedtuple_with_lazy_constant_no_recompile(self):
         """Returning a namedtuple with lazy constants should not recompile on value change."""
