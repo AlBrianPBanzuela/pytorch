@@ -164,7 +164,9 @@ class VllmTestRunner(BaseRunner):
         requirements/test/cuda.in file from vllm repo. then generates the test.txt
         in runtime
         """
-        logger.info("generate test.txt from requirements/test/cuda.in with local torch whls")
+        logger.info(
+            "generate test.txt from requirements/test/cuda.in with local torch whls"
+        )
         preprocess_test_in()
         copy("requirements/test/cuda.txt", "snapshot_constraint.txt")
 
@@ -222,7 +224,8 @@ class VllmTestRunner(BaseRunner):
 
 
 def preprocess_test_in(
-    target_file: str = "requirements/test/cuda.in", additional_packages: Iterable[str] = ()
+    target_file: str = "requirements/test/cuda.in",
+    additional_packages: Iterable[str] = (),
 ):
     """
     This modifies the target_file file in place in vllm work directory.
