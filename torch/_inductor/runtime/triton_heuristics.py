@@ -3464,7 +3464,11 @@ def _reduction_configs(
         num_warps = None
 
         # Try to use all SMs with small x
-        if x <= 1024:
+        if triton_meta.get("launch_cooperative_grid", False):
+            # cooperative launches have x <= 16, and are optimized for x_block == 1.
+            x_block = 1
+            outer_r_block = min(rnumel, 512)
+        elif x <= 1024:
             x_block = max(min(x // 128, 8), 2)
             outer_r_block = min(rnumel, 64)
         # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
@@ -3849,6 +3853,7 @@ def cooperative_reduction(
     inductor_meta,
 ):
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["max_autotune"] = True  # Testing
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
@@ -3880,7 +3885,9 @@ def cooperative_reduction(
             triton_meta=triton_meta,
         )
     for config in configs:
-        config.kwargs["RSPLIT"] = split
+        # Compensate for XBLOCK > 1.  For very small reductions, this will spawn more
+        # threads than needed, but those reductions should complete quickly anyway.
+        config.kwargs["RSPLIT"] = split * config.kwargs["XBLOCK"]
     # TODO(jansel): add more configs in max_autotune
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
