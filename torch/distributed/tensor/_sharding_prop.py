@@ -45,37 +45,6 @@ aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 
-def _adjust_group_norm_scalars(input_spec: DTensorSpec, schema: OpSchema) -> OpSchema:
-    """Adjust N, C, HxW scalar args in native_group_norm to local values.
-
-    native_group_norm(input, weight?, bias?, N, C, HxW, group, eps)
-    The scalar args are derived from the global input shape by the Python frontend.
-    When the input is sharded, we recompute them from the local input shape.
-    """
-    if input_spec.tensor_meta is None:
-        raise AssertionError("input_spec must have tensor_meta")
-    local_shape, _ = compute_local_shape_and_global_offset(
-        input_spec.tensor_meta.shape,
-        input_spec.mesh,
-        input_spec.placements,
-        skip_offset=True,
-    )
-    # N = local_shape[0], C = local_shape[1], HxW = product of remaining dims
-    n_local = local_shape[0]
-    c_local = local_shape[1]
-    hxw_local = 1
-    for d in local_shape[2:]:
-        hxw_local *= d
-    args = list(schema.args_schema)
-    # Find scalar arg positions: first 1-3 args are tensors (input, weight?, bias?),
-    # then N, C, HxW, group, eps. Count tensor args to find the offset.
-    num_tensor_args = sum(isinstance(a, DTensorSpec) for a in args)
-    args[num_tensor_args] = n_local
-    args[num_tensor_args + 1] = c_local
-    args[num_tensor_args + 2] = hxw_local
-    return OpSchema(schema.op, tuple(args), schema.kwargs_schema)
-
-
 def _propagate_use_strided_shard_flag(
     op_strategy: OpStrategy,
     op_schema: OpSchema,
@@ -439,13 +408,12 @@ class ShardingPropagator:
             aten.slice_backward.default: 1,
         }
         # ops with individual scalar shape args that need local adjustment
-        # maps op -> callable(input_spec, schema) -> adjusted schema
+        # maps op -> callable(input_specs, schema) -> adjusted schema
+        # populated by op modules (e.g. _math_ops.py) at registration time
         self.op_to_scalar_shape_adjuster: dict[
             OpOverload,
-            Callable[[DTensorSpec, OpSchema], OpSchema],
-        ] = {
-            aten.native_group_norm.default: _adjust_group_norm_scalars,
-        }
+            Callable[[list[DTensorSpec], OpSchema], OpSchema],
+        ] = {}
         # squeeze ops that need dim arg rewritten to only globally-singleton dims
         self.squeeze_op_to_dims_variant: dict[OpOverload, OpOverload] = {
             aten.squeeze.default: aten.squeeze.dims,
@@ -872,14 +840,14 @@ class ShardingPropagator:
 
                 # adjust individual scalar shape args (e.g. N, C, HxW in group_norm)
                 if op_schema.op in self.op_to_scalar_shape_adjuster:
-                    input_spec = expected_input_specs[0]
                     if any(
                         isinstance(p, Shard | _StridedShard)
-                        for p in input_spec.placements
+                        for spec in expected_input_specs
+                        for p in spec.placements
                     ):
                         schema = suggestion_schema or op_schema
                         adjuster = self.op_to_scalar_shape_adjuster[op_schema.op]
-                        suggestion_schema = adjuster(input_spec, schema)
+                        suggestion_schema = adjuster(expected_input_specs, schema)
                         needs_redistribute = True
                         use_val_from_redistribute_schema = True
 

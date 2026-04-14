@@ -31,7 +31,10 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dims,
     register_op_strategy,
 )
-from torch.distributed.tensor._utils import normalize_to_torch_size
+from torch.distributed.tensor._utils import (
+    compute_local_shape_and_global_offset,
+    normalize_to_torch_size,
+)
 from torch.distributed.tensor.placement_types import (
     _is_shard_like,
     _StridedShard,
@@ -1749,6 +1752,40 @@ def grid_sampler_backward_strategy(
     return [[_ShardingPlaceholder(0)] * 5]
 
 
+def _adjust_group_norm_scalars(
+    input_specs: list[DTensorSpec], schema: OpSchema
+) -> OpSchema:
+    """Adjust N, C, HxW scalar args in native_group_norm to local values.
+
+    native_group_norm(input, weight?, bias?, N, C, HxW, group, eps)
+    The scalar args are derived from the global input shape by the Python frontend.
+    When the input is sharded, we recompute them from the local input shape.
+    """
+    input_spec = input_specs[0]
+    if input_spec.tensor_meta is None:
+        raise AssertionError("input_spec must have tensor_meta")
+    local_shape, _ = compute_local_shape_and_global_offset(
+        input_spec.tensor_meta.shape,
+        input_spec.mesh,
+        input_spec.placements,
+        skip_offset=True,
+    )
+    # N = local_shape[0], C = local_shape[1], HxW = product of remaining dims
+    n_local = local_shape[0]
+    c_local = local_shape[1]
+    hxw_local = 1
+    for d in local_shape[2:]:
+        hxw_local *= d
+    args = list(schema.args_schema)
+    # Find scalar arg positions: first 1-3 args are tensors (input, weight?, bias?),
+    # then N, C, HxW, group, eps. Count tensor args to find the offset.
+    num_tensor_args = sum(isinstance(a, DTensorSpec) for a in args)
+    args[num_tensor_args] = n_local
+    args[num_tensor_args + 1] = c_local
+    args[num_tensor_args + 2] = hxw_local
+    return OpSchema(schema.op, tuple(args), schema.kwargs_schema)
+
+
 # ---------------------------------------------------------------------------
 # Normalization ops
 #
@@ -1815,3 +1852,13 @@ def group_norm_strategy(
     # weight and bias (if present) must be Replicate
     placements.extend([Replicate()] * (num_tensor_inputs - 1))
     return [placements]
+
+
+# Register scalar shape adjuster for group_norm so the sharding propagator
+# rewrites the N/C/HxW args to local values when the input is sharded.
+from torch.distributed.tensor._api import DTensor
+
+
+DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
+    aten.native_group_norm.default
+] = _adjust_group_norm_scalars

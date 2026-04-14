@@ -201,10 +201,6 @@ dtensor_fails = {
     xfail("sparse.mm", "reduce"),
     # bug in squeeze.dims strategy: TypeError with empty dims arg
     xfail("squeeze", "multiple"),
-    # group_norm: test tries channel-dim sharding which isn't supported
-    xfail("nn.functional.group_norm"),
-    # instance_norm decomposes to group_norm → same limitation
-    xfail("nn.functional.instance_norm"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
     # output_specs count mismatch in unsafe_split strategy
@@ -406,7 +402,7 @@ dtensor_fails_no_strategy = {
     xfail("block_diag"),
     xfail("cdist"),
     xfail("complex"),
-    xfail("diagonal_scatter"),
+    xfail("exponential"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
     xfail("geometric"),
@@ -440,7 +436,6 @@ dtensor_fails_no_strategy = {
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("select_scatter"),
     xfail("squeeze_copy"),
     xfail("stft"),
     xfail("take"),
@@ -876,6 +871,7 @@ ops_unbacked_dtensor_dde = {
     xfail("rot90"),
     xfail("scatter"),
     xfail("scatter_add"),
+    xfail("select_scatter"),
     xfail("sort"),
     xfail("squeeze_copy"),
     xfail("std_mean"),
