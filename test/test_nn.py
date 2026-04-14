@@ -2,6 +2,8 @@
 # ruff: noqa: F841
 
 import contextlib
+import ctypes
+import ctypes.util
 import math
 import random
 import unittest
@@ -6991,9 +6993,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # more bytes than needed; on the last row this can read past the
         # buffer. We detect this by placing tensor data right before an
         # unmapped guard page so any overread triggers SIGBUS/SIGSEGV.
-        import ctypes
-        import ctypes.util
-        import numpy as np
 
         page_size = os.sysconf("SC_PAGE_SIZE")
         libc = ctypes.CDLL(ctypes.util.find_library("c"))
