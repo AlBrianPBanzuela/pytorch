@@ -26847,7 +26847,7 @@ ops_and_refs = op_db + python_ref_db
 
 # Extract DSL-specific OpInfos for filtering
 # Look for any OpInfo with dsl_name attribute (DSL variants)
-dsl_ops = [op for op in op_db if hasattr(op, 'dsl_name') and getattr(op, 'dsl_name') is not None]
+dsl_ops = [op for op in op_db if hasattr(op, 'dsl_name') and op.dsl_name is not None]
 
 dsl_ops_by_dsl = {}
 

@@ -381,4 +381,3 @@ triton_silu_opinfo = UnaryUfuncInfo(
     variant_test_name='triton_optimized',
 )
 ```
-
