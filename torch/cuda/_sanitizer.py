@@ -58,7 +58,7 @@ class AccessType(enum.Enum):
         return "reading from" if self is AccessType.READ else "writing to"
 
 
-@dataclass
+@dataclass(slots=True)
 class Access:
     r"""Stores information about a single access to a tensor by a kernel.
 
@@ -204,7 +204,7 @@ class CUDASanitizerErrors(Exception):
         return f"detected {len(self.errors)} errors"
 
 
-@dataclass
+@dataclass(slots=True)
 class TensorInfo:
     r"""Stores information about a single tensor and recent accesses to it.
 
@@ -221,7 +221,7 @@ class TensorInfo:
     write: Access | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class PendingReuse:
     r"""Tracks a freed memory block awaiting potential reuse by the caching allocator.
 
