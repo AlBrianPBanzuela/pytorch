@@ -736,12 +736,12 @@ coordinate_descent_search_radius = int(
 
 
 def _parse_autoheuristic_collect_env():
-    collect_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
+    collect_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "").split(",")
     return collect_env
 
 
 def _parse_autoheuristic_use_env():
-    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm").split(",")
     return use_env
 
 
@@ -760,7 +760,7 @@ class autoheuristic_use:
     """
 
     pad_mm = "pad_mm" in _parse_autoheuristic_use_env()
-    mixed_mm = "mixed_mm" in _parse_autoheuristic_use_env()
+    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
 
 
 # If set to 1, will run a JIT post compile hook if one is set.
@@ -780,8 +780,7 @@ def collect_autoheuristic(name: str) -> bool:
         return autoheuristic_collect.mixed_mm
     else:
         # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
-        collect_set = _parse_autoheuristic_collect_env()
-        return name in collect_set
+        return name in _parse_autoheuristic_collect_env()
 
 
 def use_autoheuristic(name: str) -> bool:
@@ -791,8 +790,7 @@ def use_autoheuristic(name: str) -> bool:
         return autoheuristic_use.mixed_mm
     else:
         # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
-        use_set = _parse_autoheuristic_use_env()
-        return name in use_set
+        return name in  _parse_autoheuristic_use_env()
 
 
 # If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
