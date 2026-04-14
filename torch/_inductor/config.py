@@ -760,11 +760,7 @@ class autoheuristic_use:
     """
 
     pad_mm = "pad_mm" in _parse_autoheuristic_use_env()
-    mixed_mm = (
-        "mixed_mm" in _parse_autoheuristic_use_env()
-        if _parse_autoheuristic_use_env()
-        else True
-    )
+    mixed_mm = "mixed_mm" in _parse_autoheuristic_use_env()
 
 
 # If set to 1, will run a JIT post compile hook if one is set.
