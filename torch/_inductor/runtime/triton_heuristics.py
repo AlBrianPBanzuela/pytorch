@@ -23,7 +23,7 @@ from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
-from torch._inductor import config as inductor_config, metrics
+from torch._inductor import metrics
 from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
@@ -2961,7 +2961,6 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
     # Group sub-kernels with identical config kwargs to skip redundant tuning.
     group_map: dict[tuple[Any, ...], dict[str, Any]] = {}
-    enable_grouping = inductor_config.combo_kernel_autotune_grouping
 
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
@@ -3026,7 +3025,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 cfg_key,
                 _combo_tiling_signature(tiling_scores_i),
             )
-            if enable_grouping
+            if torch._inductor.config.combo_kernel_autotune_grouping
             else (i,)
         )
         if group_key in group_map:
