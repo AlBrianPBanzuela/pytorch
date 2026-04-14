@@ -2703,6 +2703,15 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
+            # AssertionError: Scalars are not close!
+            # torch-xpu-ops #2618
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="xpu",
+                dtypes=(torch.float64,),
+            ),
         ),
     ),
     OpInfo(
