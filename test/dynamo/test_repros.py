@@ -105,11 +105,9 @@ if HAS_MSGSPEC:
     import msgspec
 
 
-HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
-if HAS_OMEGACONG:
+HAS_OMEGACONF = importlib.util.find_spec("omegaconf")
+if HAS_OMEGACONF:
     from omegaconf import OmegaConf
-
-HAS_CUDA = torch.cuda.is_available()
 
 
 def exists(val):
@@ -978,7 +976,7 @@ class IncByTwo:
 
 
 class LRUCacheWarningTests(LoggingTestCase):
-    @requires_cuda
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
         prev_default = torch._C._get_default_device()
@@ -990,7 +988,7 @@ class LRUCacheWarningTests(LoggingTestCase):
                 torch.set_default_device(prev_default)
 
         self.addCleanup(_restore_default_device)
-        torch.set_default_device("cuda")
+        torch.set_default_device(torch.accelerator.current_accelerator().type)
 
         @torch.compile(backend="eager")
         def f(x):
@@ -4104,64 +4102,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out2 = torch.empty(12, dtype=torch.int32)
         opt_model(17, (12,), out2)
 
-    @requires_cuda
-    @serialTest()
-    def test_mem_leak_guards(self):
-        def gn(x0, x):
-            return x0 * x
-
-        class MyMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            @torch._dynamo.disable(recursive=False)
-            def forward(self, running_x):
-                # This line creates an temp tensor, which should not be leaked
-                running_x = torch.sin(running_x)
-                x = running_x
-                # This creates a TENSOR_ALIASING guard
-                x = gn(running_x, running_x)
-                # This creates a NO_TENSOR_ALIASING guard which was leaking memory
-                x = gn(running_x, x)
-                return x
-
-        mod = MyMod().cuda()
-
-        fn = torch.compile(mod, backend="eager")
-        x = torch.randn(10, 10, device="cuda")
-        torch.cuda.reset_peak_memory_stats()
-
-        fn(x)
-        peak_mem1 = torch.cuda.max_memory_allocated()
-
-        for _ in range(1000):
-            fn(x)
-        peak_mem2 = torch.cuda.max_memory_allocated()
-        self.assertTrue(peak_mem1 == peak_mem2)
-
-    @requires_cuda
-    def test_guard_default_device(self):
-        try:
-            torch.set_default_device("cuda")
-
-            counter = torch._dynamo.testing.CompileCounter()
-
-            @torch.compile(backend=counter)
-            def f():
-                x = torch.randn(3)
-                return x * 2
-
-            self.assertEqual(f().device.type, "cuda")
-            self.assertEqual(counter.frame_count, 1)
-
-            torch.set_default_device("cpu")
-
-            self.assertEqual(f().device.type, "cpu")
-            self.assertEqual(counter.frame_count, 2)
-
-        finally:
-            torch.set_default_device(None)
-
     def test_list_self_reference(self):
         # Issue - https://github.com/pytorch/pytorch/issues/100150
         root = []
@@ -4962,35 +4902,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ):
             f_compiled(a)
         # See https://github.com/pytorch/pytorch/issues/161010
-
-    def test_preserve_stride_with_clone(self) -> None:
-        A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
-        B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
-
-        def fn(
-            src: torch.Tensor, count: torch.Tensor
-        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-            Q, R = torch.linalg.qr(src)
-            rhs = torch.ones(Q.shape[0], 1, device=src.device)
-            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
-            cloned = a.clone(memory_format=torch.preserve_format)
-            return a.stride(), cloned.stride()
-
-        a_stride, cloned_stride = fn(A, torch.zeros(1))
-        self.assertEqual(
-            a_stride,
-            cloned_stride,
-            f"Strides should match in eager: {a_stride} against {cloned_stride}",
-        )
-
-        compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
-            B, torch.zeros(1)
-        )
-        self.assertEqual(
-            compiled_a_stride,
-            compiled_cloned_stride,
-            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
-        )
 
     # Extension of https://github.com/pytorch/pytorch/issues/161010
     # in the non memory dense case
@@ -6383,166 +6294,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         fn(torch.randn(4))
 
-    @requires_cuda
-    # test involves custom ops that return unbacked symints
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    # test requires the activation memory budget code to think
-    # that j() is banned from recompute
-    @torch._functorch.config.patch(activation_memory_budget=0.5)
-    def test_partitioner_activation_memory_budget_with_unbacked_symints(self):
-        @torch.library.custom_op("test_partitioner::f", mutates_args=[])
-        def f(x: torch.Tensor) -> torch.Tensor:
-            return x.new_zeros(512, 1)
-
-        @f.register_fake
-        def _(x: torch.Tensor) -> torch.Tensor:
-            ctx = torch.library.get_ctx()
-            s = ctx.new_dynamic_size()
-            return torch.empty(s, 1, device=x.device, dtype=x.dtype)
-
-        @torch.library.custom_op("test_partitioner::g", mutates_args=[])
-        def g(x: torch.Tensor) -> torch.Tensor:
-            return torch.cat([x, x[0].unsqueeze(-1)])
-
-        @g.register_fake
-        def _(x: torch.Tensor) -> torch.Tensor:
-            return torch.cat([x, x[0].unsqueeze(-1)])
-
-        @torch.library.custom_op("test_partitioner::i", mutates_args=[])
-        def i(x: torch.Tensor, sz: int) -> torch.Tensor:
-            return torch.ones(sz, 1, dtype=x.dtype, device=x.device)
-
-        @i.register_fake
-        def _(x: torch.Tensor, sz: int) -> torch.Tensor:
-            return torch.empty(sz, 1, dtype=x.dtype, device=x.device)
-
-        @torch.library.custom_op("test_partitioner::j", mutates_args=[])
-        def j(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return x + 1
-
-        @j.register_fake
-        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            sz1 = x.shape[0] - 1
-            sz2 = y.numel()
-            torch._check(sz1 == sz2)
-            # make this a reduction so partitioner bans recompute of it
-            return x.sum()
-
-        def f(x, param):
-            y = torch.ops.test_partitioner.f(x)
-            z = torch.ops.test_partitioner.g(y)
-            z2 = torch.ops.test_partitioner.i(x, z.shape[0] - 1)
-            z2 = torch.ops.test_partitioner.j(z, z2)
-            return torch.matmul(x, param).sin() * z2.sum()
-
-        x = torch.randn(512, 512, device="cuda")
-        param = torch.randn(512, 512, device="cuda", requires_grad=True)
-        out_ref = f(x, param)
-        out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
-        self.assertEqual(out_ref, out_test)
-
-    @requires_cuda
-    # This test will fail as flip in combination with particular input lengths
-    # produces weird results.
-    # This is under investigations in
-    # https://github.com/pytorch/pytorch/issues/131805
-    @unittest.skip("Skip this flip test for the moment. It is under investigation")
-    def test_flip_bad_accuracy(self):
-        import torch
-        import torch._dynamo.config
-        import torch._functorch.config
-        import torch._inductor.config
-        import torch._inductor.inductor_prims
-        import torch.fx.experimental._config
-
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, arg0_1):
-                rev = torch.ops.prims.rev.default(arg0_1, [0])
-                arg0_1 = None
-                slice_1 = torch.ops.aten.slice.Tensor(rev, 0, 0, -1, 2)
-                slice_2 = torch.ops.aten.slice.Tensor(rev, 0, 1, 9223372036854775807, 2)
-                add_1 = torch.ops.aten.add.Tensor(slice_1, slice_2)
-                slice_1 = slice_2 = None
-                slice_3 = torch.ops.aten.slice.Tensor(add_1, 0, 0, -1, 2)
-                slice_4 = torch.ops.aten.slice.Tensor(
-                    add_1, 0, 1, 9223372036854775807, 2
-                )
-                add_2 = torch.ops.aten.add.Tensor(slice_3, slice_4)
-                slice_3 = slice_4 = None
-                slice_5 = torch.ops.aten.slice.Tensor(add_2, 0, 0, -1, 2)
-                slice_6 = torch.ops.aten.slice.Tensor(
-                    add_2, 0, 1, 9223372036854775807, 2
-                )
-                add_3 = torch.ops.aten.add.Tensor(slice_5, slice_6)
-                slice_5 = slice_6 = None
-                slice_9 = torch.ops.aten.slice.Tensor(add_2, 0, 0, 1)
-                add_2 = None
-                unsqueeze = torch.ops.aten.unsqueeze.default(slice_9, 1)
-                slice_9 = None
-                unsqueeze_1 = torch.ops.aten.unsqueeze.default(add_3, 1)
-                add_3 = None
-                cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
-                unsqueeze = unsqueeze_1 = None
-                view = torch.ops.aten.view.default(cat, [2])
-                cat = None
-                slice_10 = torch.ops.aten.slice.Tensor(view, 0, 0, -1)
-                slice_11 = torch.ops.aten.slice.Tensor(
-                    add_1, 0, 2, 9223372036854775807, 2
-                )
-                add_5 = torch.ops.aten.add.Tensor(slice_10, slice_11)
-                slice_10 = slice_11 = None
-                slice_12 = torch.ops.aten.slice.Tensor(add_1, 0, 0, 1)
-                add_1 = None
-                cat_1 = torch.ops.aten.cat.default([slice_12, add_5])
-                slice_12 = add_5 = None
-                unsqueeze_2 = torch.ops.aten.unsqueeze.default(cat_1, 1)
-                cat_1 = None
-                unsqueeze_3 = torch.ops.aten.unsqueeze.default(view, 1)
-                view = None
-                cat_2 = torch.ops.aten.cat.default([unsqueeze_2, unsqueeze_3], 1)
-                unsqueeze_2 = unsqueeze_3 = None
-                view_1 = torch.ops.aten.view.default(cat_2, [4])
-                cat_2 = None
-                slice_13 = torch.ops.aten.slice.Tensor(
-                    rev, 0, 2, 9223372036854775807, 2
-                )
-                add_6 = torch.ops.aten.add.Tensor(view_1, slice_13)
-                slice_13 = None
-                slice_14 = torch.ops.aten.slice.Tensor(rev, 0, 0, 1)
-                rev = None
-                cat_3 = torch.ops.aten.cat.default([slice_14, add_6])
-                slice_14 = add_6 = None
-                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
-                    view_1, [0, 1], 0.0
-                )
-                view_1 = None
-                unsqueeze_4 = torch.ops.aten.unsqueeze.default(cat_3, 1)
-                cat_3 = None
-                unsqueeze_5 = torch.ops.aten.unsqueeze.default(constant_pad_nd, 1)
-                constant_pad_nd = None
-                cat_4 = torch.ops.aten.cat.default([unsqueeze_4, unsqueeze_5], 1)
-                unsqueeze_4 = unsqueeze_5 = None
-                view_2 = torch.ops.aten.view.default(cat_4, [10])
-                cat_4 = None
-                slice_15 = torch.ops.aten.slice.Tensor(view_2, 0, 0, 9)
-                view_2 = None
-                rev_1 = torch.ops.prims.rev.default(slice_15, [0])
-                slice_15 = None
-                return (rev_1,)
-
-        mod = Repro()
-        x = torch.arange(9, device=torch.device("cuda"))
-
-        @torch.compile
-        def f(x):
-            return mod(x)
-
-        out = f(x)
-        self.assertEqual(torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0]), out[0])
-
     # https://github.com/pytorch/pytorch/issues/88813
     def test_return_value_duplication_tensor(self) -> None:
         def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -6630,7 +6381,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(x), opt_fn(x))
 
-    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
+    @unittest.skipIf(not HAS_OMEGACONF, "missing omegaconf package")
     def test_omegaconf_dictconfig(self):
         def fn(cfg, x):
             a = cfg["foo"].a * x
@@ -6650,7 +6401,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(config, x), opt_fn(config, x))
         self.assertEqual(cloned_config.baz, 4)
 
-    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
+    @unittest.skipIf(not HAS_OMEGACONF, "missing omegaconf package")
     def test_omegaconf_listconfig_contains(self):
         def fn(cfg, x):
             if 1 in cfg:
@@ -7173,18 +6924,27 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         # Generate input once to ensure consistency across runs
         torch.manual_seed(54321)
-        torch.cuda.manual_seed_all(54321)
+        if torch.accelerator.is_available():
+            torch.get_device_module(
+                torch.accelerator.current_accelerator().type
+            ).manual_seed_all(54321)
         image_latent = torch.randn((2, 12, 16, 32, 32))
 
         torch.manual_seed(54321)
-        torch.cuda.manual_seed_all(54321)
+        if torch.accelerator.is_available():
+            torch.get_device_module(
+                torch.accelerator.current_accelerator().type
+            ).manual_seed_all(54321)
         expected = f(image_latent).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
         with torch._inductor.config.patch(fallback_random=True):
             for backend in ["eager", "aot_eager"]:
                 torch.manual_seed(54321)
-                torch.cuda.manual_seed_all(54321)
+                if torch.accelerator.is_available():
+                    torch.get_device_module(
+                        torch.accelerator.current_accelerator().type
+                    ).manual_seed_all(54321)
                 actual = torch.compile(backend=backend, fullgraph=True)(f)(
                     image_latent
                 ).sum()
@@ -7795,31 +7555,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(model(*inputs), compiled_model(*inputs))
 
-    # https://github.com/pytorch/pytorch/issues/151670
-    @requires_cuda
-    def test_diagonal_scatter_single_elem_cpu_with_cuda_tensor(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                y = torch.ones(x.size(0))
-                x = torch.diagonal_scatter(x, y)
-                return x
-
-        model = Model()
-
-        x = torch.rand(1, 2)
-        inputs = [x]
-
-        device = "cuda"
-        model = model.to(device)
-        inputs = [x.to(device) for x in inputs]
-
-        compiled_model = torch.compile(model, backend="eager")
-
-        self.assertEqual(model(*inputs), compiled_model(*inputs))
-
     def test_autograd_function_ctx_stash_no_vc_check(self):
         # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an
         # autograd.Function don't trigger version counter checks, while tensors
@@ -8089,37 +7824,266 @@ SavedForBackwardsAOTOutput(idx=5)""",
         )
         self.assertEqual(result.dtype, torch.float32)
 
+    @requires_cuda
+    def test_torch_cuda_is_initialized(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            if torch.cuda.is_initialized():
+                return x + 1
+            return x + 2
+
+        inp = torch.randn(3)
+        self.assertEqual(f(inp), inp + 1)
+
+        with mock.patch("torch.cuda.is_initialized", lambda: False):
+            self.assertEqual(f(inp), inp + 2)
+
+    def test_tensor_size_hasattr(self):
+        def fn(x):
+            if hasattr(x, "size"):
+                x = x * 2
+            if hasattr(x, "stride"):
+                x = x * 3
+            return x * 5
+
+        x = torch.ones(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_udf_class_source(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            foo = Foo()
+            bar = type(foo)()  # noqa: F841
+            return torch.cos(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
-    def test_sub_alpha_scalar_repro(self, device):
-        @torch.compile(backend="aot_eager")
+    @serialTest()
+    def test_mem_leak_guards(self, device):
+        device_mod = torch.get_device_module(device)
+
+        def gn(x0, x):
+            return x0 * x
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, running_x):
+                running_x = torch.sin(running_x)
+                x = running_x
+                x = gn(running_x, running_x)
+                x = gn(running_x, x)
+                return x
+
+        mod = MyMod().to(device)
+
+        fn = torch.compile(mod, backend="eager")
+        x = torch.randn(10, 10, device=device)
+        device_mod.reset_peak_memory_stats()
+
+        fn(x)
+        peak_mem1 = device_mod.max_memory_allocated()
+
+        for _ in range(1000):
+            fn(x)
+        peak_mem2 = device_mod.max_memory_allocated()
+        self.assertTrue(peak_mem1 == peak_mem2)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._functorch.config.patch(activation_memory_budget=0.5)
+    def test_partitioner_activation_memory_budget_with_unbacked_symints(self, device):
+        @torch.library.custom_op("test_partitioner::f", mutates_args=[])
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.new_zeros(512, 1)
+
+        @f.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            s = ctx.new_dynamic_size()
+            return torch.empty(s, 1, device=x.device, dtype=x.dtype)
+
+        @torch.library.custom_op("test_partitioner::g", mutates_args=[])
+        def g(x: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, x[0].unsqueeze(-1)])
+
+        @g.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, x[0].unsqueeze(-1)])
+
+        @torch.library.custom_op("test_partitioner::i", mutates_args=[])
+        def i(x: torch.Tensor, sz: int) -> torch.Tensor:
+            return torch.ones(sz, 1, dtype=x.dtype, device=x.device)
+
+        @i.register_fake
+        def _(x: torch.Tensor, sz: int) -> torch.Tensor:
+            return torch.empty(sz, 1, dtype=x.dtype, device=x.device)
+
+        @torch.library.custom_op("test_partitioner::j", mutates_args=[])
+        def j(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        @j.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            sz1 = x.shape[0] - 1
+            sz2 = y.numel()
+            torch._check(sz1 == sz2)
+            return x.sum()
+
+        def f(x, param):
+            y = torch.ops.test_partitioner.f(x)
+            z = torch.ops.test_partitioner.g(y)
+            z2 = torch.ops.test_partitioner.i(x, z.shape[0] - 1)
+            z2 = torch.ops.test_partitioner.j(z, z2)
+            return torch.matmul(x, param).sin() * z2.sum()
+
+        x = torch.randn(512, 512, device=device)
+        param = torch.randn(512, 512, device=device, requires_grad=True)
+        out_ref = f(x, param)
+        out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
+        self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/131805
+    @unittest.skip("Skip this flip test for the moment. It is under investigation")
+    def test_flip_bad_accuracy(self, device):
+        import torch
+        import torch._dynamo.config
+        import torch._functorch.config
+        import torch._inductor.config
+        import torch._inductor.inductor_prims
+        import torch.fx.experimental._config
+
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, arg0_1):
+                rev = torch.ops.prims.rev.default(arg0_1, [0])
+                arg0_1 = None
+                slice_1 = torch.ops.aten.slice.Tensor(rev, 0, 0, -1, 2)
+                slice_2 = torch.ops.aten.slice.Tensor(rev, 0, 1, 9223372036854775807, 2)
+                add_1 = torch.ops.aten.add.Tensor(slice_1, slice_2)
+                slice_1 = slice_2 = None
+                slice_3 = torch.ops.aten.slice.Tensor(add_1, 0, 0, -1, 2)
+                slice_4 = torch.ops.aten.slice.Tensor(
+                    add_1, 0, 1, 9223372036854775807, 2
+                )
+                add_2 = torch.ops.aten.add.Tensor(slice_3, slice_4)
+                slice_3 = slice_4 = None
+                slice_5 = torch.ops.aten.slice.Tensor(add_2, 0, 0, -1, 2)
+                slice_6 = torch.ops.aten.slice.Tensor(
+                    add_2, 0, 1, 9223372036854775807, 2
+                )
+                add_3 = torch.ops.aten.add.Tensor(slice_5, slice_6)
+                slice_5 = slice_6 = None
+                slice_9 = torch.ops.aten.slice.Tensor(add_2, 0, 0, 1)
+                add_2 = None
+                unsqueeze = torch.ops.aten.unsqueeze.default(slice_9, 1)
+                slice_9 = None
+                unsqueeze_1 = torch.ops.aten.unsqueeze.default(add_3, 1)
+                add_3 = None
+                cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
+                unsqueeze = unsqueeze_1 = None
+                view = torch.ops.aten.view.default(cat, [2])
+                cat = None
+                slice_10 = torch.ops.aten.slice.Tensor(view, 0, 0, -1)
+                slice_11 = torch.ops.aten.slice.Tensor(
+                    add_1, 0, 2, 9223372036854775807, 2
+                )
+                add_5 = torch.ops.aten.add.Tensor(slice_10, slice_11)
+                slice_10 = slice_11 = None
+                slice_12 = torch.ops.aten.slice.Tensor(add_1, 0, 0, 1)
+                add_1 = None
+                cat_1 = torch.ops.aten.cat.default([slice_12, add_5])
+                slice_12 = add_5 = None
+                unsqueeze_2 = torch.ops.aten.unsqueeze.default(cat_1, 1)
+                cat_1 = None
+                unsqueeze_3 = torch.ops.aten.unsqueeze.default(view, 1)
+                view = None
+                cat_2 = torch.ops.aten.cat.default([unsqueeze_2, unsqueeze_3], 1)
+                unsqueeze_2 = unsqueeze_3 = None
+                view_1 = torch.ops.aten.view.default(cat_2, [4])
+                cat_2 = None
+                slice_13 = torch.ops.aten.slice.Tensor(
+                    rev, 0, 2, 9223372036854775807, 2
+                )
+                add_6 = torch.ops.aten.add.Tensor(view_1, slice_13)
+                slice_13 = None
+                slice_14 = torch.ops.aten.slice.Tensor(rev, 0, 0, 1)
+                rev = None
+                cat_3 = torch.ops.aten.cat.default([slice_14, add_6])
+                slice_14 = add_6 = None
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    view_1, [0, 1], 0.0
+                )
+                view_1 = None
+                unsqueeze_4 = torch.ops.aten.unsqueeze.default(cat_3, 1)
+                cat_3 = None
+                unsqueeze_5 = torch.ops.aten.unsqueeze.default(constant_pad_nd, 1)
+                constant_pad_nd = None
+                cat_4 = torch.ops.aten.cat.default([unsqueeze_4, unsqueeze_5], 1)
+                unsqueeze_4 = unsqueeze_5 = None
+                view_2 = torch.ops.aten.view.default(cat_4, [10])
+                cat_4 = None
+                slice_15 = torch.ops.aten.slice.Tensor(view_2, 0, 0, 9)
+                view_2 = None
+                rev_1 = torch.ops.prims.rev.default(slice_15, [0])
+                slice_15 = None
+                return (rev_1,)
+
+        mod = Repro()
+        x = torch.arange(9, device=torch.device(device))
+
+        @torch.compile
         def f(x):
-            return x.sub(1, alpha=2)
+            return mod(x)
 
-        f(torch.ones(2, device=device, dtype=torch.float64))
+        out = f(x)
+        self.assertEqual(torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0]), out[0])
 
-    @requires_cuda
-    def test_norm_dtype(self, device):
-        def foo(_stack0):
-            getitem = _stack0[(slice(None, None, None), -1)]
-            _stack0 = None
-            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
-            getitem = None
-            return (normalize,)
+    # https://github.com/pytorch/pytorch/issues/151670
+    def test_diagonal_scatter_single_elem_cpu_with_gpu_tensor(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-        args = [((2, 50, 256), (1, 256, 1), torch.float16, device, False)]
-        args = [
-            rand_strided(sh, st, dt, dev).requires_grad_(rg)
-            for (sh, st, dt, dev, rg) in args
-        ]
+            def forward(self, x):
+                y = torch.ones(x.size(0))
+                x = torch.diagonal_scatter(x, y)
+                return x
 
-        torch.compile(foo, backend="aot_eager_decomp_partition")
-        with torch.cuda.amp.autocast(enabled=True):
-            ref = foo(*args)[0]
-            res = foo(*args)[0]
-            self.assertEqual(ref.dtype, res.dtype)
+        model = Model()
 
-            self.assertTrue(same(res, ref))
+        x = torch.rand(1, 2)
+        inputs = [x]
+
+        model = model.to(device)
+        inputs = [x.to(device) for x in inputs]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
+
+    def test_accelerator_sync(self, device):
+        def fn(x):
+            y = x + 1
+            torch.accelerator.synchronize()
+            return y * 2
+
+        x = torch.ones(2, device=device)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_guard_default_device(self, device):
         try:
@@ -8142,6 +8106,28 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         finally:
             torch.set_default_device(None)
+
+    def test_norm_dtype(self, device):
+        def foo(_stack0):
+            getitem = _stack0[(slice(None, None, None), -1)]
+            _stack0 = None
+            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
+            getitem = None
+            return (normalize,)
+
+        args = [((2, 50, 256), (1, 256, 1), torch.float16, device, False)]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+
+        torch.compile(foo, backend="aot_eager_decomp_partition")
+        with torch.amp.autocast(device_type=device.split(":")[0], enabled=True):
+            ref = foo(*args)[0]
+            res = foo(*args)[0]
+            self.assertEqual(ref.dtype, res.dtype)
+
+            self.assertTrue(same(res, ref))
 
     @skipIfHpu
     @unittest.skipIf(
@@ -8195,55 +8181,21 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(out3_ref.shape, out3_test.shape)
         self.assertEqual(out3_ref.stride(), out3_test.stride())
 
-    def test_megablocks_moe(self, device):
-        try:
-            from megablocks.layers import moe
-            from megablocks.layers.arguments import Arguments
-        except ImportError as e:
-            raise unittest.SkipTest("requires megablocks") from e
-        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
-        args = Arguments(
-            hidden_size=hs,
-            ffn_hidden_size=hs * 2,
-            moe_num_experts=num_experts,
-            moe_capacity_factor=1,
-            moe_top_k=top_k,
-        )
-        moe_mlp = moe.MoE(args)
-        # moe_mlp.cuda(torch.cuda.current_device()).half()
-        moe_mlp.device(torch.device.current_device()).half()
-        x = torch.randn(sl, bs, hs).device().half()
-        out1, _ = moe_mlp(x)
-        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
-        self.assertEqual(out1, out2)
-
-    def test_tensor_size_hasattr(self):
-        def fn(x):
-            if hasattr(x, "size"):
-                x = x * 2
-            if hasattr(x, "stride"):
-                x = x * 3
-            return x * 5
-
-        x = torch.ones(4)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    @requires_cuda
     def test_memleak_when_graph_input_has_tensor_attr(self, device):
+        device_mod = torch.get_device_module(device)
+
         @torch.compile(backend="eager")
         def f(x):
             x.add_(1)
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = device_mod.memory_allocated()
 
         x = torch.ones(2, device=device)
         x.foo = torch.zeros(2, device=device)
         f(x)
         del x.foo
         del x
-        mem_after = torch.cuda.memory_allocated()
+        mem_after = device_mod.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
         # check when non-tensor data structure attribute contains a tensor
@@ -8251,13 +8203,13 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         def f(x):
             x.add_(1)
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = device_mod.memory_allocated()
         x = torch.ones(2, device=device)
         x.foo = [torch.zeros(2, device=device) for _ in range(5)]
         f(x)
         del x.foo
         del x
-        mem_after = torch.cuda.memory_allocated()
+        mem_after = device_mod.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
         # check with tensor refcycle
@@ -8265,7 +8217,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         def g(x, y):
             return x + y
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = device_mod.memory_allocated()
         x = torch.ones(2, device=device)
         y = torch.zeros(2, device=device)
         x.foo = [y]
@@ -8275,41 +8227,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         del y.foo
         del x
         del y
-        mem_after = torch.cuda.memory_allocated()
+        mem_after = device_mod.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
-    def test_udf_class_source(self):
-        class Foo:
-            pass
-
-        def fn(x):
-            foo = Foo()
-            bar = type(foo)()  # noqa: F841
-            return torch.cos(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_truthiness_of_symints_no_recompiles(self, device):
-        def f(x):
-            numel = x.numel()
-            if numel:
-                return x + 1
-            else:
-                return x + 2
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        f_compiled = torch.compile(f, backend=cnt, dynamic=True)
-
-        x1 = torch.randn(4)
-        _ = f_compiled(x1)
-        x2 = torch.randn(5)
-        _ = f_compiled(x2)
-
-        self.assertEqual(cnt.frame_count, 1)
-
-    @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
@@ -8566,19 +8486,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
 
-    def test_torch_cuda_is_initialized(self):
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(x):
-            if torch.cuda.is_initialized():
-                return x + 1
-            return x + 2
-
-        inp = torch.randn(3)
-        self.assertEqual(f(inp), inp + 1)
-
-        with mock.patch("torch.cuda.is_initialized", lambda: False):
-            self.assertEqual(f(inp), inp + 2)
-
     def test_named_tuple_vt_clone(self):
         # https://github.com/pytorch/pytorch/issues/157945
         class SVDCompressor(nn.Module):
@@ -8598,9 +8505,8 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
-    @requires_cuda
-    def test_zero_dim_param_mixed_device_grad(self):
-        # cpu 0-dim params with cuda grads
+    def test_zero_dim_param_mixed_device_grad(self, device):
+        # cpu 0-dim params with accelerator grads
         # https://github.com/pytorch/pytorch/issues/160084
         class RegressionModel(torch.nn.Module):
             def __init__(self, a=0, b=0):
@@ -8615,26 +8521,13 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         model.forward = torch.compile(
             model.forward, backend="aot_eager", fullgraph=True
         )
-        inputs = torch.randn(4, 10).to("cuda")
+        inputs = torch.randn(4, 10).to(device)
         out = model(inputs)
         out.sum().backward()
         self.assertIsNotNone(model.a.grad)
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
-
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_cuda_sync(self):
-        def fn(x):
-            y = x + 1
-            torch.cuda.synchronize()
-            return y * 2
-
-        x = torch.ones(2, device="cuda")
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt)
-        self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(cnt.frame_count, 1)
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
@@ -9063,7 +8956,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @skipIfHpu
-    @requires_cuda
     def test_deterministic_pad_replicate_compile(self, device):
         from torch.testing._internal.common_utils import DeterministicGuard
 
@@ -9163,10 +9055,89 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         )
 
 
+class ReproTestsAllDevices(torch._dynamo.test_case.TestCase):
+    def test_preserve_stride_with_clone(self, device) -> None:
+        A = torch.rand(5, 5, device=device)
+        B = torch.rand(5, 5, device=device)
+
+        def fn(
+            src: torch.Tensor, count: torch.Tensor
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            Q, R = torch.linalg.qr(src)
+            rhs = torch.ones(Q.shape[0], 1, device=src.device)
+            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
+            cloned = a.clone(memory_format=torch.preserve_format)
+            return a.stride(), cloned.stride()
+
+        a_stride, cloned_stride = fn(A, torch.zeros(1))
+        self.assertEqual(
+            a_stride,
+            cloned_stride,
+            f"Strides should match in eager: {a_stride} against {cloned_stride}",
+        )
+
+        compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
+            B, torch.zeros(1)
+        )
+        self.assertEqual(
+            compiled_a_stride,
+            compiled_cloned_stride,
+            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+        )
+
+    def test_sub_alpha_scalar_repro(self, device):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sub(1, alpha=2)
+
+        f(torch.ones(2, device=device, dtype=torch.float64))
+
+    def test_truthiness_of_symints_no_recompiles(self, device):
+        def f(x):
+            numel = x.numel()
+            if numel:
+                return x + 1
+            else:
+                return x + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f_compiled = torch.compile(f, backend=cnt, dynamic=True)
+
+        x1 = torch.randn(4, device=device)
+        _ = f_compiled(x1)
+        x2 = torch.randn(5, device=device)
+        _ = f_compiled(x2)
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_megablocks_moe(self, device):
+        try:
+            from megablocks.layers import moe
+            from megablocks.layers.arguments import Arguments
+        except ImportError as e:
+            raise unittest.SkipTest("requires megablocks") from e
+        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
+        args = Arguments(
+            hidden_size=hs,
+            ffn_hidden_size=hs * 2,
+            moe_num_experts=num_experts,
+            moe_capacity_factor=1,
+            moe_top_k=top_k,
+        )
+        moe_mlp = moe.MoE(args)
+        moe_mlp.to(device).half()
+        x = torch.randn(sl, bs, hs, device=device).half()
+        out1, _ = moe_mlp(x)
+        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
+        self.assertEqual(out1, out2)
+
+
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
+instantiate_device_type_tests(
+    ReproTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
+)
+instantiate_device_type_tests(ReproTestsAllDevices, globals(), allow_xpu=True)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
