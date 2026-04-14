@@ -7,7 +7,60 @@
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
+#include <string>
+#include <unordered_set>
+
 namespace {
+
+static bool cpp_meta_supports_symint(const c10::OperatorHandle& op) {
+  static const std::unordered_set<std::string> allowlist = {
+      "aten::empty.memory_format",
+      "aten::empty_strided",
+      "aten::as_strided",
+      "aten::as_strided_",
+      "aten::zeros",
+      "aten::detach",
+      "aten::view_as_real",
+      "aten::view_as_complex",
+      "aten::set_.source_Storage_storage_offset",
+      "aten::_sparse_coo_tensor_with_dims_and_tensors",
+  };
+  const auto& name = op.operator_name();
+  auto full_name = name.name;
+  if (!name.overload_name.empty()) {
+    full_name += "." + name.overload_name;
+  }
+  if (allowlist.count(full_name)) {
+    return true;
+  }
+  // view_copy ops also support SymInt
+  return full_name.find("view_copy") != std::string::npos;
+}
+
+static bool any_tensor_has_symbolic_sizes(
+    torch::jit::Stack* stack,
+    size_t num_arguments) {
+  auto arguments = torch::jit::last(*stack, num_arguments);
+  for (size_t idx = 0; idx < num_arguments; ++idx) {
+    const auto& ivalue = arguments[idx];
+    if (ivalue.isTensor()) {
+      const auto& t = ivalue.toTensor();
+      if (t.defined() &&
+          t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+        return true;
+      }
+    } else if (ivalue.isTensorList()) {
+      for (const auto& elem : ivalue.toTensorList()) {
+        at::Tensor t = elem;
+        if (t.defined() &&
+            t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
 
 template <typename Fn>
 static void for_each_tensor(
@@ -180,11 +233,9 @@ static at::Tensor to_real_tensor(const at::Tensor& t) {
   auto device = t.device(); // returns fake device (e.g. CPU)
   auto saved_mode = c10::impl::FakeTensorModeTLS::get_state();
   c10::impl::FakeTensorModeTLS::reset_state();
-  auto real = at::empty_strided(
-                  t.sizes(),
-                  t.strides(),
-                  t.options().device(device))
-                  .zero_();
+  auto real =
+      at::empty_strided(t.sizes(), t.strides(), t.options().device(device))
+          .zero_();
   c10::impl::FakeTensorModeTLS::set_state(saved_mode);
   return real;
 }
@@ -212,17 +263,39 @@ void fakeFallback(
 
   auto fake_device = get_common_device(stack, num_arguments);
 
-  // Always rewrite device kwargs to meta so composite kernels create meta
-  // tensors internally (e.g. rand_like(x, device='cpu') must not create real
-  // CPU tensors inside the CompositeExplicitAutograd kernel).
-  auto device_from_args = rewrite_device_args_to_meta(
-      stack, arguments_begin, num_arguments, schema);
-
-  if (!fake_device.has_value()) {
-    fake_device = device_from_args;
+  auto stamp_outputs_as_fake = [&]() {
     if (!fake_device.has_value()) {
       fake_device = c10::Device(c10::DeviceType::CPU);
     }
+    const auto num_returns = schema.returns().size();
+    const auto returns_begin = stack->size() - num_returns;
+    for_each_tensor(
+        stack,
+        returns_begin,
+        num_returns,
+        [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+          if (t.defined() && (!t.is_fake() || t.device().is_meta()))
+            transmute_to_fake(t, *fake_device, mode);
+          return std::nullopt;
+        });
+  };
+
+  // call back to Python decomp table
+  if (any_tensor_has_symbolic_sizes(stack, num_arguments) &&
+      !cpp_meta_supports_symint(op) && mode && mode->decomp_fn_) {
+    if (mode->decomp_fn_(&op, stack)) {
+      stamp_outputs_as_fake();
+      return;
+    }
+  }
+
+  auto device_from_args = rewrite_device_args_to_meta(
+      stack, arguments_begin, num_arguments, schema);
+  if (!fake_device.has_value()) {
+    fake_device = device_from_args;
+  }
+  if (!fake_device.has_value()) {
+    fake_device = c10::Device(c10::DeviceType::CPU);
   }
 
   // Try the Meta kernel. If it raises NotImplementedError (no working meta
@@ -244,19 +317,7 @@ void fakeFallback(
     auto ks = dispatchKeySet.remove(c10::DispatchKey::Fake) |
         c10::DispatchKeySet(c10::DispatchKey::Meta);
     op.redispatchBoxed(ks, stack);
-
-    // Stamp meta tensor outputs with the fake device.
-    const auto num_returns = schema.returns().size();
-    const auto returns_begin = stack->size() - num_returns;
-    for_each_tensor(
-        stack,
-        returns_begin,
-        num_returns,
-        [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-          if (t.defined() && (!t.is_fake() || t.device().is_meta()))
-            transmute_to_fake(t, *fake_device, mode);
-          return std::nullopt;
-        });
+    stamp_outputs_as_fake();
   } catch (c10::NotImplementedError&) {
     // Meta kernel failed — restore the stack and run the real kernel
     // with zero-filled inputs to discover output metadata.

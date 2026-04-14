@@ -911,6 +911,30 @@ def _test_make_fx_helper_cpp_fake(self, device, dtype, op, inplace=False,
             self.skipTest("Dynamic output shape operation in trace")
 
 
+_fake_counter = 0
+
+
+def _to_cpp_fake(x):
+    if isinstance(x, torch.Tensor):
+        return torch._C._make_fake_tensor(x)
+    return x
+
+
+def _to_cpp_fake_symbolic(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    global _fake_counter
+    _fake_counter += 1
+    from torch._dynamo.source import ConstantSource
+    from torch.fx.experimental.symbolic_shapes import DimDynamic, StatelessSymbolicContext
+
+    source = ConstantSource(f"arg_{_fake_counter}")
+    ctx = StatelessSymbolicContext(
+        dynamic_sizes=[DimDynamic.DYNAMIC] * x.dim(),
+    )
+    return torch._C._make_fake_tensor(x, source=source, symbolic_context=ctx)
+
+
 def _make_fx_check_cpp_fake(func, args, kwargs, assert_close,
                             randomize_data=False, decomp_table=None):
     """Like optests.make_fx_check but traces under cpp_fake_tensor_mode()."""
@@ -926,8 +950,9 @@ def _make_fx_check_cpp_fake(func, args, kwargs, assert_close,
         return wrapper_set_seed(f, *args, **kwargs)
 
     with cpp_fake_tensor_mode():
+        fake_args = tree_map(_to_cpp_fake_symbolic, new_args)
         traced_f = make_fx(f, tracing_mode="real",
-                           decomposition_table=decomp_table)(*new_args)
+                           decomposition_table=decomp_table)(*fake_args)
 
     msg = (
         "op(*args, **kwargs) and make_fx(op)(*args, **kwargs) under "
