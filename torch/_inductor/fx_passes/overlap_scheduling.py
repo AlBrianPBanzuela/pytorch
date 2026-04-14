@@ -14,6 +14,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import (
+    _default_bucket_mode,
     _schedulable_wait_node,
     bucket_key,
     BucketMode,
@@ -160,10 +161,9 @@ def estimate_collective_time(
 
 
 def is_compute_node(n: fx.Node) -> bool:
-    """True if n is a compute-bound op (matmul, conv, attention/SDPA).
-
-    Checks whether the op has a registered FLOP formula — only
-    compute-intensive ops (mm, bmm, addmm, conv, sdpa, etc.) do.
+    """
+    Should we consider this node computationally expensive ?
+    Currently uses flop registration, but we could expand more generally.
     """
     return (
         getattr(n.target, "overloadpacket", None)
@@ -390,7 +390,7 @@ class OverlapScheduler:
         bucket_exposed_first: bool | None = None,
         enable_fusion_regions: bool = False,
         bucket_only_internode_comms: bool = False,
-        bucket_mode: BucketMode = "default",
+        bucket_mode: BucketMode | None = None,
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
     ):
@@ -413,7 +413,7 @@ class OverlapScheduler:
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
         self.bucket_only_internode_comms = bucket_only_internode_comms
-        self.bucket_mode = bucket_mode
+        self.bucket_mode = bucket_mode or _default_bucket_mode()
         self.max_off_bucket_bytes: int | None = (
             gb_to_bytes(max_off_bucket_gb) if max_off_bucket_gb is not None else None
         )
@@ -1369,10 +1369,7 @@ class OverlapScheduler:
             self.wasted_compute += min(remaining_time_per_pg.values())
 
     def _find_schedulable_path(
-        self,
-        target: fx.Node,
-        curr_overlap_node: fx.Node | None,
-        why: WhyNoOverlap,
+        self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
         # Get unscheduled ancestors
@@ -1408,9 +1405,7 @@ class OverlapScheduler:
                 )
                 return None
 
-            # Skip c10 ops and dtensor shard ops - they should be scheduled via
-            # main loop since they have complex dependencies that can create
-            # cycles in the reordered graph.
+            # Skip c10 ops and dtensor shard ops - they should be scheduled via main loop
             target_str = str(node.target)
             if "c10" in target_str or "_dtensor" in target_str:
                 log.debug(
@@ -1746,7 +1741,7 @@ def schedule_overlap_bucketing(
     bucket_only_internode_comms=False,
     prioritize_bucketing_during_scheduling: bool = True,
     max_off_bucket_gb: float | None = 0.5,
-    bucket_mode: BucketMode = "default",
+    bucket_mode: BucketMode | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1773,6 +1768,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
+        bucket_mode: Bucketing mode for grouping collectives.
     """
     if not any(is_wait_tensor(n) for n in gm.graph.nodes):
         return gm
