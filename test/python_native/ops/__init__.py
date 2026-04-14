@@ -13,7 +13,7 @@ from typing import List
 from torch.testing._internal.opinfo.core import OpInfo
 
 
-def discover_dsl_opinfos() -> List[OpInfo]:
+def discover_dsl_opinfos() -> list[OpInfo]:
     """
     Automatically discover and load all DSL OpInfo definitions from subdirectories.
 
