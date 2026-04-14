@@ -2180,6 +2180,15 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        # Short-circuit when the mask is statically resolvable.
+        # This happens when the iteration range has been narrowed so the
+        # mask condition is always true or always false.
+        if isinstance(mask, TritonCSEVariable) and mask.bounds.is_bool:
+            if mask.bounds == ValueRanges.wrap(True):
+                return body()
+            if mask.bounds == ValueRanges.wrap(False):
+                return ops.constant(other, torch.float32)
+
         if mask is not None and torch.version.hip is not None:
             mask = V.kernel.cse.generate(
                 V.kernel.compute,
