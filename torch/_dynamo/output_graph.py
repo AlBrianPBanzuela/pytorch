@@ -1336,7 +1336,9 @@ class OutputGraph(OutputGraphCommon):
 
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
 
-        gpu_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cuda"
+        gpu_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cuda"
+        )
         global_state["autocast_enabled"] = (
             functools.partial(torch.set_autocast_enabled, gpu_type),
             torch.is_autocast_enabled(gpu_type),
