@@ -153,6 +153,8 @@ class ManualOverlapScheduler(OverlapScheduler):
         module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
         bucket_mode: BucketMode | None = None,
     ):
+        # Manual overlap historically used "custom_ops" mode for bucketing
+        bucket_mode = bucket_mode or "custom_ops"
         super().__init__(
             gm,
             max_in_flight_gb=0.0,
