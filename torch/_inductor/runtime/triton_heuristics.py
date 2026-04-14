@@ -1478,14 +1478,6 @@ class CachingAutotuner(KernelInterface):
             "global_scratch": launcher.global_scratch,
             "profile_scratch": launcher.profile_scratch,
         }
-        if self.device_props.type == "xpu":
-            # On the XPU backend, threads_per_warp is not always 32.
-            # For Intel GEMM Triton kernels, it can be 16.
-            # This information must be preserved so that the Cpp wrapper
-            # can launch the kernel with the correct configuration.
-            params["threads_per_warp"] = getattr(
-                launcher.bin.metadata, "threads_per_warp", 32
-            )
 
         from torch._inductor import config
         from torch._inductor.codecache import CudaKernelParamCache
@@ -2946,9 +2938,9 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_warps: list[int] = []
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
+    combo_coordesc_field_limits: dict[str, int] = {}
 
-    # Group sub-kernels with identical config kwargs to skip redundant tuning.
-    group_map: dict[tuple[tuple[str, int], ...], dict[str, Any]] = {}
+    combo_tuning_groups: list[dict[str, Any]] = []
 
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
@@ -2972,7 +2964,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         elif subkernel_heuristic == "reduction":
             cfgs = reduction(
                 size_hints_i,
-                reduction_hint=reduction_hint,
+                reduction_hint=ReductionHint[combo_meta[f"reduction_hint_{i}"]],
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
@@ -2982,7 +2974,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         elif subkernel_heuristic == "persistent_reduction":
             cfgs = persistent_reduction(
                 size_hints_i,
-                reduction_hint=reduction_hint,
+                reduction_hint=ReductionHint[combo_meta[f"reduction_hint_{i}"]],
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
@@ -2992,37 +2984,50 @@ def _handle_combo_kernel_per_subkernel_blocks(
         else:
             raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
 
+        group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
         for key, value in cfg.kwargs.items():
             if skip_rblock and key.startswith("R") and "BLOCK" in key:
                 continue
-            combined_kwargs[f"{key}_{i}"] = value
+
+            combined_key = f"{key}_{i}"
+            combined_kwargs[combined_key] = value
+            if key.endswith("BLOCK"):
+                group_coordesc_fields.add(combined_key)
+                prefix = key.removesuffix("BLOCK").lower()
+                if prefix in size_hints_i:
+                    combo_coordesc_field_limits[combined_key] = min(
+                        TRITON_MAX_BLOCK[prefix.upper()],
+                        size_hints_i[prefix],
+                    )
 
         all_num_warps.append(cfg.num_warps)
         all_num_stages.append(cfg.num_stages)
         for c in cfgs:
             unique_warp_stage_pairs.add((c.num_warps, c.num_stages))
 
-        cfg_key = tuple(item for c in cfgs for item in sorted(c.kwargs.items()))
-        if cfg_key in group_map:
-            group_map[cfg_key]["member_indices"].append(i)
-        else:
-            group_map[cfg_key] = {
+        combo_tuning_groups.append(
+            {
                 "member_indices": [i],
                 "configs": cfgs,
                 "skip_rblock": skip_rblock,
                 "size_hints": size_hints_i,
+                "coordesc_fields": list(group_coordesc_fields),
             }
+        )
 
     unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
     inductor_meta["combo_size_hints"] = combined_size_hints
 
-    combo_tuning_groups = list(group_map.values())
     # Largest sub-kernels tuned first — they dominate runtime and get most freedom
     combo_tuning_groups.sort(
         key=lambda g: -functools.reduce(operator.mul, g["size_hints"].values())
     )
     inductor_meta["combo_tuning_groups"] = combo_tuning_groups
+    inductor_meta["combo_coordesc_field_order"] = [
+        field for group in combo_tuning_groups for field in group["coordesc_fields"]
+    ]
+    inductor_meta["combo_coordesc_field_limits"] = combo_coordesc_field_limits
     # Candidates for num_warps/num_stages re-tuning after block sizes are finalized
     inductor_meta["combo_warp_stage_candidates"] = list(unique_warp_stage_pairs)
 

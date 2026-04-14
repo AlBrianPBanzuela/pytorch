@@ -75,7 +75,7 @@ class CoordescTuner:
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )
-        self._extra_tunable_fields: list[str] = []
+        self._combo_tunable_fields: list[str] = []
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -137,25 +137,17 @@ class CoordescTuner:
             # control the stage of pipelining of tl.range.
             out.append("NUM_STAGES")
 
-        out.extend(self._extra_tunable_fields)
+        out = self._combo_tunable_fields + out
         return [f for f in out if f not in self.frozen_fields]
 
-    @staticmethod
-    def _parse_suffixed_block(name: str) -> str | None:
-        last_underscore = name.rfind("_")
-        if last_underscore == -1:
-            return None
-        base = name[:last_underscore]
-        suffix = name[last_underscore + 1 :]
-        if suffix.isdigit() and base.endswith("BLOCK"):
-            return base
-        return None
-
     def value_too_large(self, name: str, val: int) -> bool:
-        base_name = self._parse_suffixed_block(name) or name
+        field_limits = self.inductor_meta.get("combo_coordesc_field_limits")
+        if isinstance(field_limits, dict) and name in field_limits:
+            return val > field_limits[name]
+
         block_suffix = "BLOCK"
-        if base_name.endswith(block_suffix):
-            prefix = base_name.strip(block_suffix).lower()
+        if name.endswith(block_suffix):
+            prefix = name.strip(block_suffix).lower()
             return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
@@ -318,10 +310,6 @@ class CoordescTuner:
     ) -> "triton.Config":  # pyrefly: ignore  # missing-attribute
         """
         Perform coordinate descent autotuning starting from a baseline configuration.
-
-        This method iteratively tunes one field/coordinate at a time, exploring
-        neighboring values (larger and smaller) for each tunable field. It continues
-        until no further improvement is found.
         """
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
@@ -337,14 +325,9 @@ class CoordescTuner:
         best_config = baseline_config
         best_timing = baseline_timing
 
-        for key in baseline_config.kwargs:
-            base = self._parse_suffixed_block(key)
-            if (
-                base
-                and base in {"XBLOCK", "YBLOCK", "R0_BLOCK"}
-                and key not in self._extra_tunable_fields
-            ):
-                self._extra_tunable_fields.append(key)
+        self._combo_tunable_fields = self.inductor_meta.get(
+            "combo_coordesc_field_order", []
+        )
 
         tunable_fields = self.tunable_fields
 
