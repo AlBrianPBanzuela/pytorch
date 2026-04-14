@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -24,7 +24,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, DeferredLineBase, LineContext, normalize_name
+from ..utils import _align, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -33,6 +33,7 @@ from .wrapper import (
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
+    HasWriteLine,
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
@@ -47,10 +48,6 @@ if TYPE_CHECKING:
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
 
     from ..scheduler import BaseSchedulerNode
-
-
-class HasWriteLine(Protocol):
-    def writeline(self, line: LineContext | DeferredLineBase | str) -> None: ...
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -147,6 +144,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
+        current_stream_idx=None,
     ):
         """
         Generates kernel call code.
@@ -294,6 +292,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch::aot_inductor {")
+        self.codegen_input_size_and_nan_asserts()
 
     def write_input_output_info(
         self,
