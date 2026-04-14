@@ -1600,7 +1600,7 @@ def as_strided_copy(x, size, stride, storage_offset=None):
     return clone(result)
 
 
-def pointwise_cat(inputs, dim=0):
+def pointwise_cat(inputs, dim=0, share_reads=False):
     # (inclusive, exclusive)
     inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
@@ -1614,7 +1614,7 @@ def pointwise_cat(inputs, dim=0):
         idx_dim = ops.index_expr(idx[dim], torch.int64)
 
         masks = []
-        masked_loads = []
+        loaded_vals = []
         for i in range(len(inputs)):
             start = (
                 ops.constant(0, torch.int64)
@@ -1635,25 +1635,33 @@ def pointwise_cat(inputs, dim=0):
             masks.append(mask)
             idx_load = list(idx)
 
-            # if we're concatting [4], [2]
-            # when we index the second tensor for 5 we want to index 5 - 4
-            # Use Identity to prevent expansion of index * stride to keep expression
-            # in same int bitwidth as shape
-            idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
+            if share_reads:
+                # ModularIndexing wraps to [0, size), always in-bounds.
+                # Since all inputs read the same buffers, this is safe and
+                # produces identical index expressions across branches,
+                # enabling CSE to deduplicate shared computation.
+                size = inputs_ranges[i][1] - inputs_ranges[i][0]
+                idx_load[dim] = ModularIndexing(
+                    idx_load[dim] - inputs_ranges[i][0], 1, size
+                )
+                loaded_vals.append(inputs_loaders[i](idx_load))
+            else:
+                # Use Identity to prevent expansion of index * stride to
+                # keep expression in same int bitwidth as shape
+                idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
+                loaded_vals.append(
+                    ops.masked(
+                        mask,
+                        lambda: inputs_loaders[i](idx_load),
+                        0.0,  # this value should be unused
+                    ),
+                )
 
-            masked_loads.append(
-                ops.masked(
-                    mask,
-                    lambda: inputs_loaders[i](idx_load),
-                    0.0,  # this value should be unused
-                ),
-            )
-
-        next_val = masked_loads[-1]
+        next_val = loaded_vals[-1]
         for i in range((len(inputs)) - 2, -1, -1):
             next_val = ops.where(
                 masks[i],
-                masked_loads[i],
+                loaded_vals[i],
                 next_val,
             )
         return next_val
@@ -2182,7 +2190,7 @@ def cat(inputs, dim=0):
         )
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
-            return pointwise_cat(inputs, dim)
+            return pointwise_cat(inputs, dim, share_reads=recombined is not None)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
