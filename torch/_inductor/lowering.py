@@ -1600,7 +1600,7 @@ def as_strided_copy(x, size, stride, storage_offset=None):
     return clone(result)
 
 
-def pointwise_cat(inputs, dim=0):
+def pointwise_cat(inputs, dim=0, share_reads=False):
     # (inclusive, exclusive)
     inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
@@ -1614,7 +1614,7 @@ def pointwise_cat(inputs, dim=0):
         idx_dim = ops.index_expr(idx[dim], torch.int64)
 
         masks = []
-        masked_loads = []
+        loaded_vals = []
         for i in range(len(inputs)):
             start = (
                 ops.constant(0, torch.int64)
@@ -1635,25 +1635,33 @@ def pointwise_cat(inputs, dim=0):
             masks.append(mask)
             idx_load = list(idx)
 
-            # if we're concatting [4], [2]
-            # when we index the second tensor for 5 we want to index 5 - 4
-            # Use Identity to prevent expansion of index * stride to keep expression
-            # in same int bitwidth as shape
-            idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
+            if share_reads:
+                # ModularIndexing wraps to [0, size), always in-bounds.
+                # Since all inputs read the same buffers, this is safe and
+                # produces identical index expressions across branches,
+                # enabling CSE to deduplicate shared computation.
+                size = inputs_ranges[i][1] - inputs_ranges[i][0]
+                idx_load[dim] = ModularIndexing(
+                    idx_load[dim] - inputs_ranges[i][0], 1, size
+                )
+                loaded_vals.append(inputs_loaders[i](idx_load))
+            else:
+                # Use Identity to prevent expansion of index * stride to
+                # keep expression in same int bitwidth as shape
+                idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
+                loaded_vals.append(
+                    ops.masked(
+                        mask,
+                        lambda: inputs_loaders[i](idx_load),
+                        0.0,  # this value should be unused
+                    ),
+                )
 
-            masked_loads.append(
-                ops.masked(
-                    mask,
-                    lambda: inputs_loaders[i](idx_load),
-                    0.0,  # this value should be unused
-                ),
-            )
-
-        next_val = masked_loads[-1]
+        next_val = loaded_vals[-1]
         for i in range((len(inputs)) - 2, -1, -1):
             next_val = ops.where(
                 masks[i],
-                masked_loads[i],
+                loaded_vals[i],
                 next_val,
             )
         return next_val
@@ -1982,6 +1990,40 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     )
 
 
+def _cat_inputs_recombine_reduction(inputs: list[TensorBox], dim: int) -> str | None:
+    """If all cat inputs share a common upstream reduction whose total
+    numel matches the cat output, return that reduction's buffer name."""
+    if len(inputs) < 2:
+        return None
+
+    common_reads = inputs[0].get_read_names()
+    for inp in inputs[1:]:
+        common_reads = common_reads & inp.get_read_names()
+    if not common_reads:
+        return None
+
+    cat_out_size = list(inputs[0].get_size())
+    cat_out_size[dim] = sum(inp.get_size()[dim] for inp in inputs)
+    cat_out_numel = sympy_product(cat_out_size)
+    for name in common_reads:
+        buf = V.graph.try_get_buffer(name)
+        if (
+            buf is not None
+            and isinstance(buf, ir.ComputedBuffer)
+            and isinstance(buf.data, ir.Reduction)
+        ):
+            # Compare against the reduction's input numel (iteration ×
+            # reduction dims) since downstream pointwise ops broadcast
+            # the result back to the full input shape.
+            reduction_numel = sympy_product(buf.data.get_size()) * sympy_product(
+                buf.data.get_reduction_size()
+            )
+            if V.graph.sizevars.statically_known_equals(cat_out_numel, reduction_numel):
+                return name
+
+    return None
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
@@ -2021,20 +2063,26 @@ def cat(inputs, dim=0):
     def is_reduction(t):
         return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
 
-    def can_fuse_reduction(t):
+    def can_fuse_reduction(t, exclude: OrderedSet[str] = OrderedSet()):
         if isinstance(t, (TensorBox, ir.StorageBox)):
-            return can_fuse_reduction(unwrap_tensor(t))
+            return can_fuse_reduction(unwrap_tensor(t), exclude)
         return (
             is_reduction(t)
             or isinstance(t, ir.Pointwise)
             and any(
-                can_fuse_reduction(V.graph.get_buffer(read))
+                read not in exclude
+                and can_fuse_reduction(V.graph.get_buffer(read), exclude)
                 for read in t.get_read_names()
             )
         )
 
-    # fusing reducutions into computed concat buffer can cause regressions.
-    fusable_reduction = any(can_fuse_reduction(t) for t in inputs)
+    # Pointwise cat evaluates every input's computation for each
+    # output element (masked), so fusing reductions in is wasteful.
+    # Exception: when inputs just recombine a reduction's output
+    # (e.g. qknorm → RoPE → cat), we do not duplicate computation
+    recombined = _cat_inputs_recombine_reduction(inputs, dim)
+    exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
+    fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
     def should_lower_cat_input(x) -> bool:
         # Unrealized inputs will not be storage and layouts, and we dont want to realize
@@ -2137,13 +2185,12 @@ def cat(inputs, dim=0):
 
         has_multi_consumers = any_input_has_multi_consumers()
 
-        horizontal_fuse_cat = all(
-            should_lower_cat_input(inp) for inp in inputs
-        ) and not any(can_fuse_reduction(t) for t in inputs)
-        if not has_multi_consumers and (
-            fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction)
-        ):
-            return pointwise_cat(inputs, dim)
+        horizontal_fuse_cat = (
+            all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
+        )
+
+        if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
+            return pointwise_cat(inputs, dim, share_reads=recombined is not None)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
