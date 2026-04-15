@@ -183,10 +183,6 @@ void initModule(PyObject* module) {
   });
 
   // Accelerator Graph class binding
-  m.def("_accelerator_generateGraphPoolHandle", []() {
-    return c10::generate_mempool_id(true);
-  });
-
   py::class_<at::accelerator::Graph, std::shared_ptr<at::accelerator::Graph>>(
       m, "_acceleratorGraph")
       .def(py::init<bool>(), py::arg("keep_graph") = false)
@@ -244,10 +240,6 @@ void initModule(PyObject* module) {
           torch::wrap_pybind_function_no_gil(
               &::at::accelerator::Graph::debug_dump),
           py::arg("path"));
-
-  m.def("_accelerator_isGraphAvailable", []() {
-    return at::accelerator::isGraphAvailable();
-  });
 }
 
 } // namespace torch::accelerator
