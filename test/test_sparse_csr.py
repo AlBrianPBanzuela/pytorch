@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
      IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
-    (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, onlyMPS, skipCUDAIfNoSparseGeneric,
+    (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
@@ -4303,7 +4303,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
 
 class TestSparseCSRMPS(TestCase):
-    # curated unary coverage for MPS sparse CSR. 
+    # curated unary coverage for MPS sparse CSR.
     ZERO_PRESERVING_UNARY_OPS = (
         "abs",
         "angle",
