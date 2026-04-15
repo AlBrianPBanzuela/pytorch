@@ -127,7 +127,7 @@ if(WIN32)
   # sets MSVC-style compile/link rules (because C/CXX use MSVC frontend).
   # Override them all with GNU-style rules for clang++.
 
-  # Compile: use -o instead of /Fo, -isystem instead of -imsvc, etc.
+  # Compile: use GNU-style flags (-o, -isystem) instead of MSVC-style.
   set(CMAKE_HIP_COMPILE_OBJECT
     "<CMAKE_HIP_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -x hip -c <SOURCE>")
   set(CMAKE_INCLUDE_SYSTEM_FLAG_HIP "-isystem ")
