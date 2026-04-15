@@ -48,12 +48,14 @@ const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
     case cudaErrorLaunchFailure:
     case cudaErrorIllegalAddress:
     case cudaErrorAssert:
+#ifndef USE_ROCM
     case cudaErrorIllegalInstruction:
-    case cudaErrorMisalignedAddress: {
+    case cudaErrorMisalignedAddress:
+#endif
+    {
       static auto device_blocking_flag =
           c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
-      static bool blocking_enabled =
-          (device_blocking_flag.has_value() && device_blocking_flag.value());
+      static bool blocking_enabled = device_blocking_flag.value_or(false);
       if (!blocking_enabled) {
         return "\nCUDA kernel errors might be asynchronously reported at some"
                " other API call, so the stacktrace below might be incorrect."
