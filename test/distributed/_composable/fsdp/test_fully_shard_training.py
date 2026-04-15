@@ -844,21 +844,27 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         correctness end-to-end.
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False]},
+            {
+                "reshard_after_forward": [True, False],
+                "weight_tying": [False, True],
+            },
             self._test_partial_group_forward_then_standalone,
         )
 
     def _test_partial_group_forward_then_standalone(
         self,
         reshard_after_forward: bool | int,
+        weight_tying: bool,
     ):
         class ChunkedHeadModel(nn.Module):
-            def __init__(self, dim: int, vocab_size: int) -> None:
+            def __init__(self, dim: int, vocab_size: int, tie: bool) -> None:
                 super().__init__()
                 self.embed = nn.Embedding(vocab_size, dim)
                 self.body = nn.Linear(dim, dim, bias=False)
                 self.norm = nn.RMSNorm(dim)
                 self.head = nn.Linear(dim, vocab_size, bias=False)
+                if tie:
+                    self.head.weight = self.embed.weight
 
             def forward(
                 self, tokens: torch.Tensor, *, skip_head: bool = False
@@ -915,21 +921,28 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
         # Reference: plain model, chunked forward, all-reduce grads
         torch.manual_seed(42)
-        ref_model = ChunkedHeadModel(dim, vocab_size).to(device_type)
+        ref_model = ChunkedHeadModel(dim, vocab_size, weight_tying).to(device_type)
         with torch.no_grad():
             for param in ref_model.parameters():
                 dist.broadcast(param, src=0)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        # Test: grouped [norm, head] with chunked forward
+        # Test: grouped FSDP with chunked forward.
+        # With weight tying, embed and head share a weight and must be in the
+        # same FSDP group — mirrors torchtitan's
+        # fully_shard([tok_embeddings, output]).
         torch.manual_seed(42)
-        model = ChunkedHeadModel(dim, vocab_size).to(device_type)
+        model = ChunkedHeadModel(dim, vocab_size, weight_tying).to(device_type)
         with torch.no_grad():
             for param in model.parameters():
                 dist.broadcast(param, src=0)
-        fully_shard(model.embed, **fsdp_kwargs)
-        fully_shard(model.body, **fsdp_kwargs)
-        fully_shard([model.norm, model.head], **fsdp_kwargs)
+        if weight_tying:
+            fully_shard(model.body, **fsdp_kwargs)
+            fully_shard([model.embed, model.norm, model.head], **fsdp_kwargs)
+        else:
+            fully_shard(model.embed, **fsdp_kwargs)
+            fully_shard(model.body, **fsdp_kwargs)
+            fully_shard([model.norm, model.head], **fsdp_kwargs)
         fully_shard(model, **fsdp_kwargs)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
