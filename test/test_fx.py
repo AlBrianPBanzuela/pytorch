@@ -5525,15 +5525,10 @@ class TestSymIntResolution(TestCase):
         # Should be a mul Node (s0 * s1)
         self.assertIsInstance(node.args[0][0], fx.Node)
 
-    def test_concrete_symint_becomes_int(self):
-        """Concrete SymInt (backed by a number) becomes plain int."""
-        _, ph = self._make_symbolic_graph()
-
+    def test_concrete_int_unchanged(self):
+        """Plain int args pass through unchanged (no resolution needed)."""
         new_graph = fx.Graph()
-        new_ph = new_graph.placeholder("x")
-        new_ph.meta = ph.meta.copy()
 
-        # A plain int should pass through unchanged
         node = new_graph.call_function(
             torch.ops.aten.empty.memory_format, ([42],)
         )
@@ -5541,11 +5536,8 @@ class TestSymIntResolution(TestCase):
 
     def test_no_symint_args_unchanged(self):
         """Regular args (Nodes, ints) are not modified."""
-        _, ph = self._make_symbolic_graph()
-
         new_graph = fx.Graph()
         new_ph = new_graph.placeholder("x")
-        new_ph.meta = ph.meta.copy()
 
         node = new_graph.call_function(
             torch.ops.aten.reshape.default, (new_ph, [-1])
