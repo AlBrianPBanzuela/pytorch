@@ -5599,6 +5599,32 @@ graph():
         with self.assertRaises(TypeError):
             graph.symint_to_node("not_a_symint")
 
+    def test_auto_resolve_nested_floordiv_expression(self):
+        """Nested floor-div + arithmetic expression is fully decomposed."""
+        graph, ph = self._make_symbolic_graph()
+        s0 = ph.meta["val"].size(0)
+        s1 = ph.meta["val"].size(1)
+
+        # (s0 + 10) // ((s1 // 5) + 3) * s0 + 42
+        expr = (s0 + 10) // ((s1 // 5) + 3) * s0 + 42
+
+        node = graph.call_function(torch.ops.aten.empty.memory_format, ([expr],))
+        graph.output(node)
+
+        self.assertExpectedInline(str(graph), """\
+graph():
+    %x : [num_users=2] = placeholder[target=x]
+    %sym_size_int : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%x, 0), kwargs = {})
+    %sym_size_int_1 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%x, 1), kwargs = {})
+    %add : [num_users=1] = call_function[target=operator.add](args = (10, %sym_size_int), kwargs = {})
+    %floordiv : [num_users=1] = call_function[target=operator.floordiv](args = (%sym_size_int_1, 5), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=operator.add](args = (3, %floordiv), kwargs = {})
+    %floordiv_1 : [num_users=1] = call_function[target=operator.floordiv](args = (%add, %add_1), kwargs = {})
+    %mul : [num_users=1] = call_function[target=operator.mul](args = (%sym_size_int, %floordiv_1), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=operator.add](args = (42, %mul), kwargs = {})
+    %empty_memory_format : [num_users=1] = call_function[target=torch.ops.aten.empty.memory_format](args = ([%add_2],), kwargs = {})
+    return empty_memory_format""")
+
 
 if __name__ == "__main__":
     run_tests()

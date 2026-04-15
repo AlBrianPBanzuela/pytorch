@@ -40,7 +40,10 @@ def _resolve_symints_in_args(graph: "Graph", x: object) -> object:
     if isinstance(x, torch.SymInt):
         return graph.symint_to_node(x)
     elif isinstance(x, (torch.SymFloat, torch.SymBool)):
-        return x  # TODO: handle SymFloat/SymBool when needed
+        raise TypeError(
+            f"Automatic resolution of {type(x).__name__} to FX nodes is not yet supported. "
+            f"Only torch.SymInt is supported."
+        )
     elif isinstance(x, torch.Size):
         return [_resolve_symints_in_args(graph, item) for item in x]
     elif isinstance(x, tuple):
@@ -50,19 +53,6 @@ def _resolve_symints_in_args(graph: "Graph", x: object) -> object:
     elif isinstance(x, dict):
         return {k: _resolve_symints_in_args(graph, v) for k, v in x.items()}
     return x
-
-
-def _has_symbolic_literal(x: object) -> bool:
-    """Check if args/kwargs contain any non-concrete SymInt/SymFloat/SymBool."""
-    if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        return (
-            hasattr(x, "node") and hasattr(x.node, "expr") and not x.node.expr.is_number
-        )
-    elif isinstance(x, (tuple, list)):
-        return any(_has_symbolic_literal(item) for item in x)
-    elif isinstance(x, dict):
-        return any(_has_symbolic_literal(v) for v in x.values())
-    return False
 
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
@@ -1521,9 +1511,8 @@ class Graph:
 
         # Auto-resolve any SymInt literals in args/kwargs to FX nodes
         if op in ("call_function", "call_method"):
-            if _has_symbolic_literal(args) or _has_symbolic_literal(kwargs):
-                args = _resolve_symints_in_args(self, args)
-                kwargs = _resolve_symints_in_args(self, kwargs)
+            args = _resolve_symints_in_args(self, args)
+            kwargs = _resolve_symints_in_args(self, kwargs)
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
@@ -1587,6 +1576,13 @@ class Graph:
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
+
+        # Invalidate cached symint-to-proxy entries pointing to the erased node
+        if self._expr_to_proxy is not None:
+            self._expr_to_proxy = {
+                k: v for k, v in self._expr_to_proxy.items()
+                if v.node is not to_erase
+            }
 
         # Null out this Node's argument nodes so that the Nodes referred to
         # can update their ``users`` accordingly
@@ -1897,12 +1893,14 @@ class Graph:
 
         For each symbol, registers the first node whose meta['val'] tensor
         contains that symbol in its size, stride, or storage_offset.
+
+        Raises RuntimeError if any symbols remain unresolved after the scan.
         """
         from torch.fx.proxy import Proxy
 
         for node in self.nodes:
             if not needed:
-                return
+                break
             if node.op == "output":
                 continue
             val = node.meta.get("val")
@@ -1942,13 +1940,22 @@ class Graph:
                 )
                 needed.discard(sym)
 
+        if needed:
+            raise RuntimeError(
+                f"Cannot resolve symbolic expression to FX nodes: "
+                f"no graph node found with meta['val'] tensor containing "
+                f"symbol(s) {needed} in its size, stride, or storage_offset."
+            )
+
     @compatibility(is_backward_compatible=False)
     def symint_to_node(self, val: "torch.SymInt | int") -> "Node | int":
         """Convert a SymInt value to an FX Node (or plain int).
 
-        Use this in FX graph passes when you have a ``torch.SymInt`` from
-        tensor metadata (e.g., ``node.meta["val"].numel()``) and need to
-        pass it as an argument to ``graph.call_function(...)``.
+        Note: ``graph.call_function()`` and ``graph.call_method()``
+        automatically resolve SymInt arguments, so you typically do not
+        need to call this manually. Use it when you need an explicit
+        Node *outside* of those methods (e.g., to store in a data
+        structure or pass to ``graph.create_node()`` directly).
 
         - Plain ``int`` → returned as-is
         - Concrete ``SymInt`` (e.g., ``SymInt(1024)``) → returned as ``int``
@@ -1958,7 +1965,7 @@ class Graph:
 
             numel = node.meta["val"].numel()  # SymInt
             size_node = graph.symint_to_node(numel)  # FX Node
-            graph.call_function(aten.empty, ([size_node],), ...)
+            graph.output(size_node)
 
         Args:
             val: A ``torch.SymInt`` or plain ``int``.
