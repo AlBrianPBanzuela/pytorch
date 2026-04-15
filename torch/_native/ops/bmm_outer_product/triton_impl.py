@@ -58,5 +58,5 @@ def register_to_dispatch() -> None:
         return
 
     _register_for_dispatch_key("CUDA")
-    if torch.xpu.is_available():
+    if torch.xpu._is_compiled():
         _register_for_dispatch_key("XPU")
