@@ -1726,7 +1726,7 @@ class triton:
 
     # Enable loop peeling for non-persistent reductions. Splits the reduction
     # loop into an unmasked main loop (vectorizable) and a masked tail loop.
-    loop_peeling: bool = False
+    loop_peeling: bool = True
 
     # Codegen matmul natively with tl.dot without using a template.
     # This option makes Inductor generate matrix multiplication from scratch,
