@@ -214,14 +214,15 @@ GEMM_TEMPLATE = r"""
     #pragma omp parallel num_threads({{num_threads}})
     {%- endif %}
     {
+        {{ micro_gemm.codegen_init(kernel) }}
         #pragma omp for schedule(static, 1)
         for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
             {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}
     {
         {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
-{%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+{%- endif %}
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
