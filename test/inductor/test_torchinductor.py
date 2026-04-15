@@ -1059,6 +1059,11 @@ def xfail_if_triton_cpu(fn):
     return fn
 
 
+def xfail_if_pallas(fn):
+    fn._expected_failure_pallas = True
+    return fn
+
+
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -2637,6 +2642,8 @@ class CommonTemplate:
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
+    # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
+    @xfail_if_pallas
     def test__dyn_quant_pack_4bit_weight_fp32(self):
         q_group = 32
         k = 128
@@ -2673,6 +2680,8 @@ class CommonTemplate:
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     @skip_if_halide  # bf16
+    # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
+    @xfail_if_pallas
     def test__dyn_quant_pack_4bit_weight_bf16(self):
         k = 128
         n = 128
@@ -2711,6 +2720,8 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
+    # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
+    @xfail_if_pallas
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     def test__dyn_quant_matmul_4bit_fp32_input(self):
@@ -11203,7 +11214,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
-    @skip_if_cpu
+    @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # max/min on boolean tensors returned incorrect indices in Triton
