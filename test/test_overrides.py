@@ -1939,7 +1939,7 @@ class TestTorchFunctionRedispatch(TestCase):
   (RedispatchTensor([1.]),),
   {})]""")
 
-    def test_recursive(self):
+    def test_skip_to_inner(self):
         x = RedispatchTensor(torch.full((1,), 1))
         y = RedispatchTensor(torch.full((1,), 2))
         z = RedispatchTensor(torch.full((1,), 3))
@@ -1977,18 +1977,9 @@ class TestTorchFunctionRedispatch(TestCase):
 class TestTorchFunctionRedispatchOps(TestCase):
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
-        def clone_preserving_strides(x):
-            if x.layout != torch.strided:
-                ret = x.clone()
-            else:
-                ret = torch.empty_strided(x.shape, x.stride(), device=x.device, dtype=x.dtype)
-                ret.copy_(x)
-            ret.requires_grad_(x.requires_grad)
-            return ret
-
         def wrap(x):
             if isinstance(x, torch.Tensor):
-                return RedispatchTensor(clone_preserving_strides(x.detach()))
+                return RedispatchTensor(x.detach().clone())
             return x
 
         for sample in op.sample_inputs(device=device, dtype=dtype):

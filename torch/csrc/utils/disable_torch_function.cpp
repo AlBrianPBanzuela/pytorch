@@ -7,6 +7,8 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <fmt/format.h>
 
+using torch::autograd::utils::wrap;
+
 namespace torch {
 static PyObject* disabled_torch_function = nullptr;
 static PyObject* disabled_torch_dispatch = nullptr;
@@ -253,12 +255,9 @@ PyObject* THPModule_skip_one_hop_torch_function(
   if (!PyArg_ParseTuple(a, "OOOO", &func, &types, &args, &kwargs)) {
     return nullptr;
   }
-  py::tuple py_args;
-  if (args == Py_None) {
-    py_args = py::make_tuple();
-  } else {
-    py_args = py::reinterpret_borrow<py::tuple>(args);
-  }
+  py::tuple py_args = args == Py_None
+      ? py::make_tuple()
+      : py::reinterpret_borrow<py::tuple>(args);
 
   if (kwargs == Py_None) {
     kwargs = nullptr;
@@ -268,7 +267,7 @@ PyObject* THPModule_skip_one_hop_torch_function(
 
   TORCH_CHECK(
       !at::impl::PythonTorchFunctionTLS::peek_skip_next(),
-      "skip_one_hop_torch_function called but skip_next_torch_function was already true!");
+      "you cannot skip two levels of __torch_function__");
   at::impl::PythonTorchFunctionTLS::exchange_skip_next(true);
   auto result = py::reinterpret_steal<py::object>(
       PyObject_Call(func, py_args.ptr(), kwargs));
@@ -366,18 +365,12 @@ auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
       torch::torch_function_enabled() && has_torch_function_attr(obj));
 }
 
-bool has_torch_function(PyObject* obj) {
-  return (
-      !torch::should_skip_torch_function() &&
-      torch::check_has_torch_function(obj));
-}
-
 bool has_torch_function(c10::ArrayRef<PyObject*> args) {
   if (torch::should_skip_torch_function()) {
     return false;
   }
   for (const auto obj : args) {
-    if (check_has_torch_function(obj)) {
+    if (has_torch_function(obj)) {
       return true;
     }
   }
@@ -406,8 +399,6 @@ inline static bool array_has_torch_function(
   }
   return false;
 }
-
-using torch::autograd::utils::wrap;
 
 PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg) {
   if (torch::should_skip_torch_function()) {

@@ -254,15 +254,17 @@ class RedispatchTensor(torch.Tensor):
         with torch._C.DisableTorchFunction():
             return super().__repr__()
 
-    def __reduce_ex__(self, proto):
-        with torch._C.DisableTorchFunction():
-            return super().__reduce_ex__(proto)
-
     @classmethod
     def __torch_function__(cls, func, types, args, kwargs=None):
+        call_log_entry = (func.__qualname__, types, args, kwargs)
+
+        # Collect input call_logs so we can propagate to output tensors
+        input_logs = []
+
         def append_log(x):
             if isinstance(x, RedispatchTensor):
-                x.call_log.append((func.__qualname__, types, args, kwargs))
+                x.call_log.append(call_log_entry)
+                input_logs.append(x.call_log)
 
         _ = tree_map(append_log, args)
         if kwargs:
@@ -272,7 +274,10 @@ class RedispatchTensor(torch.Tensor):
 
         def wrap(x):
             if isinstance(x, torch.Tensor) and not isinstance(x, RedispatchTensor):
-                return cls(x)
+                r = cls(x)
+                if input_logs:
+                    r.call_log = list(input_logs[0])
+                return r
             return x
         return tree_map(wrap, ret)
 
