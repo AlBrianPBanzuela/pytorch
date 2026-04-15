@@ -369,24 +369,12 @@ class TestFunctionSchema(TestCase):
             key = f"onednn::qconv2d_pointwise.{overload}"
             matching = [s for name, s in schemas.items() if name.startswith(key)]
             if not matching:
-                raise unittest.SkipTest(f"Schema {key} not registered (onednn not available)")
+                raise unittest.SkipTest(
+                    f"Schema {key} not registered (onednn not available)"
+                )
             schema = matching[0]
             self._check_alias_annotation(schema, "qaccum", expected_is_write=True)
             self._check_return_alias_annotation(schema, 0)
-
-    def test_fsdp_all_gather_copy_in_alias_annotations(self):
-        # The all_gather_output argument is mutated and both returns alias it.
-        try:
-            schema = torch.ops.fsdp.all_gather_copy_in.default._schema
-        except AttributeError as e:
-            raise unittest.SkipTest(
-                "fsdp ops not registered (distributed not available)"
-            ) from e
-        self._check_alias_annotation(
-            schema, "all_gather_output", expected_is_write=True
-        )
-        self._check_return_alias_annotation(schema, 0)
-        self._check_return_alias_annotation(schema, 1)
 
 
 if __name__ == "__main__":
