@@ -284,10 +284,10 @@ class CKTileGemmTemplate(CKTileTemplate):
             }
             auto stream_config = ck_tile::stream_config{stream};
             auto grid_size = Kernel::GridSize(M, N, kBatch);
-            constexpr auto block_size = Kernel::BlockSize();
+            auto block_size = Kernel::BlockSize();
             constexpr auto lds_bytes = 0;
             constexpr auto kBlockPerCU = 1;
-            auto gemm = ck_tile::make_kernel<block_size.x, kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
+            auto gemm = ck_tile::make_kernel<kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
             ck_tile::launch_kernel(stream_config, gemm);
         };
 

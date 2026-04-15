@@ -354,10 +354,10 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 } // namespace utils
                 } // namespace ck
 
-                const std::vector<std::size_t>& HostTensorDescriptor::GetLengths() const { return mLens; }
-                const std::vector<std::size_t>& HostTensorDescriptor::GetStrides() const { return mStrides; }
-                std::size_t HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
-                void HostTensorDescriptor::CalculateStrides() {
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetLengths() const { return mLens; }
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetStrides() const { return mStrides; }
+                std::size_t ck::HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
+                void ck::HostTensorDescriptor::CalculateStrides() {
                     mStrides.clear();
                     mStrides.resize(mLens.size(), 0);
                     if(mStrides.empty())
