@@ -79,6 +79,7 @@ class CKTemplate(ROCmTemplate):
                 using F32 = float;
                 // using F64 = double;
                 using BF16 = ck::bhalf_t;
+                using TF32 = ck::tf32_t;
                 // using I32 = int32_t;
                 // using I8 = int8_t;
                 // using I4 = ck::int4_t;

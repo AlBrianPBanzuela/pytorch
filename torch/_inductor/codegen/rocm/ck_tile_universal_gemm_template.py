@@ -616,11 +616,20 @@ class CKTileGemmTemplate(CKTileTemplate):
         def render_epilogue(epilogue_type):
             if epilogue_type == "Default":
                 return r"""
+            using DsDataType = ck_tile::tuple<>;
+            using DsLayout = ck_tile::tuple<>;
+            using CDElementwise = ck_tile::element_wise::PassThrough;
+
             using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<ADataType,
                                                                           BDataType,
+                                                                          DsDataType,
                                                                           AccDataType,
                                                                           CDataType,
+                                                                          DsLayout,
                                                                           CLayout,
+                                                                          CDElementwise,
+                                                                          TileM,
+                                                                          TileN,
                                                                           kPadM,
                                                                           kPadN,
                                                                           WarpTileM,
