@@ -26,6 +26,8 @@ concurrency:
 env:
   ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
   AWS_DEFAULT_REGION: us-east-1
+  DOCKER_REGISTRY: 308535385114.dkr.ecr.us-east-1.amazonaws.com
+  DOCKER_REPOSITORY: pytorch/ci-image
 
 permissions: read-all
 
@@ -161,9 +163,89 @@ jobs:
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
 
-  docker-build-benchmark:
+  docker-build-torchbench:
+    # Builds the standalone torchbench deps image. This is expensive (~30-60 min)
+    # so we only rebuild when the inputs change: the Dockerfile or pinned commits.
+    # A content hash of those files is used as the image tag.
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    needs: [get-label-type, docker-build]
+    needs: get-label-type
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: linux.12xlarge
+          - runner: linux.arm64.m7g.4xlarge
+    runs-on: "${{ matrix.runner }}"
+    steps:
+      - name: Clean workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          sudo rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
+      - name: Compute torchbench image tag
+        id: tag
+        working-directory: .ci/docker
+        run: |
+          HASH=$(cat \
+            torchbench/Dockerfile \
+            ci_commit_pins/torchbench.txt \
+            ci_commit_pins/huggingface-requirements.txt \
+            ci_commit_pins/timm.txt \
+            | sha256sum | cut -c1-20)
+          TAG="pytorch-torchbench-deps-${HASH}"
+          IMAGE="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY}:${TAG}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if image exists
+        id: check
+        run: |
+          if docker manifest inspect "${{ steps.tag.outputs.image }}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build torchbench image
+        if: steps.check.outputs.exists == 'false'
+        working-directory: .ci/docker
+        run: |
+          docker buildx build \
+            --no-cache \
+            --progress=plain \
+            -f torchbench/Dockerfile \
+            --load \
+            -t "${{ steps.tag.outputs.image }}" \
+            .
+
+      - name: Push torchbench image
+        if: steps.check.outputs.exists == 'false'
+        run: docker push "${{ steps.tag.outputs.image }}"
+
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
+        if: always()
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
+
+  docker-build-benchmark:
+    # Merges base CI images with the pre-built torchbench deps image.
+    # This is fast (just COPY, no installs) so always-rebuild is fine.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    needs: [get-label-type, docker-build, docker-build-torchbench]
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -207,6 +289,25 @@ jobs:
         with:
           docker-image: ${{ steps.base-image.outputs.docker-image }}
 
+      - name: Resolve torchbench image
+        id: torchbench-image
+        working-directory: .ci/docker
+        run: |
+          HASH=$(cat \
+            torchbench/Dockerfile \
+            ci_commit_pins/torchbench.txt \
+            ci_commit_pins/huggingface-requirements.txt \
+            ci_commit_pins/timm.txt \
+            | sha256sum | cut -c1-20)
+          TAG="pytorch-torchbench-deps-${HASH}"
+          IMAGE="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY}:${TAG}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull torchbench image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.torchbench-image.outputs.image }}
+
       - name: Build benchmark docker image
         id: build-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -216,6 +317,7 @@ jobs:
           push: true
         env:
           BASE_IMAGE: ${{ steps.base-image.outputs.docker-image }}
+          TORCHBENCH_IMAGE: ${{ steps.torchbench-image.outputs.image }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main

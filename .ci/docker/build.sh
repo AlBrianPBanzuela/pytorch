@@ -81,11 +81,11 @@ elif [[ "$image" == *riscv* ]]; then
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
-# For benchmark images built in two-phase mode, BASE_IMAGE must be set
-# to the already-built base image tag. This uses benchmark/Dockerfile
-# which extends the base image with inductor benchmark deps.
-if [[ -n "${BASE_IMAGE:-}" ]]; then
-  DOCKERFILE="benchmark/Dockerfile"
+# For benchmark images built via merge, both BASE_IMAGE and TORCHBENCH_IMAGE
+# must be set. This uses torchbench/Dockerfile.benchmark which COPYs
+# pre-built benchmark deps from the torchbench image into the base image.
+if [[ -n "${TORCHBENCH_IMAGE:-}" ]]; then
+  DOCKERFILE="torchbench/Dockerfile.benchmark"
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
@@ -325,13 +325,14 @@ if [[ -n "${CI:-}" ]]; then
 fi
 
 # Build image
-if [[ -n "${BASE_IMAGE:-}" ]]; then
-  # Two-phase benchmark build: extend base image with benchmark deps
+if [[ -n "${TORCHBENCH_IMAGE:-}" ]]; then
+  # Merge build: COPY pre-built benchmark deps from torchbench image into base
   docker buildx build \
          ${no_cache_flag} \
          ${progress_flag} \
          --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
-         -f $(dirname ${DOCKERFILE})/Dockerfile \
+         --build-arg "TORCHBENCH_IMAGE=${TORCHBENCH_IMAGE}" \
+         -f "${DOCKERFILE}" \
          --load \
          -t "$tmp_tag" \
          "$@" \
