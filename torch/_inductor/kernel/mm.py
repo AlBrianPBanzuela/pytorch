@@ -667,10 +667,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
 
+    use_unexpanded_bias = torch.version.hip or (mat1.get_device().type == "xpu")
+
     if use_aten_gemm_kernels():
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
-        # For ROCm, check original inp since kernel_inputs_aten uses inp (not inp_expanded)
-        bias_to_check = inp if torch.version.hip else inp_expanded
+        # For ROCm/XPU, check original inp since kernel_inputs_aten uses inp (not inp_expanded)
+        bias_to_check = inp if use_unexpanded_bias else inp_expanded
         if (
             bias_to_check.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
@@ -678,8 +680,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         ):
             aten_templates.append(aten_bias_addmm)
 
-        # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
-        if torch.version.hip:
+        # On ROCm/XPU, ATen choices use original bias input to avoid backend
+        # issues with 2D expanded bias (stride (0, 1)).
+        if use_unexpanded_bias:
             choices.extend(
                 V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
             )
