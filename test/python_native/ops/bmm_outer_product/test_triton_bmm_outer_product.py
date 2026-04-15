@@ -1,3 +1,4 @@
+# Owner(s): ["module: dsl-native-ops"]
 """
 Tests for Triton BMM Outer Product implementation using BinaryUfuncInfo with DSL support.
 
@@ -17,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import _dispatch_dtypes, floating_types
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     DecorateInfo,
@@ -171,63 +173,78 @@ triton_bmm_outer_product_opinfo = BinaryUfuncInfo(
         # Skip tests that generate incompatible tensor shapes (not outer product pattern)
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_batch_vs_slicing',
+            "TestBinaryUfuncs",
+            "test_batch_vs_slicing",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_broadcasting',
+            "TestBinaryUfuncs",
+            "test_broadcasting",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_contig_size1_large_dim',
+            "TestBinaryUfuncs",
+            "test_contig_size1_large_dim",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_contig_size1',
+            "TestBinaryUfuncs",
+            "test_contig_size1",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_contig_vs_every_other',
+            "TestBinaryUfuncs",
+            "test_contig_vs_every_other",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_contig_vs_transposed',
+            "TestBinaryUfuncs",
+            "test_contig_vs_transposed",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_non_contig_expand',
+            "TestBinaryUfuncs",
+            "test_non_contig_expand",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_non_contig',
+            "TestBinaryUfuncs",
+            "test_non_contig",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_not_broadcastable',
+            "TestBinaryUfuncs",
+            "test_not_broadcastable",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
+            "TestBinaryUfuncs",
+            "test_reference_numerics_extremal_values",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_reference_numerics_large_values',
+            "TestBinaryUfuncs",
+            "test_reference_numerics_large_values",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+            "TestBinaryUfuncs",
+            "test_reference_numerics_small_values",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_reference_numerics',
+            "TestBinaryUfuncs",
+            "test_reference_numerics",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_scalar_support',
+            "TestBinaryUfuncs",
+            "test_scalar_support",
         ),
         DecorateInfo(
             unittest.skip("BMM outer product requires specific 3D tensor pattern"),
-            'TestBinaryUfuncs', 'test_type_promotion',
+            "TestBinaryUfuncs",
+            "test_type_promotion",
         ),
     ),
     # Additional metadata for Triton-specific testing
@@ -275,6 +292,10 @@ def create_outer_product_tensors(
     a = make_tensor((batch_size, m_dim, 1), device=device, dtype=dtype, **kwargs)
     b = make_tensor((batch_size, 1, n_dim), device=device, dtype=dtype, **kwargs)
     return a.contiguous(), b.contiguous()
+
+
+if __name__ == "__main__":
+    run_tests()
 
 
 # Export the OpInfo for import by common_methods_invocations.py
