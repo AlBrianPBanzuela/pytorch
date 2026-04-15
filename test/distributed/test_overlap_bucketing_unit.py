@@ -1881,6 +1881,38 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
+    def test_saturation_model(self):
+        """IB floor activates for small groups; NVLink uses formula; monotonic."""
+        from torch._inductor.comm_analysis import (
+            compute_min_saturation_bytes,
+            detect_interconnect,
+            INTERCONNECT_PROFILES,
+            NCCL_COLL,
+        )
+
+        _MB = 1024 * 1024
+        sat = compute_min_saturation_bytes
+
+        # gs=1 → no communication needed
+        self.assertEqual(sat(1, NCCL_COLL.ALL_GATHER), 0)
+
+        # Inter-node (gs=16 → 2 nodes): IB floor should activate
+        ib_profile = INTERCONNECT_PROFILES[detect_interconnect(16)]
+        self.assertGreaterEqual(
+            sat(16, NCCL_COLL.ALL_GATHER), ib_profile.min_saturation_bytes
+        )
+
+        # Monotonic in group_size for inter-node
+        sat_64 = sat(64, NCCL_COLL.ALL_GATHER)
+        sat_128 = sat(128, NCCL_COLL.ALL_GATHER)
+        self.assertGreater(sat_64, sat(16, NCCL_COLL.ALL_GATHER))
+        self.assertGreater(sat_128, sat_64)
+
+        # Intra-node (gs=8 → 1 node): reasonable range
+        sat_nv = sat(8, NCCL_COLL.ALL_GATHER)
+        self.assertGreater(sat_nv, 50 * _MB)
+        self.assertLess(sat_nv, 200 * _MB)
+
     def test_pre_bucketing_only_merges_fsdp_collectives(self):
         """Pre-bucketing merges FSDP all-gathers but leaves TP all-gathers alone."""
         from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
