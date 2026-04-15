@@ -1,0 +1,2415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/>
+<title>torch.compile — Complete Method Flow</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:Consolas,'Courier New',monospace;padding:16px}
+h1{color:#58a6ff;font-size:1.3rem;margin-bottom:6px;text-align:center}
+.subtitle{color:#8b949e;font-size:.8rem;text-align:center;margin-bottom:18px}
+.scroll{overflow-x:auto;overflow-y:auto;max-height:90vh}
+.grid{display:flex;gap:14px;align-items:flex-start;padding-bottom:20px}
+.col{min-width:280px;max-width:300px}
+.file-hdr{font-size:.72rem;font-weight:bold;padding:5px 8px;border-radius:4px 4px 0 0;
+          letter-spacing:.5px;text-transform:uppercase;color:#fff}
+.class-box{border:1px solid #30363d;border-radius:0 0 5px 5px;margin-bottom:10px;overflow:hidden}
+.class-name{font-size:.78rem;font-weight:bold;padding:5px 8px;border-bottom:1px solid #30363d;color:#fff}
+.method{font-size:.72rem;padding:2px 10px;color:#8b949e;border-bottom:1px solid #21262d}
+.method:last-child{border-bottom:none}
+.method:hover{background:#161b22;color:#c9d1d9}
+.funcs-box{border:1px solid #30363d;border-radius:5px;margin-bottom:10px;overflow:hidden}
+.funcs-hdr{font-size:.72rem;font-weight:bold;padding:4px 8px;color:#8b949e;
+           border-bottom:1px solid #30363d;background:#161b22}
+.arrow-section{background:#161b22;border:1px solid #30363d;border-radius:8px;
+               padding:14px;margin-top:18px}
+.arrow-section h2{color:#58a6ff;font-size:.9rem;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;font-size:.75rem}
+th{color:#8b949e;padding:4px 10px;text-align:left;border-bottom:1px solid #30363d}
+td{padding:3px 10px;border-bottom:1px solid #21262d;color:#c9d1d9}
+td:first-child{color:#79c0ff}
+td:last-child{color:#56d364}
+td:nth-child(2){color:#f78166}
+.stats{text-align:center;color:#8b949e;font-size:.75rem;margin-bottom:12px}
+</style>
+</head><body>
+<h1>torch.compile — Complete Method &amp; Class Flow</h1>
+<p class="subtitle">Every class and method across all torch.compile pipeline files</p>
+
+<p class="stats">17 files &nbsp;|&nbsp; 218 classes &nbsp;|&nbsp; 1200 methods &nbsp;|&nbsp; 341 module-level functions</p>
+<div class="scroll"><div class="grid">
+<div class="col">
+<div class="file-hdr" style="background:#1f6feb">torch/__init__.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _running_with_deploy()</div>
+<div class="method">&#x2192; _get_cuda_dep_paths()</div>
+<div class="method">&#x2192; _preload_cuda_lib()</div>
+<div class="method">&#x2192; _preload_cuda_deps()</div>
+<div class="method">&#x2192; _load_global_deps()</div>
+<div class="method">&#x2192; sym_not()</div>
+<div class="method">&#x2192; sym_float()</div>
+<div class="method">&#x2192; sym_int()</div>
+<div class="method">&#x2192; sym_max()</div>
+<div class="method">&#x2192; __all_and_float_types()</div>
+<div class="method">&#x2192; sym_min()</div>
+<div class="method">&#x2192; sym_sum()</div>
+<div class="method">&#x2192; _get_sym_math_fn()</div>
+<div class="method">&#x2192; sym_ite()</div>
+<div class="method">&#x2192; sym_fresh_size()</div>
+<div class="method">&#x2192; typename()</div>
+<div class="method">&#x2192; is_tensor()</div>
+<div class="method">&#x2192; is_storage()</div>
+<div class="method">&#x2192; get_default_device()</div>
+<div class="method">&#x2192; set_default_device()</div>
+<div class="method">&#x2192; set_default_tensor_type()</div>
+<div class="method">&#x2192; set_default_dtype()</div>
+<div class="method">&#x2192; use_deterministic_algorithms()</div>
+<div class="method">&#x2192; are_deterministic_algorithms_enabled()</div>
+<div class="method">&#x2192; is_deterministic_algorithms_warn_only_enabled()</div>
+<div class="method">&#x2192; set_deterministic_debug_mode()</div>
+<div class="method">&#x2192; get_deterministic_debug_mode()</div>
+<div class="method">&#x2192; get_float32_matmul_precision()</div>
+<div class="method">&#x2192; set_float32_matmul_precision()</div>
+<div class="method">&#x2192; set_warn_always()</div>
+<div class="method">&#x2192; is_warn_always_enabled()</div>
+<div class="method">&#x2192; _check_with()</div>
+<div class="method">&#x2192; _check()</div>
+<div class="method">&#x2192; _check_is_size()</div>
+<div class="method">&#x2192; _check_index()</div>
+<div class="method">&#x2192; _check_value()</div>
+<div class="method">&#x2192; _check_type()</div>
+<div class="method">&#x2192; _check_not_implemented()</div>
+<div class="method">&#x2192; _check_tensor_all_with()</div>
+<div class="method">&#x2192; _check_tensor_all()</div>
+<div class="method">&#x2192; _manager_path()</div>
+<div class="method">&#x2192; _assert()</div>
+<div class="method">&#x2192; compiled_with_cxx11_abi()</div>
+<div class="method">&#x2192; compile()</div>
+<div class="method">&#x2192; compile()</div>
+<div class="method">&#x2192; compile()</div>
+<div class="method">&#x2192; _register_device_module()</div>
+<div class="method">&#x2192; get_device_module()</div>
+<div class="method">&#x2192; _constrain_as_size()</div>
+<div class="method">&#x2192; _import_device_backends()</div>
+<div class="method">&#x2192; _is_device_backend_autoload_enabled()</div>
+<div class="method">&#x2192; _as_tensor_fullprec()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; SymInt</div>
+<div class="method">· __init__()</div>
+<div class="method">· __bool__()</div>
+<div class="method">· __int__()</div>
+<div class="method">· __index__()</div>
+<div class="method">· __round__()</div>
+<div class="method">· __truediv__()</div>
+<div class="method">· __rtruediv__()</div>
+<div class="method">· __floordiv__()</div>
+<div class="method">· __rfloordiv__()</div>
+<div class="method">· __pow__()</div>
+<div class="method">· __rpow__()</div>
+<div class="method">· __eq__()</div>
+<div class="method">· __lt__()</div>
+<div class="method">· __gt__()</div>
+<div class="method">· __le__()</div>
+<div class="method">· __ge__()</div>
+<div class="method">· __add__()</div>
+<div class="method">· __radd__()</div>
+<div class="method">· __rmul__()</div>
+<div class="method">· __mod__()</div>
+<div class="method">· __mul__()</div>
+<div class="method">· __pow_by_natural__()</div>
+<div class="method">· __rpow_by_natural__()</div>
+<div class="method">· __int_truediv__()</div>
+<div class="method">· __rint_truediv__()</div>
+<div class="method">· __int_floordiv__()</div>
+<div class="method">· __rint_floordiv__()</div>
+<div class="method">· __sym_max__()</div>
+<div class="method">· __sym_min__()</div>
+<div class="method">· __sym_float__()</div>
+<div class="method">· __neg__()</div>
+<div class="method">· __sub__()</div>
+<div class="method">· __rsub__()</div>
+<div class="method">· __and__()</div>
+<div class="method">· __or__()</div>
+<div class="method">· __repr__()</div>
+<div class="method">· _sympy_()</div>
+<div class="method">· __hash__()</div>
+<div class="method">· as_integer_ratio()</div>
+<div class="method">· bit_length()</div>
+<div class="method">· conjugate()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; SymFloat</div>
+<div class="method">· __init__()</div>
+<div class="method">· __truediv__()</div>
+<div class="method">· __rtruediv__()</div>
+<div class="method">· __floordiv__()</div>
+<div class="method">· __rfloordiv__()</div>
+<div class="method">· __bool__()</div>
+<div class="method">· __float__()</div>
+<div class="method">· __int__()</div>
+<div class="method">· __pow__()</div>
+<div class="method">· __rpow__()</div>
+<div class="method">· __eq__()</div>
+<div class="method">· __lt__()</div>
+<div class="method">· __gt__()</div>
+<div class="method">· __le__()</div>
+<div class="method">· __ge__()</div>
+<div class="method">· __float_pow__()</div>
+<div class="method">· __rfloat_pow__()</div>
+<div class="method">· __float_truediv__()</div>
+<div class="method">· __rfloat_truediv__()</div>
+<div class="method">· __trunc__()</div>
+<div class="method">· __sym_max__()</div>
+<div class="method">· __sym_min__()</div>
+<div class="method">· __sym_int__()</div>
+<div class="method">· is_integer()</div>
+<div class="method">· as_integer_ratio()</div>
+<div class="method">· __repr__()</div>
+<div class="method">· _sympy_()</div>
+<div class="method">· __hash__()</div>
+<div class="method">· conjugate()</div>
+<div class="method">· hex()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; SymBool</div>
+<div class="method">· __init__()</div>
+<div class="method">· __bool__()</div>
+<div class="method">· __int__()</div>
+<div class="method">· __and__()</div>
+<div class="method">· __or__()</div>
+<div class="method">· __sym_not__()</div>
+<div class="method">· __sym_ite__()</div>
+<div class="method">· __eq__()</div>
+<div class="method">· __repr__()</div>
+<div class="method">· _sympy_()</div>
+<div class="method">· __hash__()</div>
+<div class="method">· __sym_float__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; ByteStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; DoubleStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; FloatStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; HalfStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; LongStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; IntStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; ShortStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; CharStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; BoolStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; BFloat16Storage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; ComplexDoubleStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; ComplexFloatStorage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; QUInt8Storage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; QInt8Storage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; QInt32Storage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; QUInt4x2Storage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; QUInt2x4Storage</div>
+<div class="method">· dtype()</div>
+<div class="method">· _dtype()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; _TorchCompileInductorWrapper</div>
+<div class="method">· __init__()</div>
+<div class="method">· __eq__()</div>
+<div class="method">· apply_mode()</div>
+<div class="method">· apply_options()</div>
+<div class="method">· __call__()</div>
+<div class="method">· get_compiler_config()</div>
+<div class="method">· reset()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; _TorchCompileAOTInductorWrapper</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; _TorchCompileWrapper</div>
+<div class="method">· __init__()</div>
+<div class="method">· __eq__()</div>
+<div class="method">· __call__()</div>
+<div class="method">· reset()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1f6febcc">&#x25A0; _TritonLibrary</div>
+<div class="method">· registerOp()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#1a7f37">eval_frame.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _set_stance()</div>
+<div class="method">&#x2192; get_example_inputs()</div>
+<div class="method">&#x2192; _set_in_optimized_module()</div>
+<div class="method">&#x2192; _is_in_optimized_module()</div>
+<div class="method">&#x2192; _callback_from_stance()</div>
+<div class="method">&#x2192; _create_wrapped_callback()</div>
+<div class="method">&#x2192; _get_or_add_example_inputs()</div>
+<div class="method">&#x2192; _create_delayed_compile_callback()</div>
+<div class="method">&#x2192; _is_skip_guard_eval_unsafe_stance()</div>
+<div class="method">&#x2192; _reset_guarded_backend_cache()</div>
+<div class="method">&#x2192; _debug_get_cache_entry_list()</div>
+<div class="method">&#x2192; remove_from_cache()</div>
+<div class="method">&#x2192; nothing()</div>
+<div class="method">&#x2192; always_false()</div>
+<div class="method">&#x2192; innermost_fn()</div>
+<div class="method">&#x2192; innermost_backend()</div>
+<div class="method">&#x2192; make_set_enable_dynamic()</div>
+<div class="method">&#x2192; set_enable_dynamic()</div>
+<div class="method">&#x2192; clear_dynamo_tls()</div>
+<div class="method">&#x2192; _log_traced_frames()</div>
+<div class="method">&#x2192; guard_collectives_hook()</div>
+<div class="method">&#x2192; _get_eval_frame_override()</div>
+<div class="method">&#x2192; _optimize_catch_errors()</div>
+<div class="method">&#x2192; get_compiler_fn()</div>
+<div class="method">&#x2192; argument_names()</div>
+<div class="method">&#x2192; check_if_dynamo_supported()</div>
+<div class="method">&#x2192; is_dynamo_supported()</div>
+<div class="method">&#x2192; check_if_inductor_supported()</div>
+<div class="method">&#x2192; is_inductor_supported()</div>
+<div class="method">&#x2192; check_for_incompatible_configs()</div>
+<div class="method">&#x2192; optimize()</div>
+<div class="method">&#x2192; _optimize()</div>
+<div class="method">&#x2192; explain()</div>
+<div class="method">&#x2192; check_signature_rewritable()</div>
+<div class="method">&#x2192; check_user_input_output()</div>
+<div class="method">&#x2192; rewrite_signature()</div>
+<div class="method">&#x2192; export()</div>
+<div class="method">&#x2192; optimize_assert()</div>
+<div class="method">&#x2192; _optimize_assert()</div>
+<div class="method">&#x2192; skip_code()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; Unset</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; DynamoStance</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; OptimizedModule</div>
+<div class="method">· __init__()</div>
+<div class="method">· __len__()</div>
+<div class="method">· _initialize()</div>
+<div class="method">· __call__()</div>
+<div class="method">· _aot_compile()</div>
+<div class="method">· _save_aot_compiled_module()</div>
+<div class="method">· _load_aot_compiled_module()</div>
+<div class="method">· __reduce__()</div>
+<div class="method">· __getstate__()</div>
+<div class="method">· __setstate__()</div>
+<div class="method">· training()</div>
+<div class="method">· training()</div>
+<div class="method">· __getattr__()</div>
+<div class="method">· __setattr__()</div>
+<div class="method">· __delattr__()</div>
+<div class="method">· _call_lazy_check()</div>
+<div class="method">· __dir__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; DynamoTLS</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; _TorchDynamoContext</div>
+<div class="method">· __init__()</div>
+<div class="method">· __enter__()</div>
+<div class="method">· __exit__()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; OptimizeContext</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+<div class="method">· __reduce__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; RunOnlyContext</div>
+<div class="method">· __init__()</div>
+<div class="method">· __reduce__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; DisableContext</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+<div class="method">· __reduce__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; _NullDecorator</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; FlattenInputOutputSignature</div>
+<div class="method">· __init__()</div>
+<div class="method">· placeholder()</div>
+<div class="method">· output()</div>
+<div class="method">· run_node()</div>
+<div class="method">· transform()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; ExportResult</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a7f37cc">&#x25A0; TorchPatcher</div>
+<div class="method">· patch()</div>
+<div class="method">· suppress_torch_distributed_warnings()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#7d4e00">convert_frame.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _clear_fake_mode_weakrefs()</div>
+<div class="method">&#x2192; fx_forward_from_src_skip_result()</div>
+<div class="method">&#x2192; log_dynamo_start()</div>
+<div class="method">&#x2192; preserve_global_state()</div>
+<div class="method">&#x2192; has_tensor_in_frame()</div>
+<div class="method">&#x2192; exception_handler()</div>
+<div class="method">&#x2192; maybe_cprofile()</div>
+<div class="method">&#x2192; cprofile_wrapper()</div>
+<div class="method">&#x2192; get_compile_id()</div>
+<div class="method">&#x2192; convert_frame_assert()</div>
+<div class="method">&#x2192; get_compiled_code_side_effects()</div>
+<div class="method">&#x2192; compiled_code_has_side_effects()</div>
+<div class="method">&#x2192; _copy_code_context()</div>
+<div class="method">&#x2192; register_bytecode_hook()</div>
+<div class="method">&#x2192; trace_frame()</div>
+<div class="method">&#x2192; _safe_builtins_dict()</div>
+<div class="method">&#x2192; get_traced_fn()</div>
+<div class="method">&#x2192; _get_signature()</div>
+<div class="method">&#x2192; _get_frame()</div>
+<div class="method">&#x2192; fullgraph_capture()</div>
+<div class="method">&#x2192; _fullgraph_capture_frame()</div>
+<div class="method">&#x2192; get_fail_callback()</div>
+<div class="method">&#x2192; compile_frame()</div>
+<div class="method">&#x2192; _compile()</div>
+<div class="method">&#x2192; convert_frame()</div>
+<div class="method">&#x2192; replay()</div>
+<div class="method">&#x2192; first_real_inst_idx()</div>
+<div class="method">&#x2192; catch_errors_wrapper()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; TODO_UNKNOWN</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; Tracker</div>
+<div class="method">· __init__()</div>
+<div class="method">· add()</div>
+<div class="method">· __contains__()</div>
+<div class="method">· clear()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; ConvertFrameBox</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; ConvertFrameAssert</div>
+<div class="method">· __init__()</div>
+<div class="method">· _clone_with_backend()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; DynamoOutput</div>
+<div class="method">· build_guards()</div>
+<div class="method">· graph_capture_output()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; BackendInput</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; GraphRuntimeEnv</div>
+<div class="method">· forward_callable()</div>
+<div class="method">· _check_external_refs()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; GraphCaptureOutput</div>
+<div class="method">· build_guards()</div>
+<div class="method">· get_runtime_env()</div>
+<div class="method">· _get_external_refs()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; CaptureOutput</div>
+<div class="method">· forward_callable()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; FrameInfo</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; ConvertFrame</div>
+<div class="method">· __init__()</div>
+<div class="method">· _clone_with_backend()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; ConvertFrameProtocol</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#7d4e00cc">&#x25A0; CatchErrorsWrapper</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#3b1f6e">symbolic_convert.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _import_module()</div>
+<div class="method">&#x2192; _step_logger()</div>
+<div class="method">&#x2192; save_and_restart_speculation_log()</div>
+<div class="method">&#x2192; temporarely_allow_writes_to_output_graph()</div>
+<div class="method">&#x2192; stack_op()</div>
+<div class="method">&#x2192; is_stdlib()</div>
+<div class="method">&#x2192; get_assert_bytecode_sequence()</div>
+<div class="method">&#x2192; _detect_and_normalize_assert_statement()</div>
+<div class="method">&#x2192; get_node_source_info()</div>
+<div class="method">&#x2192; format_tensor_computation_trace()</div>
+<div class="method">&#x2192; generic_jump()</div>
+<div class="method">&#x2192; _reconstruct_block_stack()</div>
+<div class="method">&#x2192; break_graph_if_unsupported()</div>
+<div class="method">&#x2192; profile_inline_call()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; SpeculationEntry</div>
+<div class="method">· fail_and_restart_analysis()</div>
+<div class="method">· failed()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; SpeculationLog</div>
+<div class="method">· restart()</div>
+<div class="method">· clear()</div>
+<div class="method">· next()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; LocalState</div>
+<div class="method">· render()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; DistributedState</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; TensorifyState</div>
+<div class="method">· specialize()</div>
+<div class="method">· should_specialize()</div>
+<div class="method">· clear()</div>
+<div class="method">· empty()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; BlockStackEntry</div>
+<div class="method">· can_restore()</div>
+<div class="method">· resume_fn()</div>
+<div class="method">· exit()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; SpeculationLogDivergence</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; ReturnValueOp</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; YieldValueOp</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; BytecodeDispatchTableMeta</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; ExceptionStack</div>
+<div class="method">· clear_current_exception()</div>
+<div class="method">· set_current_exception()</div>
+<div class="method">· move_current_exception_to_stack()</div>
+<div class="method">· get_current_exception()</div>
+<div class="method">· _set_context_recursive()</div>
+<div class="method">· _break_context_reference_cycle()</div>
+<div class="method">· _set_context_and_break_context_reference_cycle()</div>
+<div class="method">· pop()</div>
+<div class="method">· append()</div>
+<div class="method">· __len__()</div>
+<div class="method">· __getitem__()</div>
+<div class="method">· __str__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; InstructionTranslatorBase</div>
+<div class="method">· mark_inconsistent_side_effects()</div>
+<div class="method">· maybe_has_backedge()</div>
+<div class="method">· cellvars()</div>
+<div class="method">· freevars()</div>
+<div class="method">· cell_and_freevars()</div>
+<div class="method">· prune_dead_locals()</div>
+<div class="method">· call_function()</div>
+<div class="method">· inline_generator_function()</div>
+<div class="method">· inline_user_function_return()</div>
+<div class="method">· get_line_of_code_header()</div>
+<div class="method">· get_log_starts_line_log_str()</div>
+<div class="method">· starts_line()</div>
+<div class="method">· step()</div>
+<div class="method">· next_instruction()</div>
+<div class="method">· step_graph_break()</div>
+<div class="method">· run_ctx_mgr()</div>
+<div class="method">· run()</div>
+<div class="method">· push()</div>
+<div class="method">· push_many()</div>
+<div class="method">· pop()</div>
+<div class="method">· popn()</div>
+<div class="method">· LOAD_FAST()</div>
+<div class="method">· LOAD_DEREF()</div>
+<div class="method">· STORE_FAST()</div>
+<div class="method">· DELETE_FAST()</div>
+<div class="method">· _maybe_emit_sync_dealloc()</div>
+<div class="method">· STORE_DEREF()</div>
+<div class="method">· _load_const()</div>
+<div class="method">· LOAD_CONST()</div>
+<div class="method">· _load_global()</div>
+<div class="method">· nn_modules_globals_vt()</div>
+<div class="method">· LOAD_GLOBAL()</div>
+<div class="method">· STORE_GLOBAL()</div>
+<div class="method">· import_source()</div>
+<div class="method">· resolve_name()</div>
+<div class="method">· calc_package()</div>
+<div class="method">· IMPORT_NAME()</div>
+<div class="method">· IMPORT_FROM()</div>
+<div class="method">· load_builtin_from_argval()</div>
+<div class="method">· load_builtin()</div>
+<div class="method">· jump()</div>
+<div class="method">· SETUP_LOOP()</div>
+<div class="method">· SETUP_EXCEPT()</div>
+<div class="method">· POP_BLOCK()</div>
+<div class="method">· SETUP_WITH()</div>
+<div class="method">· SETUP_FINALLY()</div>
+<div class="method">· FOR_ITER()</div>
+<div class="method">· _create_exception_type()</div>
+<div class="method">· _attach_traceback_to_exception()</div>
+<div class="method">· _raise_exception_variable()</div>
+<div class="method">· RAISE_VARARGS()</div>
+<div class="method">· CLEANUP_THROW()</div>
+<div class="method">· RERAISE()</div>
+<div class="method">· _isinstance_exception()</div>
+<div class="method">· WITH_EXCEPT_START()</div>
+<div class="method">· exception_handler()</div>
+<div class="method">· PUSH_EXC_INFO()</div>
+<div class="method">· POP_EXCEPT()</div>
+<div class="method">· check_if_exc_matches()</div>
+<div class="method">· CHECK_EXC_MATCH()</div>
+<div class="method">· JUMP_IF_NOT_EXC_MATCH()</div>
+<div class="method">· COMPARE_OP()</div>
+<div class="method">· GET_ITER()</div>
+<div class="method">· CALL_FUNCTION()</div>
+<div class="method">· CALL_FUNCTION_EX()</div>
+<div class="method">· CALL_FUNCTION_KW()</div>
+<div class="method">· LOAD_METHOD_SUPER()</div>
+<div class="method">· LOAD_ATTR_SUPER()</div>
+<div class="method">· LOAD_METHOD()</div>
+<div class="method">· CALL_METHOD()</div>
+<div class="method">· _load_attr()</div>
+<div class="method">· LOAD_ATTR()</div>
+<div class="method">· STORE_ATTR()</div>
+<div class="method">· DELETE_ATTR()</div>
+<div class="method">· _maybe_sync_dealloc_attr()</div>
+<div class="method">· codegen_return_with_pops()</div>
+<div class="method">· create_resume()</div>
+<div class="method">· create_call_resume_at()</div>
+<div class="method">· codegen_call_resume()</div>
+<div class="method">· should_compile_partial_graph()</div>
+<div class="method">· STORE_SUBSCR()</div>
+<div class="method">· DELETE_SUBSCR()</div>
+<div class="method">· _maybe_sync_dealloc_subscr()</div>
+<div class="method">· BUILD_TUPLE()</div>
+<div class="method">· BUILD_SLICE()</div>
+<div class="method">· _can_speculate_comprehension_nested()</div>
+<div class="method">· BUILD_LIST()</div>
+<div class="method">· BUILD_SET()</div>
+<div class="method">· BUILD_LIST_UNPACK()</div>
+<div class="method">· BUILD_TUPLE_UNPACK()</div>
+<div class="method">· BUILD_MAP()</div>
+<div class="method">· BUILD_MAP_UNPACK()</div>
+<div class="method">· BUILD_CONST_KEY_MAP()</div>
+<div class="method">· MAP_ADD()</div>
+<div class="method">· SET_ADD()</div>
+<div class="method">· SET_UPDATE()</div>
+<div class="method">· LIST_APPEND()</div>
+<div class="method">· MAKE_FUNCTION()</div>
+<div class="method">· UNPACK_SEQUENCE()</div>
+<div class="method">· UNPACK_EX()</div>
+<div class="method">· graph_break_on_leaf_function()</div>
+<div class="method">· NOP()</div>
+<div class="method">· POP_TOP()</div>
+<div class="method">· ROT_TWO()</div>
+<div class="method">· ROT_THREE()</div>
+<div class="method">· ROT_FOUR()</div>
+<div class="method">· DUP_TOP()</div>
+<div class="method">· DUP_TOP_TWO()</div>
+<div class="method">· _convert_value()</div>
+<div class="method">· _format_value()</div>
+<div class="method">· FORMAT_VALUE()</div>
+<div class="method">· BUILD_STRING()</div>
+<div class="method">· IS_OP()</div>
+<div class="method">· CONTAINS_OP()</div>
+<div class="method">· LIST_EXTEND()</div>
+<div class="method">· LIST_TO_TUPLE()</div>
+<div class="method">· STOPITERATION_ERROR()</div>
+<div class="method">· DICT_MERGE()</div>
+<div class="method">· GEN_START()</div>
+<div class="method">· GET_LEN()</div>
+<div class="method">· MATCH_MAPPING()</div>
+<div class="method">· MATCH_SEQUENCE()</div>
+<div class="method">· MATCH_CLASS()</div>
+<div class="method">· MATCH_KEYS()</div>
+<div class="method">· LOAD_ASSERTION_ERROR()</div>
+<div class="method">· LOAD_BUILD_CLASS()</div>
+<div class="method">· RESUME()</div>
+<div class="method">· PRECALL()</div>
+<div class="method">· KW_NAMES()</div>
+<div class="method">· PUSH_NULL()</div>
+<div class="method">· _call()</div>
+<div class="method">· CALL()</div>
+<div class="method">· COPY()</div>
+<div class="method">· SWAP()</div>
+<div class="method">· CACHE()</div>
+<div class="method">· BEFORE_WITH()</div>
+<div class="method">· enter_ctx()</div>
+<div class="method">· unsupported_ctx_graph_break()</div>
+<div class="method">· setup_or_before_with()</div>
+<div class="method">· append_prefix_inst()</div>
+<div class="method">· MAKE_CELL()</div>
+<div class="method">· COPY_FREE_VARS()</div>
+<div class="method">· RETURN_GENERATOR()</div>
+<div class="method">· END_FOR()</div>
+<div class="method">· LOAD_FAST_CHECK()</div>
+<div class="method">· LOAD_FAST_AND_CLEAR()</div>
+<div class="method">· LOAD_SUPER_ATTR()</div>
+<div class="method">· CALL_INTRINSIC_1()</div>
+<div class="method">· CALL_INTRINSIC_2()</div>
+<div class="method">· END_SEND()</div>
+<div class="method">· CALL_KW()</div>
+<div class="method">· TO_BOOL()</div>
+<div class="method">· SET_FUNCTION_ATTRIBUTE()</div>
+<div class="method">· CONVERT_VALUE()</div>
+<div class="method">· FORMAT_SIMPLE()</div>
+<div class="method">· FORMAT_WITH_SPEC()</div>
+<div class="method">· LOAD_SPECIAL()</div>
+<div class="method">· LOAD_SMALL_INT()</div>
+<div class="method">· LOAD_COMMON_CONSTANT()</div>
+<div class="method">· is_non_empty_graph()</div>
+<div class="method">· format_frame_summary()</div>
+<div class="method">· frame_summary()</div>
+<div class="method">· is_co_filename_from_nn_modules()</div>
+<div class="method">· store_global_weakref_by_id()</div>
+<div class="method">· fake_mode()</div>
+<div class="method">· strict_translation_mode()</div>
+<div class="method">· speculate()</div>
+<div class="method">· _make_frame_loc()</div>
+<div class="method">· _get_frame_loc_chain()</div>
+<div class="method">· log_graph_break()</div>
+<div class="method">· raise_loop_graph_break()</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; InstructionTranslator</div>
+<div class="method">· current_tx()</div>
+<div class="method">· set_current_tx()</div>
+<div class="method">· __init__()</div>
+<div class="method">· _throw_if_in_functorch()</div>
+<div class="method">· get_example_value()</div>
+<div class="method">· symbolic_locals_contain_module_class()</div>
+<div class="method">· replace_tos_if_return_is_generator()</div>
+<div class="method">· _return()</div>
+<div class="method">· RETURN_VALUE()</div>
+<div class="method">· RETURN_CONST()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; InliningInstructionTranslator</div>
+<div class="method">· inline_call()</div>
+<div class="method">· check_inlineable()</div>
+<div class="method">· build_inline_tracer()</div>
+<div class="method">· inline_call_()</div>
+<div class="method">· __init__()</div>
+<div class="method">· fake_mode()</div>
+<div class="method">· run_ctx_mgr()</div>
+<div class="method">· _can_speculate_comprehension_nested()</div>
+<div class="method">· should_compile_partial_graph()</div>
+<div class="method">· create_call_resume_at()</div>
+<div class="method">· RETURN_VALUE()</div>
+<div class="method">· RETURN_CONST()</div>
+<div class="method">· get_globals_source_and_value()</div>
+<div class="method">· _load_global()</div>
+<div class="method">· STORE_GLOBAL()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3b1f6ecc">&#x25A0; InliningGeneratorInstructionTranslator</div>
+<div class="method">· __init__()</div>
+<div class="method">· inline_call_()</div>
+<div class="method">· should_compile_partial_graph()</div>
+<div class="method">· YIELD_VALUE()</div>
+<div class="method">· GET_YIELD_FROM_ITER()</div>
+<div class="method">· RETURN_VALUE()</div>
+<div class="method">· RETURN_CONST()</div>
+<div class="method">· YIELD_FROM()</div>
+<div class="method">· SEND()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#6e1f1f">output_graph.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _wrap_with_inductor_config()</div>
+<div class="method">&#x2192; collect_reachable_grad_fns()</div>
+<div class="method">&#x2192; _step_logger()</div>
+<div class="method">&#x2192; _get_gen_rand_values_fn()</div>
+<div class="method">&#x2192; get_builtins_dict()</div>
+<div class="method">&#x2192; check_pt2_compliant_op()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; AliasingInfo</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; MutationInfo</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; GraphCompileReason</div>
+<div class="method">· __post_init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; FakeRootModule</div>
+<div class="method">· __init__()</div>
+<div class="method">· __repr__()</div>
+<div class="method">· add_nn_modules()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; WrapperBackend</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; BytecodeTracingTimings</div>
+<div class="method">· report_and_reset()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; OutputGraphGuardsState</div>
+<div class="method">· shape_env()</div>
+<div class="method">· guards()</div>
+<div class="method">· aotautograd_guards()</div>
+<div class="method">· dump_guards_state()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; StackLocalsMetadata</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; ExportMetaData</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; OutputGraphCommon</div>
+<div class="method">· __init__()</div>
+<div class="method">· shape_env()</div>
+<div class="method">· bypass_package()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; OutputGraph</div>
+<div class="method">· __init__()</div>
+<div class="method">· get_replayed_side_effect_source_refs()</div>
+<div class="method">· get_chained_attr_source()</div>
+<div class="method">· get_chained_param_buffer_source()</div>
+<div class="method">· mark_bytecode_tracing_start()</div>
+<div class="method">· mark_bytecode_tracing_stop()</div>
+<div class="method">· install_builtins_dict_in_fglobals()</div>
+<div class="method">· add_backward_state_hook()</div>
+<div class="method">· get_backward_state_proxy()</div>
+<div class="method">· init_ambient_guards()</div>
+<div class="method">· maybe_install_saved_tensors_hooks_subgraphs()</div>
+<div class="method">· synthetic_graph_input()</div>
+<div class="method">· add_cleanup_hook()</div>
+<div class="method">· call_cleanup_hooks()</div>
+<div class="method">· root_tracer()</div>
+<div class="method">· current_tracer()</div>
+<div class="method">· is_root_tracer()</div>
+<div class="method">· check_input_mutation_on_current_stream()</div>
+<div class="method">· check_event_record_after_input_mutation()</div>
+<div class="method">· graph()</div>
+<div class="method">· graph()</div>
+<div class="method">· input_name_to_proxy()</div>
+<div class="method">· real_value_cache()</div>
+<div class="method">· bound_symbols()</div>
+<div class="method">· create_proxy()</div>
+<div class="method">· create_node()</div>
+<div class="method">· remove_node()</div>
+<div class="method">· subtracer()</div>
+<div class="method">· output()</div>
+<div class="method">· fake_mode()</div>
+<div class="method">· shape_env()</div>
+<div class="method">· guards()</div>
+<div class="method">· nn_modules()</div>
+<div class="method">· aotautograd_guards()</div>
+<div class="method">· save_global_state()</div>
+<div class="method">· push_tx()</div>
+<div class="method">· pop_tx()</div>
+<div class="method">· current_tx()</div>
+<div class="method">· resolve_source_value()</div>
+<div class="method">· count_calls()</div>
+<div class="method">· is_empty_graph()</div>
+<div class="method">· has_outputs()</div>
+<div class="method">· get_submodule()</div>
+<div class="method">· new_var()</div>
+<div class="method">· update_co_names()</div>
+<div class="method">· module_key_name()</div>
+<div class="method">· register_static_attr_and_return_proxy()</div>
+<div class="method">· register_attr_or_module()</div>
+<div class="method">· handle_aliases_for_stolen_lists()</div>
+<div class="method">· _get_stack_values_to_restore()</div>
+<div class="method">· compile_subgraph()</div>
+<div class="method">· codegen_cells()</div>
+<div class="method">· codegen_suffix()</div>
+<div class="method">· cleanup_graph()</div>
+<div class="method">· bypass_package()</div>
+<div class="method">· get_graph_sizes_structured()</div>
+<div class="method">· get_graph_sizes()</div>
+<div class="method">· restore_global_state()</div>
+<div class="method">· run_compiler_collective()</div>
+<div class="method">· _validate_outputs_safe_for_autograd_nodes()</div>
+<div class="method">· _check_requires_grad_intermediate_outputs()</div>
+<div class="method">· compile_and_call_fx_graph()</div>
+<div class="method">· placeholders()</div>
+<div class="method">· graphargs()</div>
+<div class="method">· call_user_compiler()</div>
+<div class="method">· _call_user_compiler()</div>
+<div class="method">· dedup_pass()</div>
+<div class="method">· install_subgraph()</div>
+<div class="method">· example_inputs()</div>
+<div class="method">· remove_unused_get_attr_nodes()</div>
+<div class="method">· remove_unused_graphargs()</div>
+<div class="method">· remove_tensorify_specialized_graphargs()</div>
+<div class="method">· add_output_instructions()</div>
+<div class="method">· install_resume_function_global()</div>
+<div class="method">· install_global_unsafe()</div>
+<div class="method">· install_global_by_id()</div>
+<div class="method">· install_global()</div>
+<div class="method">· cleanup()</div>
+<div class="method">· add_graph_finalizer()</div>
+<div class="method">· example_value_from_input_node()</div>
+<div class="method">· add_fqn_info_for_inlined_modules()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; DynamoTracerOutput</div>
+<div class="method">· __init__()</div>
+<div class="method">· _cleanup_output_graph()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; LazyProxy</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#6e1f1fcc">&#x25A0; SubgraphTracer</div>
+<div class="method">· __init__()</div>
+<div class="method">· record_proxyable_vt()</div>
+<div class="method">· _maybe_preserve_original_meta()</div>
+<div class="method">· create_proxy()</div>
+<div class="method">· _create_proxy()</div>
+<div class="method">· create_node()</div>
+<div class="method">· remove_node()</div>
+<div class="method">· create_graph_input()</div>
+<div class="method">· lift_tracked_freevar_to_input()</div>
+<div class="method">· maybe_lift_tracked_freevar_to_input()</div>
+<div class="method">· track_produced_symints()</div>
+<div class="method">· _lift_basic_symbols()</div>
+<div class="method">· lookup_unbound_symbols()</div>
+<div class="method">· has_input_mutation()</div>
+<div class="method">· has_aliasing()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#3a1042">codegen.py</div>
+<div class="class-box">
+<div class="class-name" style="background:#3a1042cc">&#x25A0; GraphOutputEntry</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#3a1042cc">&#x25A0; PyCodegen</div>
+<div class="method">· __init__()</div>
+<div class="method">· restore_stack()</div>
+<div class="method">· graph_output_vars()</div>
+<div class="method">· call_reconstruct()</div>
+<div class="method">· add_push_null()</div>
+<div class="method">· __call__()</div>
+<div class="method">· add_graph_output()</div>
+<div class="method">· load_graph_output()</div>
+<div class="method">· add_cache()</div>
+<div class="method">· foreach()</div>
+<div class="method">· create_binary_subscr()</div>
+<div class="method">· setup_globally_cached()</div>
+<div class="method">· clear_tos()</div>
+<div class="method">· append_output()</div>
+<div class="method">· extend_output()</div>
+<div class="method">· get_instructions()</div>
+<div class="method">· create_load()</div>
+<div class="method">· create_load_closure()</div>
+<div class="method">· create_load_deref()</div>
+<div class="method">· create_store()</div>
+<div class="method">· create_store_deref()</div>
+<div class="method">· create_load_global()</div>
+<div class="method">· create_load_const()</div>
+<div class="method">· create_load_const_unchecked()</div>
+<div class="method">· load_method()</div>
+<div class="method">· call_method()</div>
+<div class="method">· create_load_attr()</div>
+<div class="method">· load_attr()</div>
+<div class="method">· create_load_attrs()</div>
+<div class="method">· create_store_attr()</div>
+<div class="method">· store_attr()</div>
+<div class="method">· load_function_name()</div>
+<div class="method">· rot_n()</div>
+<div class="method">· pop_null()</div>
+<div class="method">· pop_top()</div>
+<div class="method">· call_function()</div>
+<div class="method">· dup_top()</div>
+<div class="method">· store()</div>
+<div class="method">· load_deref()</div>
+<div class="method">· make_function_with_closure()</div>
+<div class="method">· create_load_python_module()</div>
+<div class="method">· mark_source_temp()</div>
+<div class="method">· make_call_generated_code()</div>
+<div class="method">· create_import_name()</div>
+<div class="method">· load_import_from()</div>
+<div class="method">· create_call_function_kw()</div>
+<div class="method">· create_delete()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#4a3000">guards.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; get_framelocals_idx()</div>
+<div class="method">&#x2192; from_numpy()</div>
+<div class="method">&#x2192; uninteresting_files()</div>
+<div class="method">&#x2192; _get_closure_vars()</div>
+<div class="method">&#x2192; _ast_unparse()</div>
+<div class="method">&#x2192; get_verbose_code_part()</div>
+<div class="method">&#x2192; get_verbose_code_parts()</div>
+<div class="method">&#x2192; _get_closure_var_hint()</div>
+<div class="method">&#x2192; convert_int_to_concrete_values()</div>
+<div class="method">&#x2192; convert_to_concrete_values()</div>
+<div class="method">&#x2192; get_tensor_guard_code_part()</div>
+<div class="method">&#x2192; get_key_index()</div>
+<div class="method">&#x2192; get_key_index_source()</div>
+<div class="method">&#x2192; raise_local_type_error()</div>
+<div class="method">&#x2192; should_optimize_getattr_on_nn_module()</div>
+<div class="method">&#x2192; getitem_on_dict_manager()</div>
+<div class="method">&#x2192; match_on_id_for_tensor()</div>
+<div class="method">&#x2192; code_framelocals_names_reversed_cached()</div>
+<div class="method">&#x2192; extract_tensor_metadata()</div>
+<div class="method">&#x2192; extract_subclass_metadata()</div>
+<div class="method">&#x2192; check_subclass_metadata()</div>
+<div class="method">&#x2192; extract_dtensor_spec()</div>
+<div class="method">&#x2192; check_dtensor_spec()</div>
+<div class="method">&#x2192; extract_opaque_obj()</div>
+<div class="method">&#x2192; check_opaque_obj()</div>
+<div class="method">&#x2192; extract_closure()</div>
+<div class="method">&#x2192; check_closure()</div>
+<div class="method">&#x2192; _constant_subclass_base_value()</div>
+<div class="method">&#x2192; register_guard_check_spec()</div>
+<div class="method">&#x2192; skip_guard_check_spec()</div>
+<div class="method">&#x2192; unsupported_guard_check_spec()</div>
+<div class="method">&#x2192; must_add_nn_module_guards()</div>
+<div class="method">&#x2192; _get_unsupported_types()</div>
+<div class="method">&#x2192; make_guard_filter_entry()</div>
+<div class="method">&#x2192; pickle_guards_state()</div>
+<div class="method">&#x2192; build_guard_function()</div>
+<div class="method">&#x2192; is_recompiles_enabled()</div>
+<div class="method">&#x2192; is_recompiles_verbose_enabled()</div>
+<div class="method">&#x2192; make_torch_function_mode_stack_guard()</div>
+<div class="method">&#x2192; recompilation_reason_for_no_tensor_aliasing_guard()</div>
+<div class="method">&#x2192; strip_local_scope()</div>
+<div class="method">&#x2192; format_user_stack_trace()</div>
+<div class="method">&#x2192; get_guard_fail_reason_helper()</div>
+<div class="method">&#x2192; get_guard_fail_reason()</div>
+<div class="method">&#x2192; get_and_maybe_log_recompilation_reasons()</div>
+<div class="method">&#x2192; update_diff_guard_managers_for_existing_cache_entries()</div>
+<div class="method">&#x2192; guard_error_hook()</div>
+<div class="method">&#x2192; unique()</div>
+<div class="method">&#x2192; make_dupe_guard()</div>
+<div class="method">&#x2192; install_guard()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; IndentedBufferWithPrefix</div>
+<div class="method">· prefix()</div>
+<div class="method">· writeline()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; GuardManagerWrapper</div>
+<div class="method">· __init__()</div>
+<div class="method">· _preserve_printed_relational_guards()</div>
+<div class="method">· collect_diff_guard_sources()</div>
+<div class="method">· finalize()</div>
+<div class="method">· prepare_diff_guard_manager()</div>
+<div class="method">· find_tag_safe_roots()</div>
+<div class="method">· populate_diff_guard_manager()</div>
+<div class="method">· clone_with_chosen_sources()</div>
+<div class="method">· get_guard_lines()</div>
+<div class="method">· get_manager_line()</div>
+<div class="method">· construct_dict_manager_string()</div>
+<div class="method">· construct_manager_string()</div>
+<div class="method">· __str__()</div>
+<div class="method">· check()</div>
+<div class="method">· check_verbose()</div>
+<div class="method">· populate_code_parts_for_debugging()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; NNModuleAttrAccessorInfo</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; GuardCodeList</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; GuardManagerType</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; GuardCheckSpec</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; UnsupportedGuardCheckSpec</div>
+<div class="method">· __init__()</div>
+<div class="method">· get_metadata_fn()</div>
+<div class="method">· eval_fn()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; GuardBuilder</div>
+<div class="method">· __init__()</div>
+<div class="method">· guard_on_dict_keys_and_ignore_order()</div>
+<div class="method">· guard_on_dict_keys_and_order()</div>
+<div class="method">· _get_generic_dict_manager_example_value()</div>
+<div class="method">· getattr_on_nn_module()</div>
+<div class="method">· requires_key_order_guarding()</div>
+<div class="method">· get_guard_manager_type()</div>
+<div class="method">· manager_guards_on_keys()</div>
+<div class="method">· get_global_guard_manager()</div>
+<div class="method">· get_guard_manager_from_source()</div>
+<div class="method">· get_guard_manager()</div>
+<div class="method">· add_python_lambda_leaf_guard_to_root()</div>
+<div class="method">· get()</div>
+<div class="method">· arg_ref()</div>
+<div class="method">· _guard_on_attribute()</div>
+<div class="method">· HASATTR()</div>
+<div class="method">· NOT_PRESENT_IN_GENERIC_DICT()</div>
+<div class="method">· TYPE_MATCH()</div>
+<div class="method">· DICT_VERSION()</div>
+<div class="method">· DICT_CONTAINS()</div>
+<div class="method">· DICT_NOT_CONTAINS()</div>
+<div class="method">· SET_CONTAINS()</div>
+<div class="method">· SET_NOT_CONTAINS()</div>
+<div class="method">· BOOL_MATCH()</div>
+<div class="method">· NONE_MATCH()</div>
+<div class="method">· ID_MATCH()</div>
+<div class="method">· id_match_unchecked()</div>
+<div class="method">· NOT_NONE_MATCH()</div>
+<div class="method">· DISPATCH_KEY_SET_MATCH()</div>
+<div class="method">· DUAL_LEVEL()</div>
+<div class="method">· FUNCTORCH_STACK_MATCH()</div>
+<div class="method">· AUTOGRAD_SAVED_TENSORS_HOOKS()</div>
+<div class="method">· TENSOR_SUBCLASS_METADATA_MATCH()</div>
+<div class="method">· DTENSOR_SPEC_MATCH()</div>
+<div class="method">· OPAQUE_OBJ_GUARD_FN_MATCH()</div>
+<div class="method">· EQUALS_MATCH()</div>
+<div class="method">· CONSTANT_MATCH()</div>
+<div class="method">· CONSTANT_SUBCLASS_MATCH()</div>
+<div class="method">· NN_MODULE()</div>
+<div class="method">· FUNCTION_MATCH()</div>
+<div class="method">· CLASS_MATCH()</div>
+<div class="method">· MODULE_MATCH()</div>
+<div class="method">· CLOSURE_MATCH()</div>
+<div class="method">· BUILTIN_MATCH()</div>
+<div class="method">· SEQUENCE_LENGTH()</div>
+<div class="method">· TUPLE_ITERATOR_LEN()</div>
+<div class="method">· RANGE_ITERATOR_MATCH()</div>
+<div class="method">· COUNT_ITERATOR_MATCH()</div>
+<div class="method">· DUPLICATE_INPUT()</div>
+<div class="method">· WEAKREF_ALIVE()</div>
+<div class="method">· MAPPING_KEYS_CHECK()</div>
+<div class="method">· DICT_KEYS_MATCH()</div>
+<div class="method">· EMPTY_NN_MODULE_HOOKS_DICT()</div>
+<div class="method">· GRAD_MODE()</div>
+<div class="method">· DETERMINISTIC_ALGORITHMS()</div>
+<div class="method">· FSDP_TRAINING_STATE()</div>
+<div class="method">· GLOBAL_STATE()</div>
+<div class="method">· TORCH_FUNCTION_STATE()</div>
+<div class="method">· DEFAULT_DEVICE()</div>
+<div class="method">· SHAPE_ENV()</div>
+<div class="method">· TENSOR_MATCH()</div>
+<div class="method">· _set_guard_export_info()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; PyExprCSEPass</div>
+<div class="method">· __init__()</div>
+<div class="method">· _new_var()</div>
+<div class="method">· count()</div>
+<div class="method">· replace()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; DeletedGuardManagerWrapper</div>
+<div class="method">· __init__()</div>
+<div class="method">· populate_diff_guard_manager()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; ShapeCodeParts</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; GuardsState</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; _Missing</div>
+<div class="method">· __init__()</div>
+<div class="method">· __repr__()</div>
+<div class="method">· __str__()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; GuardsStatePickler</div>
+<div class="method">· __init__()</div>
+<div class="method">· _unpickle_module()</div>
+<div class="method">· _unpickle_tensor()</div>
+<div class="method">· _unpickle_traceable_wrapper_subclass()</div>
+<div class="method">· _unpickle_python_module()</div>
+<div class="method">· _unpickle_dispatch_key_set()</div>
+<div class="method">· _unpickle_functorch_interpreter()</div>
+<div class="method">· _unpickle_mapping_proxy()</div>
+<div class="method">· _unpickle_dict_keys()</div>
+<div class="method">· _unpickle_count_iter()</div>
+<div class="method">· _unpickle_fsdp_module_type()</div>
+<div class="method">· _unpickle_ddp_module()</div>
+<div class="method">· _unpickle_c_op()</div>
+<div class="method">· _unpickle_op()</div>
+<div class="method">· _unpickle_bound_method()</div>
+<div class="method">· _unpickle_sdp_backend()</div>
+<div class="method">· _unpickle_cell()</div>
+<div class="method">· _unpickle_named_tuple_type()</div>
+<div class="method">· _unpickle_code()</div>
+<div class="method">· _unpickle_nested_function()</div>
+<div class="method">· reducer_override()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; CheckFunctionManager</div>
+<div class="method">· __init__()</div>
+<div class="method">· serialize_guards()</div>
+<div class="method">· build_guards()</div>
+<div class="method">· compile_check_fn()</div>
+<div class="method">· invalidate()</div>
+<div class="method">· id_ref()</div>
+<div class="method">· lookup_weakrefs()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; Config</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; ExprCounter</div>
+<div class="method">· __init__()</div>
+<div class="method">· visit()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; Replacer</div>
+<div class="method">· __init__()</div>
+<div class="method">· visit()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#4a3000cc">&#x25A0; _AnyCompare</div>
+<div class="method">· __eq__()</div>
+<div class="method">· __ne__()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#1a3a4a">side_effects.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _manual_dict_setitem()</div>
+<div class="method">&#x2192; _manual_list_update()</div>
+<div class="method">&#x2192; allow_side_effects_in_hop()</div>
+<div class="method">&#x2192; allow_externally_visible_side_effects_in_subtracer()</div>
+<div class="method">&#x2192; disallow_side_effects_in_generator()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a3a4acc">&#x25A0; SideEffects</div>
+<div class="method">· __init__()</div>
+<div class="method">· ignore_mutations_on()</div>
+<div class="method">· stop_ignoring_mutations_on()</div>
+<div class="method">· _capture_user_stack()</div>
+<div class="method">· __eq__()</div>
+<div class="method">· diff()</div>
+<div class="method">· clone()</div>
+<div class="method">· __contains__()</div>
+<div class="method">· __getitem__()</div>
+<div class="method">· should_allow_externally_visible_side_effects_in_subtracer()</div>
+<div class="method">· should_allow_side_effects_in_hop()</div>
+<div class="method">· is_reconstructing_generator()</div>
+<div class="method">· _maybe_record_side_effect()</div>
+<div class="method">· check_allowed_side_effect()</div>
+<div class="method">· store_attr()</div>
+<div class="method">· load_attr()</div>
+<div class="method">· store_cell()</div>
+<div class="method">· load_cell()</div>
+<div class="method">· load_global()</div>
+<div class="method">· store_global()</div>
+<div class="method">· cls_supports_mutation_side_effects()</div>
+<div class="method">· is_attribute_mutation()</div>
+<div class="method">· has_pending_mutation()</div>
+<div class="method">· has_pending_mutation_of_attr()</div>
+<div class="method">· is_modified()</div>
+<div class="method">· _track_obj()</div>
+<div class="method">· track_object_existing()</div>
+<div class="method">· track_object_new()</div>
+<div class="method">· get_variable_cls()</div>
+<div class="method">· get_example_value()</div>
+<div class="method">· track_new_user_defined_object()</div>
+<div class="method">· track_cell_new()</div>
+<div class="method">· track_cell_existing()</div>
+<div class="method">· track_global_existing()</div>
+<div class="method">· track_save_for_backward()</div>
+<div class="method">· track_runahead_tensor_and_symvar_side_effects()</div>
+<div class="method">· prune_dead_object_new()</div>
+<div class="method">· mutation()</div>
+<div class="method">· has_existing_dict_mutation()</div>
+<div class="method">· _get_modified_vars()</div>
+<div class="method">· codegen_save_tempvars()</div>
+<div class="method">· register_hook()</div>
+<div class="method">· remove_hook()</div>
+<div class="method">· codegen_hooks()</div>
+<div class="method">· get_ca_final_callbacks_var()</div>
+<div class="method">· _format_side_effect_message()</div>
+<div class="method">· _emit_side_effect_messages()</div>
+<div class="method">· codegen_update_mutated()</div>
+<div class="method">· log_side_effects_summary()</div>
+<div class="method">· is_empty()</div>
+<div class="method">· clear()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#0d419d">variables/base.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _is_top_level_scope()</div>
+<div class="method">&#x2192; is_side_effect_safe()</div>
+<div class="method">&#x2192; typestr()</div>
+<div class="method">&#x2192; print_cpython_to_vt_mapping()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; SourceType</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; MutationType</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; ValueMutationNew</div>
+<div class="method">· __init__()</div>
+<div class="method">· __hash__()</div>
+<div class="method">· __eq__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; ValueMutationExisting</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; AttributeMutation</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; AttributeMutationExisting</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; AttributeMutationNew</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; NO_SUCH_SUBOBJ</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; AsPythonConstantNotImplementedError</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; VariableTrackerMeta</div>
+<div class="method">· __new__()</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; ImplicitRealizingVariableTrackerMeta</div>
+<div class="method">· __instancecheck__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d419dcc">&#x25A0; VariableTracker</div>
+<div class="method">· clone()</div>
+<div class="method">· visit()</div>
+<div class="method">· __repr__()</div>
+<div class="method">· debug_repr()</div>
+<div class="method">· python_type()</div>
+<div class="method">· python_type_name()</div>
+<div class="method">· as_python_constant()</div>
+<div class="method">· guard_as_python_constant()</div>
+<div class="method">· is_python_constant()</div>
+<div class="method">· bool_impl()</div>
+<div class="method">· is_constant_match()</div>
+<div class="method">· is_constant_none()</div>
+<div class="method">· make_guard()</div>
+<div class="method">· const_getattr()</div>
+<div class="method">· is_symnode_like()</div>
+<div class="method">· is_tensor()</div>
+<div class="method">· var_getattr()</div>
+<div class="method">· is_proxy()</div>
+<div class="method">· as_proxy()</div>
+<div class="method">· maybe_fx_node()</div>
+<div class="method">· _contains_self_reference()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· unpack_var_sequence()</div>
+<div class="method">· force_unpack_var_sequence()</div>
+<div class="method">· has_unpack_var_sequence()</div>
+<div class="method">· has_force_unpack_var_sequence()</div>
+<div class="method">· force_apply_to_var_sequence()</div>
+<div class="method">· call_obj_hasattr()</div>
+<div class="method">· call_function()</div>
+<div class="method">· sq_length()</div>
+<div class="method">· mp_length()</div>
+<div class="method">· mp_subscript_impl()</div>
+<div class="method">· call_method()</div>
+<div class="method">· call_tree_map()</div>
+<div class="method">· call_tree_map_branch()</div>
+<div class="method">· _tree_map_fallback()</div>
+<div class="method">· call_tree_map_with_path()</div>
+<div class="method">· call_tree_map_with_path_branch()</div>
+<div class="method">· _tree_map_with_path_fallback()</div>
+<div class="method">· set_name_hint()</div>
+<div class="method">· realize()</div>
+<div class="method">· unwrap()</div>
+<div class="method">· is_realized()</div>
+<div class="method">· next_variable()</div>
+<div class="method">· is_strict_mode()</div>
+<div class="method">· is_mutable()</div>
+<div class="method">· is_immutable()</div>
+<div class="method">· build()</div>
+<div class="method">· is_python_hashable()</div>
+<div class="method">· get_python_hash()</div>
+<div class="method">· get_real_python_backed_value()</div>
+<div class="method">· is_python_equal()</div>
+<div class="method">· nb_index_impl()</div>
+<div class="method">· __init__()</div>
+<div class="method">· __init_subclass__()</div>
+<div class="method">· _add_call_once_guard()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#0d3a5c">variables/builder.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; safe_has_grad()</div>
+<div class="method">&#x2192; _dataclasses_fields_lambda()</div>
+<div class="method">&#x2192; _clone_input()</div>
+<div class="method">&#x2192; wrap_fx_proxy()</div>
+<div class="method">&#x2192; cache_real_value_when_export()</div>
+<div class="method">&#x2192; wrap_fx_proxy_cls()</div>
+<div class="method">&#x2192; _wrap_fx_preexisting_tensor()</div>
+<div class="method">&#x2192; _wrap_fx_proxy()</div>
+<div class="method">&#x2192; handle_traced_output()</div>
+<div class="method">&#x2192; infer_subclass_type()</div>
+<div class="method">&#x2192; get_specialized_props()</div>
+<div class="method">&#x2192; construct_tensor_variable()</div>
+<div class="method">&#x2192; get_automatic_dynamic_shapes_mark_as()</div>
+<div class="method">&#x2192; get_dynamic_sources()</div>
+<div class="method">&#x2192; is_dynamic_source()</div>
+<div class="method">&#x2192; record_automatic_dynamic()</div>
+<div class="method">&#x2192; get_unbacked_sources()</div>
+<div class="method">&#x2192; is_unbacked_source()</div>
+<div class="method">&#x2192; _automatic_dynamic()</div>
+<div class="method">&#x2192; wrap_to_fake_tensor_and_record()</div>
+<div class="method">&#x2192; _wrap_to_fake_tensor_and_record_impl()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; _missing</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; GraphArg</div>
+<div class="method">· __setattr__()</div>
+<div class="method">· example()</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· erase()</div>
+<div class="method">· __eq__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; BackwardStateGraphArg</div>
+<div class="method">· __init__()</div>
+<div class="method">· reconstruct()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; VariableBuilder</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+<div class="method">· _call_impl()</div>
+<div class="method">· _can_lift_attrs_to_inputs()</div>
+<div class="method">· get_source()</div>
+<div class="method">· install_guards()</div>
+<div class="method">· _type_dispatch()</div>
+<div class="method">· _type_dispatch_impl()</div>
+<div class="method">· wrap_regex_pattern()</div>
+<div class="method">· wrap_weakref()</div>
+<div class="method">· wrap_removable_handle()</div>
+<div class="method">· wrap_jit_function()</div>
+<div class="method">· wrap_mapping_proxy()</div>
+<div class="method">· _id_dispatch()</div>
+<div class="method">· _wrap()</div>
+<div class="method">· wrap_user_defined()</div>
+<div class="method">· wrap_listlike()</div>
+<div class="method">· wrap_tuple_iterator()</div>
+<div class="method">· wrap_range_iterator()</div>
+<div class="method">· wrap_itertools_count()</div>
+<div class="method">· wrap_slice_range()</div>
+<div class="method">· mark_static_input()</div>
+<div class="method">· wrap_module()</div>
+<div class="method">· wrap_literal()</div>
+<div class="method">· _wrap_symint_for_lazy()</div>
+<div class="method">· _wrap_symfloat_for_lazy()</div>
+<div class="method">· _wrap_lazy_constant()</div>
+<div class="method">· _wrap_lazy_constant()</div>
+<div class="method">· _wrap_lazy_constant()</div>
+<div class="method">· _wrap_lazy_constant()</div>
+<div class="method">· assert_not_wrapped_by_this_graph()</div>
+<div class="method">· wrap_tensor()</div>
+<div class="method">· wrap_numpy_ndarray()</div>
+<div class="method">· wrap_symint()</div>
+<div class="method">· wrap_symfloat()</div>
+<div class="method">· wrap_unspecialized_primitive()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; SourcelessBuilder</div>
+<div class="method">· __init__()</div>
+<div class="method">· create()</div>
+<div class="method">· create()</div>
+<div class="method">· create()</div>
+<div class="method">· create()</div>
+<div class="method">· create()</div>
+<div class="method">· create()</div>
+<div class="method">· wrap_constant_literal()</div>
+<div class="method">· make_type_handlers()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; SourcelessUserDefinedObjectBuilder</div>
+<div class="method">· __init__()</div>
+<div class="method">· create()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; TensorDescriptor</div>
+<div class="method">· from_tensor()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; JITFunction</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0d3a5ccc">&#x25A0; Autotuner</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#2a1a5e">source.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; is_constant_source()</div>
+<div class="method">&#x2192; _get_source_debug_name()</div>
+<div class="method">&#x2192; _esc_str()</div>
+<div class="method">&#x2192; get_local_source_name()</div>
+<div class="method">&#x2192; is_from_local_source()</div>
+<div class="method">&#x2192; is_from_global_source()</div>
+<div class="method">&#x2192; get_global_source_name()</div>
+<div class="method">&#x2192; is_from_nonlocal_source()</div>
+<div class="method">&#x2192; is_from_closure_source()</div>
+<div class="method">&#x2192; is_from_source()</div>
+<div class="method">&#x2192; is_from_unspecialized_nn_module_source()</div>
+<div class="method">&#x2192; is_from_unspecialized_builtin_nn_module_source()</div>
+<div class="method">&#x2192; is_from_unspecialized_param_buffer_source()</div>
+<div class="method">&#x2192; is_from_flatten_script_object_source()</div>
+<div class="method">&#x2192; is_from_optimizer_source()</div>
+<div class="method">&#x2192; is_from_defaults()</div>
+<div class="method">&#x2192; is_from_skip_guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; LocalSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TempLocalSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; SyntheticLocalSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; RandomValueSource</div>
+<div class="method">· guard_source()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; GlobalSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; GlobalWeakRefSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; WeakRefCallSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; CallFunctionNoArgsSource</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; AttrSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; CellContentsSource</div>
+<div class="method">· __post_init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; GenericAttrSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TypeDictSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TypeMROSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; LocalCellSource</div>
+<div class="method">· reconstruct()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; CodeSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ClosureSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; GradSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ParamBufferSource</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; UnspecializedParamBufferSource</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; EphemeralSource</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+<div class="method">· make_guard()</div>
+<div class="method">· is_ephemeral()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; SkipGuardSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TensorProperty</div>
+<div class="method">· method_name()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TensorPropertySource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; IndexedSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; NegateSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ConvertIntSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; DynamicScalarSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; FlattenScriptObjectSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ScriptObjectQualifiedNameSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; AttrProxySource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; DefaultsSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; GetItemSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· unpack_slice()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ConstDictKeySource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+<div class="method">· is_dict_key()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; NonSerializableSetGetItemSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+<div class="method">· is_dict_key()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; DictGetItemSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; DictSubclassGetItemSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ListGetItemSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TupleIteratorGetItemSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; NamedTupleFieldsSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; DataclassFieldsSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TypeSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; OptimizerSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; NNModuleSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; UnspecializedNNModuleSource</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; UnspecializedBuiltinNNModuleSource</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; FSDPNNModuleSource</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; GlobalStateSource</div>
+<div class="method">· _name_template()</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ImportSource</div>
+<div class="method">· __post_init__()</div>
+<div class="method">· _name_template()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; TorchFunctionModeStackSource</div>
+<div class="method">· _name_template()</div>
+<div class="method">· _get_index()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ConstantSource</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+<div class="method">· _name_template()</div>
+<div class="method">· make_guard()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; NumpyTensorSource</div>
+<div class="method">· _name_template()</div>
+<div class="method">· reconstruct()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; SubclassAttrListSource</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; FloatTensorSource</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; CallMethodItemSource</div>
+<div class="method">· _name_template()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; ShapeEnvSource</div>
+<div class="method">· _name_template()</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; CurrentStreamSource</div>
+<div class="method">· _name_template()</div>
+<div class="method">· reconstruct()</div>
+<div class="method">· guard_source()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#2a1a5ecc">&#x25A0; BackwardStateSource</div>
+<div class="method">· _name_template()</div>
+<div class="method">· guard_source()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#1a4a3a">resume_execution.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _initial_push_null()</div>
+<div class="method">&#x2192; _bytecode_from_template_with_split()</div>
+<div class="method">&#x2192; _try_except_tf_mode_template()</div>
+<div class="method">&#x2192; _filter_iter()</div>
+<div class="method">&#x2192; _load_tuple_and_call()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4a3acc">&#x25A0; ReenterWith</div>
+<div class="method">· try_except_torch_function_mode()</div>
+<div class="method">· try_finally()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4a3acc">&#x25A0; ResumeFunctionMetadata</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4a3acc">&#x25A0; ContinueExecutionCache</div>
+<div class="method">· lookup()</div>
+<div class="method">· generate()</div>
+<div class="method">· unreachable_codes()</div>
+<div class="method">· generate_based_on_original_code_object()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#1a4428">fx/graph.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _register_custom_builtin()</div>
+<div class="method">&#x2192; _is_magic()</div>
+<div class="method">&#x2192; _snake_case()</div>
+<div class="method">&#x2192; _is_from_torch()</div>
+<div class="method">&#x2192; _format_target()</div>
+<div class="method">&#x2192; _parse_stack_trace()</div>
+<div class="method">&#x2192; _override_sym_repr()</div>
+<div class="method">&#x2192; _identity()</div>
+<div class="method">&#x2192; _make_color_fn()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _CustomBuiltin</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _Namespace</div>
+<div class="method">· __init__()</div>
+<div class="method">· create_name()</div>
+<div class="method">· associate_name_with_obj()</div>
+<div class="method">· _rename_object()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; PythonCode</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _InsertPoint</div>
+<div class="method">· __init__()</div>
+<div class="method">· __enter__()</div>
+<div class="method">· __exit__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _node_list</div>
+<div class="method">· __init__()</div>
+<div class="method">· __len__()</div>
+<div class="method">· __iter__()</div>
+<div class="method">· __reversed__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _PyTreeInfo</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _ParsedStackTrace</div>
+<div class="method">· get_summary_str()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; CodeGen</div>
+<div class="method">· __init__()</div>
+<div class="method">· _format_multiline_args()</div>
+<div class="method">· _format_single_arg()</div>
+<div class="method">· _get_delimiters()</div>
+<div class="method">· _format_multiline_container()</div>
+<div class="method">· _get_desc_trailers()</div>
+<div class="method">· _call_method_with_signature_check()</div>
+<div class="method">· gen_fn_def()</div>
+<div class="method">· generate_output()</div>
+<div class="method">· process_inputs()</div>
+<div class="method">· process_outputs()</div>
+<div class="method">· additional_globals()</div>
+<div class="method">· _gen_python_code()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _BoxedCodeGen</div>
+<div class="method">· gen_fn_def()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _PyTreeCodeGen</div>
+<div class="method">· __init__()</div>
+<div class="method">· process_inputs()</div>
+<div class="method">· process_outputs()</div>
+<div class="method">· _format_annotations()</div>
+<div class="method">· gen_var_bindings()</div>
+<div class="method">· gen_fn_def()</div>
+<div class="method">· generate_output()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _ExportCodeGen</div>
+<div class="method">· __init__()</div>
+<div class="method">· process_inputs()</div>
+<div class="method">· process_outputs()</div>
+<div class="method">· gen_fn_def()</div>
+<div class="method">· gen_var_bindings()</div>
+<div class="method">· generate_output()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; _FindNodesLookupTable</div>
+<div class="method">· __init__()</div>
+<div class="method">· _key()</div>
+<div class="method">· __contains__()</div>
+<div class="method">· insert()</div>
+<div class="method">· remove()</div>
+<div class="method">· find_nodes()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#1a4428cc">&#x25A0; Graph</div>
+<div class="method">· __init__()</div>
+<div class="method">· owning_module()</div>
+<div class="method">· owning_module()</div>
+<div class="method">· nodes()</div>
+<div class="method">· output_node()</div>
+<div class="method">· find_nodes()</div>
+<div class="method">· graph_copy()</div>
+<div class="method">· __deepcopy__()</div>
+<div class="method">· create_node()</div>
+<div class="method">· process_inputs()</div>
+<div class="method">· process_outputs()</div>
+<div class="method">· erase_node()</div>
+<div class="method">· inserting_before()</div>
+<div class="method">· inserting_after()</div>
+<div class="method">· placeholder()</div>
+<div class="method">· get_attr()</div>
+<div class="method">· call_module()</div>
+<div class="method">· call_method()</div>
+<div class="method">· call_function()</div>
+<div class="method">· node_copy()</div>
+<div class="method">· output()</div>
+<div class="method">· _target_to_str()</div>
+<div class="method">· python_code()</div>
+<div class="method">· _python_code()</div>
+<div class="method">· __str__()</div>
+<div class="method">· print_tabular()</div>
+<div class="method">· lint()</div>
+<div class="method">· eliminate_dead_code()</div>
+<div class="method">· set_codegen()</div>
+<div class="method">· on_generate_code()</div>
+<div class="method">· _clear_nodes()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#174a1a">fx/node.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; has_side_effect()</div>
+<div class="method">&#x2192; _find_module_of_method()</div>
+<div class="method">&#x2192; _type_repr()</div>
+<div class="method">&#x2192; _get_qualified_name()</div>
+<div class="method">&#x2192; _format_arg()</div>
+<div class="method">&#x2192; map_arg()</div>
+<div class="method">&#x2192; map_aggregate()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#174a1acc">&#x25A0; Node</div>
+<div class="method">· __init__()</div>
+<div class="method">· __getstate__()</div>
+<div class="method">· __setstate__()</div>
+<div class="method">· next()</div>
+<div class="method">· prev()</div>
+<div class="method">· prepend()</div>
+<div class="method">· append()</div>
+<div class="method">· args()</div>
+<div class="method">· args()</div>
+<div class="method">· kwargs()</div>
+<div class="method">· kwargs()</div>
+<div class="method">· all_input_nodes()</div>
+<div class="method">· update_arg()</div>
+<div class="method">· insert_arg()</div>
+<div class="method">· update_kwarg()</div>
+<div class="method">· stack_trace()</div>
+<div class="method">· stack_trace()</div>
+<div class="method">· __repr__()</div>
+<div class="method">· _pretty_print_target()</div>
+<div class="method">· format_node()</div>
+<div class="method">· replace_all_uses_with()</div>
+<div class="method">· is_impure()</div>
+<div class="method">· normalized_arguments()</div>
+<div class="method">· replace_input_with()</div>
+<div class="method">· _rename()</div>
+<div class="method">· __setattr__()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#0f3a20">fx/graph_module.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _exec_with_source()</div>
+<div class="method">&#x2192; _forward_from_src()</div>
+<div class="method">&#x2192; _method_from_src()</div>
+<div class="method">&#x2192; _format_import_statement()</div>
+<div class="method">&#x2192; _format_import_block()</div>
+<div class="method">&#x2192; reduce_graph_module()</div>
+<div class="method">&#x2192; reduce_package_graph_module()</div>
+<div class="method">&#x2192; _deserialize_graph_module()</div>
+<div class="method">&#x2192; _copy_attr()</div>
+<div class="method">&#x2192; _assign_attr()</div>
+<div class="method">&#x2192; _get_attr()</div>
+<div class="method">&#x2192; _del_attr()</div>
+<div class="method">&#x2192; _get_attr_via_attr_list()</div>
+<div class="method">&#x2192; _has_attr()</div>
+<div class="method">&#x2192; _print_readable()</div>
+<div class="method">&#x2192; _metadata_hash()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0f3a20cc">&#x25A0; _EvalCacheLoader</div>
+<div class="method">· __init__()</div>
+<div class="method">· cache()</div>
+<div class="method">· get_source()</div>
+<div class="method">· _get_key()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0f3a20cc">&#x25A0; _CodeOnlyModule</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0f3a20cc">&#x25A0; _WrappedCall</div>
+<div class="method">· __init__()</div>
+<div class="method">· _generate_error_message()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0f3a20cc">&#x25A0; GraphModule</div>
+<div class="method">· __new__()</div>
+<div class="method">· __init__()</div>
+<div class="method">· _boxed_call()</div>
+<div class="method">· graph()</div>
+<div class="method">· graph()</div>
+<div class="method">· to_folder()</div>
+<div class="method">· add_submodule()</div>
+<div class="method">· delete_submodule()</div>
+<div class="method">· delete_all_unused_submodules()</div>
+<div class="method">· code()</div>
+<div class="method">· recompile()</div>
+<div class="method">· _recompile_submodules()</div>
+<div class="method">· __reduce_package__()</div>
+<div class="method">· __reduce__()</div>
+<div class="method">· _deepcopy_init()</div>
+<div class="method">· __deepcopy__()</div>
+<div class="method">· __copy__()</div>
+<div class="method">· print_readable()</div>
+<div class="method">· __str__()</div>
+<div class="method">· _replicate_for_data_parallel()</div>
+<div class="method">· _set_replace_hook()</div>
+<div class="method">· _register_replace_node_hook()</div>
+<div class="method">· _unregister_replace_node_hook()</div>
+<div class="method">· _register_create_node_hook()</div>
+<div class="method">· _unregister_create_node_hook()</div>
+<div class="method">· _register_erase_node_hook()</div>
+<div class="method">· _unregister_erase_node_hook()</div>
+<div class="method">· _register_deepcopy_hook()</div>
+<div class="method">· _unregister_deepcopy_hook()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0f3a20cc">&#x25A0; KeepModules</div>
+<div class="method">· is_leaf_module()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0f3a20cc">&#x25A0; GraphModuleImpl</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#0a2e18">fx/_symbolic_trace.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; is_fx_tracing_warning()</div>
+<div class="method">&#x2192; is_fx_tracing()</div>
+<div class="method">&#x2192; is_fx_symbolic_tracing()</div>
+<div class="method">&#x2192; _patch_function()</div>
+<div class="method">&#x2192; _transfer_attrs()</div>
+<div class="method">&#x2192; _find_proxy()</div>
+<div class="method">&#x2192; _create_wrapped_func()</div>
+<div class="method">&#x2192; _create_wrapped_method()</div>
+<div class="method">&#x2192; _new_patcher()</div>
+<div class="method">&#x2192; _maybe_revert_all_patches()</div>
+<div class="method">&#x2192; _patch_wrapped_functions()</div>
+<div class="method">&#x2192; _autowrap_check()</div>
+<div class="method">&#x2192; wrap()</div>
+<div class="method">&#x2192; wrap()</div>
+<div class="method">&#x2192; wrap()</div>
+<div class="method">&#x2192; symbolic_trace()</div>
+<div class="method">&#x2192; _assert_is_none()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; ProxyableClassMeta</div>
+<div class="method">· __init__()</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; PHBase</div>
+<div class="method">· __repr__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; PHWithMeta</div>
+<div class="method">· __init__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; Tracer</div>
+<div class="method">· __init__()</div>
+<div class="method">· get_fresh_qualname()</div>
+<div class="method">· create_arg()</div>
+<div class="method">· is_leaf_module()</div>
+<div class="method">· path_of_module()</div>
+<div class="method">· call_module()</div>
+<div class="method">· getattr()</div>
+<div class="method">· create_args_for_root()</div>
+<div class="method">· trace()</div>
+<div class="method">· __deepcopy__()</div>
+<div class="method">· _proxy_placeholder()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; _PatchedFn</div>
+<div class="method">· revert()</div>
+<div class="method">· patch()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; _PatchedFnSetItem</div>
+<div class="method">· revert()</div>
+<div class="method">· patch()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; _PatchedFnDel</div>
+<div class="method">· revert()</div>
+<div class="method">· patch()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; _PatchedFnSetAttr</div>
+<div class="method">· revert()</div>
+<div class="method">· patch()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#0a2e18cc">&#x25A0; _Patcher</div>
+<div class="method">· __init__()</div>
+<div class="method">· patch()</div>
+<div class="method">· patch_method()</div>
+<div class="method">· visit_once()</div>
+<div class="method">· revert_all_patches()</div>
+<div class="method">· reapply_all_patches()</div>
+<div class="method">· __enter__()</div>
+<div class="method">· __exit__()</div>
+</div>
+</div>
+<div class="col">
+<div class="file-hdr" style="background:#5c3800">_inductor/compile_fx.py</div>
+<div class="funcs-box">
+<div class="funcs-hdr">module-level functions</div>
+<div class="method">&#x2192; _fx_compile_mode_default()</div>
+<div class="method">&#x2192; _get_progression_configs()</div>
+<div class="method">&#x2192; get_static_input_idxs()</div>
+<div class="method">&#x2192; record_original_output_strides()</div>
+<div class="method">&#x2192; _recursive_record_original_output_strides()</div>
+<div class="method">&#x2192; _recursive_record_user_visible_output_idxs()</div>
+<div class="method">&#x2192; _step_logger()</div>
+<div class="method">&#x2192; _warn_tf32_disabled()</div>
+<div class="method">&#x2192; _resolve_name_collision()</div>
+<div class="method">&#x2192; _unlift_graph()</div>
+<div class="method">&#x2192; _get_subgraph_names()</div>
+<div class="method">&#x2192; _recursive_pre_grad_passes()</div>
+<div class="method">&#x2192; _recursive_joint_graph_passes()</div>
+<div class="method">&#x2192; _recursive_post_grad_passes()</div>
+<div class="method">&#x2192; split_const_gm()</div>
+<div class="method">&#x2192; is_tf32_warning_applicable()</div>
+<div class="method">&#x2192; maybe_disable_comprehensive_padding()</div>
+<div class="method">&#x2192; maybe_disable_graph_partition()</div>
+<div class="method">&#x2192; fake_tensor_prop()</div>
+<div class="method">&#x2192; get_patched_config_dict()</div>
+<div class="method">&#x2192; with_fresh_cache_if_config()</div>
+<div class="method">&#x2192; compile_fx_inner()</div>
+<div class="method">&#x2192; _compile_fx_inner()</div>
+<div class="method">&#x2192; fx_codegen_and_compile()</div>
+<div class="method">&#x2192; get_input_idxs_to_check()</div>
+<div class="method">&#x2192; cudagraphify()</div>
+<div class="method">&#x2192; static_input()</div>
+<div class="method">&#x2192; index_expanded_dims_and_copy_()</div>
+<div class="method">&#x2192; cudagraphify_impl()</div>
+<div class="method">&#x2192; compile_fx_aot()</div>
+<div class="method">&#x2192; fw_compiler_freezing()</div>
+<div class="method">&#x2192; get_cpp_wrapper_config()</div>
+<div class="method">&#x2192; get_cuda_device_context()</div>
+<div class="method">&#x2192; partition_fn()</div>
+<div class="method">&#x2192; get_num_model_outputs()</div>
+<div class="method">&#x2192; cudagraph_annotation_context()</div>
+<div class="method">&#x2192; create_compiler_config_extra()</div>
+<div class="method">&#x2192; compile_fx_forward()</div>
+<div class="method">&#x2192; compile_fx_backward()</div>
+<div class="method">&#x2192; run_pre_grad_passes()</div>
+<div class="method">&#x2192; compile_fx()</div>
+<div class="method">&#x2192; _extract_inputs_from_exported_gm()</div>
+<div class="method">&#x2192; _maybe_wrap_and_compile_fx_main()</div>
+<div class="method">&#x2192; _compile_fx_main()</div>
+<div class="method">&#x2192; graph_returns_tuple()</div>
+<div class="method">&#x2192; make_graph_return_tuple()</div>
+<div class="method">&#x2192; handle_dynamo_export_graph()</div>
+<div class="method">&#x2192; _check_triton_bf16_support()</div>
+<div class="method">&#x2192; _aoti_flatten_inputs()</div>
+<div class="method">&#x2192; autograd_cache_key()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; FxCompileMode</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; FxCompileConfig</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; _CompileFxKwargs</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; _CompileFxCallable</div>
+<div class="method">· __call__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; _FxCompileStat</div>
+<div class="method">· __repr__()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; FxCompile</div>
+<div class="method">· codegen_and_compile()</div>
+<div class="method">· _reset_stats()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; _InProcessFxCompile</div>
+<div class="method">· codegen_and_compile()</div>
+</div>
+<div class="class-box">
+<div class="class-name" style="background:#5c3800cc">&#x25A0; CompilerConfigExtra</div>
+<div class="method" style="color:#444">no methods</div>
+</div>
+</div>
+</div></div>
+
+<div class="arrow-section">
+<h2>&#x27A1; Cross-Class Method Call Flow (compilation order)</h2>
+<table>
+<tr><th>#</th><th>FROM class</th><th>TO class</th><th>relationship</th></tr>
+
+<tr><td>1</td><td>torch.compile</td><td>_TorchCompileInductorWrapper</td><td>creates</td></tr>
+<tr><td>2</td><td>torch.compile</td><td>optimize</td><td>calls</td></tr>
+<tr><td>3</td><td>optimize</td><td>_optimize</td><td>&#x2192;</td></tr>
+<tr><td>4</td><td>_optimize</td><td>_optimize_catch_errors</td><td>&#x2192;</td></tr>
+<tr><td>5</td><td>_optimize</td><td>ConvertFrameAssert</td><td>creates</td></tr>
+<tr><td>6</td><td>_optimize_catch_errors</td><td>OptimizedModule</td><td>wraps model</td></tr>
+<tr><td>7</td><td>OptimizedModule</td><td>_TorchDynamoContext</td><td>uses</td></tr>
+<tr><td>8</td><td>OptimizedModule</td><td>ConvertFrameAssert</td><td>triggers at runtime</td></tr>
+<tr><td>9</td><td>ConvertFrameAssert</td><td>_compile</td><td>calls</td></tr>
+<tr><td>10</td><td>_compile</td><td>trace_frame</td><td>calls</td></tr>
+<tr><td>11</td><td>trace_frame</td><td>InstructionTranslator</td><td>creates</td></tr>
+<tr><td>12</td><td>InstructionTranslator</td><td>OutputGraph</td><td>creates</td></tr>
+<tr><td>13</td><td>OutputGraph</td><td>SubgraphTracer</td><td>owns</td></tr>
+<tr><td>14</td><td>SubgraphTracer</td><td>Tracer</td><td>extends</td></tr>
+<tr><td>15</td><td>SubgraphTracer</td><td>Graph</td><td>builds</td></tr>
+<tr><td>16</td><td>Graph</td><td>Node</td><td>contains</td></tr>
+<tr><td>17</td><td>OutputGraph</td><td>SideEffects</td><td>tracks</td></tr>
+<tr><td>18</td><td>InstructionTranslatorBase</td><td>VariableTracker</td><td>wraps values</td></tr>
+<tr><td>19</td><td>VariableBuilder</td><td>VariableTracker</td><td>builds</td></tr>
+<tr><td>20</td><td>InstructionTranslatorBase</td><td>SubgraphTracer</td><td>create_proxy()</td></tr>
+<tr><td>21</td><td>OutputGraph</td><td>GuardBuilder</td><td>generate guards</td></tr>
+<tr><td>22</td><td>GuardBuilder</td><td>CheckFunctionManager</td><td>feeds</td></tr>
+<tr><td>23</td><td>OutputGraph</td><td>PyCodegen</td><td>drives</td></tr>
+<tr><td>24</td><td>PyCodegen</td><td>Source</td><td>reconstruct()</td></tr>
+<tr><td>25</td><td>OutputGraph</td><td>_TorchCompileInductorWrapper</td><td>call_user_compiler()</td></tr>
+<tr><td>26</td><td>_TorchCompileInductorWrapper</td><td>compile_fx</td><td>calls</td></tr>
+<tr><td>27</td><td>compile_fx</td><td>compile_fx_inner</td><td>calls</td></tr>
+<tr><td>28</td><td>compile_fx_inner</td><td>_InProcessFxCompile</td><td>uses</td></tr>
+<tr><td>29</td><td>OutputGraph</td><td>GraphModule</td><td>builds</td></tr>
+<tr><td>30</td><td>GraphModule</td><td>Graph</td><td>owns</td></tr>
+<tr><td>31</td><td>ReenterWith</td><td>PyCodegen</td><td>used by</td></tr>
+<tr><td>32</td><td>ContinueExecutionCache</td><td>InstructionTranslatorBase</td><td>generates resume</td></tr>
+</table></div>
+</body></html>
