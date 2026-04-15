@@ -19,5 +19,5 @@ struct GridSamplerBackwardParams {
   ::c10::metal::array<idx_type_t, N> grad_output_strides;
   ::c10::metal::array<idx_type_t, N> grad_input_strides;
   idx_type_t grad_grid_sW;
-  bool input_requires_grad;
+  int32_t padding_mode;
 };
