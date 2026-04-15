@@ -313,6 +313,26 @@ class FSDPState(_State):
         output = self._register_pre_backward_hook(output)
         self._training_state = TrainingState.IDLE
         if self._state_ctx.iter_forward_root is self:
+            for state in self._state_ctx.all_states:
+                if state is not self and state._modules_to_run_forward:
+                    # A grouped fully_shard's forward did not run all modules
+                    # (e.g. chunked loss skipping lm_head). Force-complete the
+                    # group's post-forward so that params are resharded and
+                    # backward hooks are registered on the root output.
+                    warning_once(
+                        logger,
+                        f"{len(state._modules_to_run_forward)} of "
+                        f"{len(state._modules)} modules passed to "
+                        f"fully_shard did not run forward: "
+                        f"{list(state._modules_to_run_forward)}. Consider "
+                        f"using separate fully_shard() calls for modules "
+                        f"that may not always run together.",
+                    )
+                    state._modules_to_run_forward.clear()
+                    for fsdp_param_group in state._fsdp_param_groups:
+                        fsdp_param_group.post_forward(module, input, output)
+                    output = state._register_pre_backward_hook(output)
+                    state._training_state = TrainingState.IDLE
             if all_gather_state := self._comm_ctx.all_gather_state:
                 # Free the last all-gather result if needed; refer to
                 # [Note: Overlapping all-gather copy-in and all-gather]
@@ -364,6 +384,11 @@ class FSDPState(_State):
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
+                # Clear iter_forward_root in case a grouped module's
+                # post-forward never fired (e.g. partial group forward
+                # followed by standalone calls in a chunk loop), leaving
+                # iter_forward_root stale.
+                self._state_ctx.iter_forward_root = None
                 # Catch the last module's RS states that no subsequent
                 # module's group N-1 wait will clear.
                 for rs_state in self._comm_ctx.reduce_scatter_states:
@@ -428,11 +453,31 @@ def _register_group_forward_hooks(
     modules_set = set(modules)
 
     @_dynamo_disable
-    @functools.wraps(pre_hook)
-    def wrapped_pre_hook(*args: Any, **kwargs: Any):
-        if len(modules_to_run) == 0:  # first to run
-            modules_to_run.update(modules_set)
-            return pre_hook(*args, **kwargs)
+    def get_wrapped_pre_hook(module: nn.Module):
+        @functools.wraps(pre_hook)
+        def wrapped_pre_hook(*args: Any, **kwargs: Any):
+            if len(modules_to_run) == 0:  # first to run
+                modules_to_run.update(modules_set)
+                return pre_hook(*args, **kwargs)
+            if module not in modules_to_run:
+                # This module already ran and was discarded in a previous
+                # group forward, but other modules in the group were skipped
+                # so the set was never fully cleared. Reset and start a new
+                # group forward so that unshard runs for this call.
+                warning_once(
+                    logger,
+                    f"FSDP group forward: {len(modules_to_run)} of "
+                    f"{len(modules_set)} modules did not run in the previous "
+                    f"group forward: {list(modules_to_run)}. Consider using "
+                    f"separate fully_shard() calls for modules that may not "
+                    f"always run together.",
+                )
+                modules_to_run.clear()
+                modules_to_run.update(modules_set)
+                return pre_hook(*args, **kwargs)
+            # Mid-group: this module hasn't run yet, unshard already happened
+
+        return wrapped_pre_hook
 
     @_dynamo_disable
     def get_wrapped_post_hook(module: nn.Module):
@@ -446,7 +491,7 @@ def _register_group_forward_hooks(
 
     pre_handles = [
         module.register_forward_pre_hook(
-            wrapped_pre_hook, prepend=True, with_kwargs=True
+            get_wrapped_pre_hook(module), prepend=True, with_kwargs=True
         )
         for module in modules
     ]
