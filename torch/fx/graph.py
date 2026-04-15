@@ -34,8 +34,9 @@ from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 log = logging.getLogger(__name__)
 
+
 def _resolve_symints_in_args(graph: "Graph", x: object) -> object:
-    """Recursively convert SymInt/SymFloat/SymBool values to FX nodes in args/kwargs."""
+    """Recursively convert SymInt values to FX nodes in args/kwargs."""
     if isinstance(x, torch.SymInt):
         return graph.symint_to_node(x)
     elif isinstance(x, (torch.SymFloat, torch.SymBool)):
@@ -54,12 +55,15 @@ def _resolve_symints_in_args(graph: "Graph", x: object) -> object:
 def _has_symbolic_literal(x: object) -> bool:
     """Check if args/kwargs contain any non-concrete SymInt/SymFloat/SymBool."""
     if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        return hasattr(x, "node") and hasattr(x.node, "expr") and not x.node.expr.is_number
+        return (
+            hasattr(x, "node") and hasattr(x.node, "expr") and not x.node.expr.is_number
+        )
     elif isinstance(x, (tuple, list)):
         return any(_has_symbolic_literal(item) for item in x)
     elif isinstance(x, dict):
         return any(_has_symbolic_literal(v) for v in x.values())
     return False
+
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -1911,7 +1915,9 @@ class Graph:
                         torch.ops.aten.sym_size.int, (node, i)
                     )
                     size_node.meta["val"] = s
-                    self._expr_to_proxy[sym] = Proxy(size_node, tracer=self._symint_tracer)
+                    self._expr_to_proxy[sym] = Proxy(
+                        size_node, tracer=self._symint_tracer
+                    )
                     needed.discard(sym)
             for i, s in enumerate(val.stride()):
                 if isinstance(s, torch.SymInt) and s.node.expr in needed:
@@ -1920,7 +1926,9 @@ class Graph:
                         torch.ops.aten.sym_stride.int, (node, i)
                     )
                     stride_node.meta["val"] = s
-                    self._expr_to_proxy[sym] = Proxy(stride_node, tracer=self._symint_tracer)
+                    self._expr_to_proxy[sym] = Proxy(
+                        stride_node, tracer=self._symint_tracer
+                    )
                     needed.discard(sym)
             so = val.storage_offset()
             if isinstance(so, torch.SymInt) and so.node.expr in needed:
@@ -1929,7 +1937,9 @@ class Graph:
                     torch.ops.aten.sym_storage_offset.default, (node,)
                 )
                 offset_node.meta["val"] = so
-                self._expr_to_proxy[sym] = Proxy(offset_node, tracer=self._symint_tracer)
+                self._expr_to_proxy[sym] = Proxy(
+                    offset_node, tracer=self._symint_tracer
+                )
                 needed.discard(sym)
 
     @compatibility(is_backward_compatible=False)
@@ -1946,8 +1956,8 @@ class Graph:
 
         Example::
 
-            numel = node.meta["val"].numel()          # SymInt
-            size_node = graph.symint_to_node(numel)    # FX Node
+            numel = node.meta["val"].numel()  # SymInt
+            size_node = graph.symint_to_node(numel)  # FX Node
             graph.call_function(aten.empty, ([size_node],), ...)
 
         Args:
