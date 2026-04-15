@@ -6,7 +6,7 @@ import itertools
 import pickle
 import weakref
 from abc import abstractmethod
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from typing import Any, NewType, TypeVar
 from typing_extensions import override, Self
 
@@ -75,7 +75,7 @@ def _unpickle_as_none() -> None:
     return None
 
 
-def _unpickle_as_weakref(referent: object) -> weakref.ref[object]:
+def _unpickle_as_weakref(referent: object) -> weakref.ref:
     return weakref.ref(referent)
 
 
@@ -84,7 +84,7 @@ def _unpickle_as_dead_weakref() -> Callable[[], None]:
 
 
 @contextlib.contextmanager
-def patch_pytree_map_over_slice() -> Generator[None]:
+def patch_pytree_map_over_slice():
     if slice in pytree.SUPPORTED_NODES:
         yield
         return

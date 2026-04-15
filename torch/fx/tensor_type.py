@@ -1,11 +1,7 @@
-from collections.abc import Sequence
-
+# mypy: allow-untyped-defs
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility
-
-
-__all__ = ["Dyn", "TensorType", "is_consistent", "is_more_precise"]
 
 
 @compatibility(is_backward_compatible=False)
@@ -18,21 +14,21 @@ class TensorType:
                 return torch.add(x, y)
     """
 
-    def __init__(self, dim: Sequence[object]) -> None:
+    def __init__(self, dim):
         self.__origin__ = TensorType
         self.__args__ = dim
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"TensorType[{self.__args__}]"
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other):
         if isinstance(other, self.__class__):
             return list(self.__args__) == list(other.__args__)
         else:
             return False
 
     @staticmethod
-    def __class_getitem__(*args: object) -> "TensorType":
+    def __class_getitem__(*args):
         if len(args) == 1 and isinstance(args[0], tuple):
             args = args[0]
         return TensorType(tuple(args))
@@ -46,13 +42,13 @@ class _DynType:
     def __init__(self) -> None:
         self.__name__ = "_DynType"
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other):
         return isinstance(other, self.__class__)
 
-    def __str__(self) -> str:
+    def __str__(self):
         return "Dyn"
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return "Dyn"
 
 
@@ -60,7 +56,7 @@ Dyn = _DynType()
 
 
 @compatibility(is_backward_compatible=False)
-def is_consistent(t1: object, t2: object) -> bool:
+def is_consistent(t1, t2):
     """
     A binary relation denoted by ~ that determines if t1 is consistent with t2.
     The relation is reflexive, symmetric but not transitive.
@@ -88,7 +84,7 @@ def is_consistent(t1: object, t2: object) -> bool:
 
 
 @compatibility(is_backward_compatible=False)
-def is_more_precise(t1: object, t2: object) -> bool:
+def is_more_precise(t1, t2):
     """
     A binary relation denoted by <= that determines if t1 is more precise than t2.
     The relation is reflexive and transitive.

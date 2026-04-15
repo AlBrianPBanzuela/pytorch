@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 from __future__ import annotations
 
 
@@ -21,7 +23,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Any, overload, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch._logging.structured as structured
@@ -41,11 +43,6 @@ from torch._logging import dtrace_structured
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from typing import Self
-
-    import sympy
-
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 log = logging.getLogger(__name__)
@@ -65,15 +62,7 @@ __all__ = ["SymNode", "method_to_operator", "magic_methods", "DynamicInt"]
 from torch.types import py_sym_types as SymTypes
 
 
-@overload
-def _to_symtype(t: type[bool]) -> type[SymBool]: ...
-@overload
-def _to_symtype(t: type[int]) -> type[SymInt]: ...
-@overload
-def _to_symtype(t: type[float]) -> type[SymFloat]: ...
-@overload
-def _to_symtype(t: type) -> type: ...
-def _to_symtype(t: type) -> type:
+def _to_symtype(t):
     if t is bool:
         return SymBool
     if t is int:
@@ -103,14 +92,14 @@ class SymNode:
 
     def __init__(
         self,
-        expr: object,
-        shape_env: ShapeEnv | None,
-        pytype: type,
+        expr,
+        shape_env,
+        pytype,
         hint: HintType | object,
-        constant: int | float | bool | None = None,
-        fx_node: object = None,
-        optimized_summation: bool = False,
-    ) -> None:
+        constant=None,
+        fx_node=None,
+        optimized_summation=False,
+    ):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
@@ -145,7 +134,7 @@ class SymNode:
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
 
-        def compute_hint() -> HintType | SymInt | SymFloat | SymBool:
+        def compute_hint():
             from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
             # This occasionally gets exercised by, e.g.,
@@ -155,8 +144,6 @@ class SymNode:
             # expensive.
             if has_free_unbacked_symbols(self.expr):
                 return None
-            if self.shape_env is None:
-                raise RuntimeError("shape_env is required to compute hint")
             hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
             if hint is not None:
                 hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
@@ -210,14 +197,9 @@ class SymNode:
         return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
     @property
-    def expr(self) -> sympy.Basic:
-        if (
-            isinstance(self._expr, int)
-            or self._expr.is_number  # pyrefly: ignore[missing-attribute]
-        ):
+    def expr(self):
+        if isinstance(self._expr, int) or self._expr.is_number:
             return self._expr
-        if self.shape_env is None:
-            raise AssertionError("shape_env is required to access expr")
         ver = self.shape_env._replacements_version_counter
         if ver == 0:
             return self._expr
@@ -229,20 +211,20 @@ class SymNode:
         return result
 
     @property
-    def hint(self) -> HintType | SymInt | SymFloat | SymBool:
+    def hint(self):
         return self._hint
 
-    def has_hint(self) -> bool:
+    def has_hint(self):
         return self._hint is not None
 
-    def maybe_as_int(self) -> int | None:
+    def maybe_as_int(self):
         if self.expr.is_number:
             return int(self.expr)
         else:
             return None
 
     # NB: This does conversions, not sure if this is good or not
-    def maybe_as_float(self) -> float | None:
+    def maybe_as_float(self):
         import sympy
 
         if isinstance(self.expr, sympy.Float):
@@ -250,7 +232,7 @@ class SymNode:
         else:
             return None
 
-    def maybe_as_bool(self) -> bool | None:
+    def maybe_as_bool(self):
         import sympy
 
         if self.expr is sympy.true:
@@ -260,16 +242,16 @@ class SymNode:
         else:
             return None
 
-    def is_int(self) -> bool:
+    def is_int(self):
         return self.pytype is int
 
-    def is_float(self) -> bool:
+    def is_float(self):
         return self.pytype is float
 
-    def is_bool(self) -> bool:
+    def is_bool(self):
         return self.pytype is bool
 
-    def is_nested_int(self) -> bool:
+    def is_nested_int(self):
         # Unbacked SymInts cannot be nested int today
         return (
             self._hint is not None
@@ -277,7 +259,7 @@ class SymNode:
             and self._hint.node.is_nested_int()
         )
 
-    def wrap_int(self, num: int) -> SymNode:
+    def wrap_int(self, num):
         if type(num) is not int:
             raise AssertionError(f"Expected int, got {type(num)}")
         import sympy
@@ -286,7 +268,7 @@ class SymNode:
             sympy.Integer(num), self.shape_env, int, num, constant=num, fx_node=num
         )
 
-    def wrap_float(self, num: float) -> SymNode:
+    def wrap_float(self, num):
         if type(num) is not float:
             raise AssertionError(f"Expected float, got {type(num)}")
         import sympy
@@ -295,7 +277,7 @@ class SymNode:
             sympy.Float(num), self.shape_env, float, num, constant=num, fx_node=num
         )
 
-    def wrap_bool(self, num: bool) -> SymNode:
+    def wrap_bool(self, num):
         if type(num) is not bool:
             raise AssertionError(f"Expected bool, got {type(num)}")
         import sympy
@@ -309,16 +291,16 @@ class SymNode:
             fx_node=num,
         )
 
-    def clone(self) -> SymNode:
+    def clone(self):
         return self
 
-    def str(self) -> builtins.str:
+    def str(self):
         return f"{self.expr}"
 
-    def __str__(self) -> builtins.str:
+    def __str__(self):
         return self.str()
 
-    def __repr__(self) -> builtins.str:
+    def __repr__(self):
         rep = [
             f"SymNode({self._expr}, shape_env={self.shape_env}, pytype={self.pytype}",
         ]
@@ -342,70 +324,70 @@ class SymNode:
     def pos(self) -> SymNode:
         return self._pos()  # type: ignore[attr-defined]
 
-    def round(self, ndigits: int | None = None) -> SymNode:
+    def round(self, ndigits=None) -> SymNode:
         return self._round(ndigits)  # type: ignore[attr-defined]
 
     def trunc(self) -> SymNode:
         return self._trunc()  # type: ignore[attr-defined]
 
-    def add(self, other: SymNode) -> SymNode:
+    def add(self, other) -> SymNode:
         return self._add(other)  # type: ignore[attr-defined]
 
-    def sub(self, other: SymNode) -> SymNode:
+    def sub(self, other) -> SymNode:
         return self._sub(other)  # type: ignore[attr-defined]
 
-    def mul(self, other: SymNode) -> SymNode:
+    def mul(self, other) -> SymNode:
         return self._mul(other)  # type: ignore[attr-defined]
 
-    def mod(self, other: SymNode) -> SymNode:
+    def mod(self, other) -> SymNode:
         return self._mod(other)  # type: ignore[attr-defined]
 
-    def float_pow(self, other: SymNode) -> SymNode:
+    def float_pow(self, other) -> SymNode:
         return self._float_pow(other)  # type: ignore[attr-defined]
 
-    def pow_by_natural(self, other: SymNode) -> SymNode:
+    def pow_by_natural(self, other) -> SymNode:
         return self._pow_by_natural(other)  # type: ignore[attr-defined]
 
-    def and_(self, other: SymNode) -> SymNode:
+    def and_(self, other) -> SymNode:
         return self._and_(other)  # type: ignore[attr-defined]
 
-    def or_(self, other: SymNode) -> SymNode:
+    def or_(self, other) -> SymNode:
         return self._or_(other)  # type: ignore[attr-defined]
 
-    def float_truediv(self, other: SymNode) -> SymNode:
+    def float_truediv(self, other) -> SymNode:
         return self._float_truediv(other)  # type: ignore[attr-defined]
 
-    def int_truediv(self, other: SymNode) -> SymNode:
+    def int_truediv(self, other) -> SymNode:
         return self._int_truediv(other)  # type: ignore[attr-defined]
 
-    def int_floordiv(self, other: SymNode) -> SymNode:
+    def int_floordiv(self, other) -> SymNode:
         return self._int_floordiv(other)  # type: ignore[attr-defined]
 
-    def lshift(self, other: SymNode) -> SymNode:
+    def lshift(self, other) -> SymNode:
         return self._lshift(other)  # type: ignore[attr-defined]
 
-    def rshift(self, other: SymNode) -> SymNode:
+    def rshift(self, other) -> SymNode:
         return self._rshift(other)  # type: ignore[attr-defined]
 
     def sym_not(self) -> SymNode:  # noqa: F811
         return self._sym_not()  # type: ignore[attr-defined]
 
-    def eq(self, other: SymNode) -> SymNode:
+    def eq(self, other) -> SymNode:
         return self._eq(other)  # type: ignore[attr-defined]
 
-    def ne(self, other: SymNode) -> SymNode:
+    def ne(self, other) -> SymNode:
         return self._ne(other)  # type: ignore[attr-defined]
 
-    def gt(self, other: SymNode) -> SymNode:
+    def gt(self, other) -> SymNode:
         return self._gt(other)  # type: ignore[attr-defined]
 
-    def lt(self, other: SymNode) -> SymNode:
+    def lt(self, other) -> SymNode:
         return self._lt(other)  # type: ignore[attr-defined]
 
-    def le(self, other: SymNode) -> SymNode:
+    def le(self, other) -> SymNode:
         return self._le(other)  # type: ignore[attr-defined]
 
-    def ge(self, other: SymNode) -> SymNode:
+    def ge(self, other) -> SymNode:
         return self._ge(other)  # type: ignore[attr-defined]
 
     def floor(self) -> SymNode:
@@ -426,86 +408,74 @@ class SymNode:
     def neg(self) -> SymNode:
         return self._neg()  # type: ignore[attr-defined]
 
-    def sym_min(self, other: SymNode) -> SymNode:  # noqa: F811
+    def sym_min(self, other) -> SymNode:  # noqa: F811
         return self._sym_min(other)  # type: ignore[attr-defined]
 
-    def sym_max(self, other: SymNode) -> SymNode:  # noqa: F811
+    def sym_max(self, other) -> SymNode:  # noqa: F811
         return self._sym_max(other)  # type: ignore[attr-defined]
 
-    def sym_ite(self, then_val: SymNode, else_val: SymNode) -> SymNode:
+    def sym_ite(self, then_val, else_val) -> SymNode:
         return self._sym_ite(then_val, else_val)  # type: ignore[attr-defined]
 
-    def is_contiguous(self, sizes: list[SymNode], strides: list[SymNode]) -> SymNode:
+    def is_contiguous(self, sizes, strides) -> SymNode:
         return self._is_contiguous(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_contiguous_2d(
-        self, sizes: list[SymNode], strides: list[SymNode]
-    ) -> SymNode:
+    def is_channels_last_contiguous_2d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_contiguous_2d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_contiguous_3d(
-        self, sizes: list[SymNode], strides: list[SymNode]
-    ) -> SymNode:
+    def is_channels_last_contiguous_3d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_contiguous_3d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_strides_2d(
-        self, sizes: list[SymNode], strides: list[SymNode]
-    ) -> SymNode:
+    def is_channels_last_strides_2d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_strides_2d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_strides_3d(
-        self, sizes: list[SymNode], strides: list[SymNode]
-    ) -> SymNode:
+    def is_channels_last_strides_3d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_strides_3d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_non_overlapping_and_dense_indicator(
-        self, sizes: list[SymNode], strides: list[SymNode]
-    ) -> SymNode:
+    def is_non_overlapping_and_dense_indicator(self, sizes, strides) -> SymNode:
         return self._is_non_overlapping_and_dense_indicator(sizes, strides)  # type: ignore[attr-defined]
 
     # Make C++ happy
-    def sym_or(self, other: SymNode) -> SymNode:
+    def sym_or(self, other):
         return self.or_(other)
 
-    def sym_and(self, other: SymNode) -> SymNode:
+    def sym_and(self, other):
         return self.and_(other)
 
     # Integer bitwise ops
-    def bitwise_and(self, other: SymNode) -> SymNode:
+    def bitwise_and(self, other):
         return self._bitwise_and(other)  # type: ignore[attr-defined]
 
-    def bitwise_or(self, other: SymNode) -> SymNode:
+    def bitwise_or(self, other):
         return self._bitwise_or(other)  # type: ignore[attr-defined]
 
-    def bitwise_xor(self, other: SymNode) -> SymNode:
+    def bitwise_xor(self, other):
         return self._bitwise_xor(other)  # type: ignore[attr-defined]
 
     # There is no int_truediv available from C++
-    def truediv(self, other: SymNode) -> SymNode:
+    def truediv(self, other):
         return self.float_truediv(other)
 
-    def floordiv(self, other: SymNode) -> SymNode:
+    def floordiv(self, other) -> SymNode:
         return self.int_floordiv(other)
 
     # We didn't bind integer pow in C++
-    def pow(self, other: SymNode) -> SymNode:
+    def pow(self, other):
         return self.float_pow(other)
 
-    def is_non_overlapping_and_dense(
-        self, sizes: list[SymNode], strides: list[SymNode]
-    ) -> SymNode:
+    def is_non_overlapping_and_dense(self, sizes, strides):
         return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(
             to_node(self, 1)
         )  # type: ignore[attr-defined]
 
-    def int_(self) -> int:
+    def int_(self):
         return self.guard_int("", 0)  # NB: uses Python backtrace
 
     # This one is currently done by hand, but if we add other variadic
     # functions consider factoring it out to be metaprogrammed too.  Note that
     # some load bearing logic is directly in torch.sym_sum
 
-    def sym_sum(self, args: list[SymNode]) -> SymNode:
+    def sym_sum(self, args) -> SymNode:
         import sympy
 
         # Inner impl
@@ -533,10 +503,8 @@ class SymNode:
                 break
             size_hints.append(a.hint)
         else:
-            out_hint = sum(size_hints)  # pyrefly: ignore[no-matching-overload]
+            out_hint = sum(size_hints)
 
-        if self.shape_env is None:
-            raise RuntimeError("shape_env is required for sym_sum")
         fx_node, _ = self.shape_env._create_fx_call_function(
             torch.sym_sum, (tuple(a.fx_node for a in args),)
         )
@@ -544,13 +512,11 @@ class SymNode:
         # NB: Only for integers!
         return SymNode(out, self.shape_env, int, out_hint, fx_node=fx_node)
 
-    def evaluate(self, size_oblivious: bool = False) -> bool | int | float:
-        if self.shape_env is None:
-            raise RuntimeError("shape_env is required to evaluate")
+    def evaluate(self, size_oblivious=False):
         return self.shape_env.evaluate_sym_node(self, size_oblivious)
 
     # You can manually trigger a guard with this function
-    def guard_int(self, file: builtins.str, line: int) -> int:
+    def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.evaluate()
@@ -560,7 +526,7 @@ class SymNode:
             log.warning("Failed to convert to int: %s", r)
             raise
 
-    def guard_float(self, file: builtins.str, line: int) -> float:
+    def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.evaluate()
@@ -570,7 +536,7 @@ class SymNode:
             log.warning("Failed to convert to float: %s", r)
             raise
 
-    def guard_bool(self, file: builtins.str, line: int) -> bool:
+    def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.evaluate()
@@ -580,11 +546,9 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
-    def expect_true(self, file: builtins.str, line: int) -> bool:
+    def expect_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-        if self.shape_env is None:
-            raise RuntimeError("shape_env is required for expect_true")
         if (
             self.has_hint()
             and not free_unbacked_symbols(self.expr)
@@ -600,14 +564,14 @@ class SymNode:
             self.expr, f"{file}:{line}", fx_node=self.fx_node
         )
 
-    def statically_known_true(self, file: builtins.str, line: int) -> bool:
+    def statically_known_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
 
         if not self.is_bool():
             raise AssertionError("Expected bool type")
         return statically_known_true(SymBool(self))
 
-    def guard_size_oblivious(self, file: builtins.str, line: int) -> bool:
+    def guard_size_oblivious(self, file, line):
         """
         Like guard_bool, but if we encounter unbacked symbols, if those symbols
         are size-like, we will treat them as >= 2 for the purposes of the analysis.
@@ -627,35 +591,35 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
-    def guard_or_false(self, file: builtins.str, line: int) -> bool:
+    def guard_or_false(self, file, line):
         from torch.fx.experimental.symbolic_shapes import guard_or_false
 
         if not self.is_bool():
             raise AssertionError("Expected bool type")
         return guard_or_false(SymBool(self))
 
-    def guard_or_true(self, file: builtins.str, line: int) -> bool:
+    def guard_or_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import guard_or_true
 
         if not self.is_bool():
             raise AssertionError("Expected bool type")
         return guard_or_true(SymBool(self))
 
-    def bool_(self) -> bool:
+    def bool_(self):
         return self.guard_bool("", 0)
 
-    def is_symbolic(self) -> bool:
+    def is_symbolic(self):
         return True
 
-    def nested_int(self) -> None:
+    def nested_int(self):
         return None
 
-    def is_constant(self) -> bool:
+    def is_constant(self):
         return False
 
 
 class _DynamicScalar:
-    def __new__(cls, *args: object) -> Self:
+    def __new__(cls, *args):
         if cls is _DynamicScalar:
             raise TypeError("_DynamicScalar is an abstract base class, use DynamicInt.")
         return super().__new__(cls, *args)
@@ -673,43 +637,20 @@ class DynamicInt(_DynamicScalar, int):
         fn(x)  # compiles x as a dynamic integer input; returns f(4)
     """
 
-    def __new__(cls, val: int) -> Self:
+    def __new__(cls, val):
         if not isinstance(val, int):
             raise AssertionError(f"Expected int, got {type(val)}")
         obj = super().__new__(cls, int(val))
         return obj
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"DynamicInt({self.real})"
 
-    def __floordiv__(
-        self, other: int
-    ) -> DynamicInt:  # // was casting to int without these overrides?
+    def __floordiv__(self, other):  # // was casting to int without these overrides?
         return DynamicInt(self.real // other)
 
-    def __rfloordiv__(self, other: int) -> DynamicInt:
+    def __rfloordiv__(self, other):
         return DynamicInt(other // self.real)
-
-    def __pow__(self, other, modulo=None):
-        if modulo is not None:
-            result = pow(self.real, other, modulo)
-        else:
-            result = self.real**other
-        # Only create DynamicInt if result is int, otherwise return plain value
-        # (e.g., negative exponent produces float)
-        if isinstance(result, int):
-            return DynamicInt(result)
-        return result
-
-    def __rpow__(self, other, modulo=None):
-        if modulo is not None:
-            result = pow(other, self.real, modulo)
-        else:
-            result = other**self.real
-        # Only create DynamicInt if result is int, otherwise return plain value
-        if isinstance(result, int):
-            return DynamicInt(result)
-        return result
 
 
 # TODO: this probably needs the sizes-strides eval functions
@@ -765,8 +706,8 @@ unary_magic_methods = {
 
 
 # Adding math ops: sqrt, cos, sin, ...
-def _get_sym_node_fn(name: str) -> Callable[[SymNode], SymNode]:
-    def fn(self: SymNode) -> SymNode:
+def _get_sym_node_fn(name):
+    def fn(self):
         return getattr(self, f"_sym_{name}")()
 
     return fn
@@ -791,7 +732,6 @@ for name in math_op_names:
     setattr(SymNode, sym_name, _get_sym_node_fn(name))
     METHOD_TO_OPERATOR[sym_name] = getattr(torch, priv_sym_name)
     unary_magic_methods.add(sym_name)
-    # pyrefly: ignore [unresolvable-dunder-all]
     __all__.append(sym_name)
 
 
@@ -845,25 +785,25 @@ always_bool_magic_methods = {
 # Methods that have a `__foo__` as well as `__rfoo__`
 
 
-def _sympy_float_truediv(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_float_truediv(a, b):
     from torch.utils._sympy.functions import FloatTrueDiv
 
     return FloatTrueDiv(a, b)
 
 
-def _sympy_int_truediv(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_int_truediv(a, b):
     from torch.utils._sympy.functions import IntTrueDiv
 
     return IntTrueDiv(a, b)
 
 
-def _sympy_floordiv(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_floordiv(a, b):
     from torch.utils._sympy.functions import FloorDiv
 
     return FloorDiv(a, b)
 
 
-def _sympy_mod(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_mod(a, b):
     from torch.utils._sympy.functions import Mod, PythonMod
 
     if a.is_nonnegative and b.is_nonnegative:
@@ -872,45 +812,43 @@ def _sympy_mod(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
         return PythonMod(a, b)
 
 
-def _sympy_pow_by_natural(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_pow_by_natural(a, b):
     from torch.utils._sympy.functions import PowByNatural
 
     return PowByNatural(a, b)
 
 
-def _sympy_float_pow(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_float_pow(a, b):
     from torch.utils._sympy.functions import FloatPow
 
     return FloatPow(a, b)
 
 
-def _sympy_and(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_and(a, b):
     import sympy
 
     return sympy.And(a, b)
 
 
-def _sympy_or(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_or(a, b):
     import sympy
 
     return sympy.Or(a, b)
 
 
-def _sympy_lshift(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_lshift(a, b):
     from torch.utils._sympy.functions import LShift
 
     return LShift(a, b)
 
 
-def _sympy_rshift(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_rshift(a, b):
     from torch.utils._sympy.functions import RShift
 
     return RShift(a, b)
 
 
-def _binary_search_insert_arg(
-    ordered_args: list[sympy.Basic], new_arg: sympy.Basic
-) -> list[sympy.Basic] | None:
+def _binary_search_insert_arg(ordered_args, new_arg):
     """
     If new_arg is found in ordered_args None is returned, else the new
     ordered_args with new_arg inserted
@@ -945,11 +883,8 @@ def _binary_search_insert_arg(
 
 
 def _optimized_add(
-    lhs: sympy.Basic,
-    rhs: sympy.Basic,
-    lhs_is_optimized_summation: bool = False,
-    rhs_is_optimized_summation: bool = False,
-) -> tuple[bool, sympy.Basic]:
+    lhs, rhs, lhs_is_optimized_summation=False, rhs_is_optimized_summation=False
+):
     """
     Custom optimization for Add used to optimize incremental binary summations of certain properties. The idea
     is when we know the expression is a summation of unique symbols all we need to know is the correct order of symbols,
@@ -963,7 +898,7 @@ def _optimized_add(
     import sympy
     from sympy.core.basic import _args_sortkey as sortkey
 
-    def make_optimized(ordered_args: list[sympy.Basic]) -> tuple[bool, sympy.Basic]:
+    def make_optimized(ordered_args):
         if ordered_args is None:
             raise AssertionError("ordered_args is None")
         # Use _from_args directly to bypass _exec_constructor_postprocessors
@@ -1015,19 +950,19 @@ def _optimized_add(
     return (_is_symbols_binary_summation(result), result)
 
 
-def _bitwise_and(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _bitwise_and(a, b):
     from torch.utils._sympy.functions import BitwiseFn_bitwise_and
 
     return BitwiseFn_bitwise_and(a, b)
 
 
-def _bitwise_or(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _bitwise_or(a, b):
     from torch.utils._sympy.functions import BitwiseFn_bitwise_or
 
     return BitwiseFn_bitwise_or(a, b)
 
 
-def _bitwise_xor(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _bitwise_xor(a, b):
     from torch.utils._sympy.functions import BitwiseFn_bitwise_xor
 
     return BitwiseFn_bitwise_xor(a, b)
@@ -1053,7 +988,7 @@ reflectable_magic_methods = {
 }
 
 
-def _floor_ceil_helper(a: sympy.Basic, fn: Callable[..., sympy.Basic]) -> sympy.Basic:
+def _floor_ceil_helper(a, fn):
     import sympy
 
     if isinstance(a, sympy.Mul):
@@ -1071,7 +1006,7 @@ def _floor_ceil_helper(a: sympy.Basic, fn: Callable[..., sympy.Basic]) -> sympy.
     return fn(a)
 
 
-def _sympy_floor(a: sympy.Basic) -> sympy.Basic:
+def _sympy_floor(a):
     from torch.utils._sympy.functions import FloorToInt
 
     return FloorToInt(a)
@@ -1079,67 +1014,67 @@ def _sympy_floor(a: sympy.Basic) -> sympy.Basic:
 
 # NB: this is Python trunc semantics which returns an int.  Do NOT use this to
 # represent torch.trunc (which is float to float)
-def _sympy_trunc(a: sympy.Basic) -> sympy.Basic:
+def _sympy_trunc(a):
     from torch.utils._sympy.functions import TruncToInt
 
     return TruncToInt(a)
 
 
-def _sympy_ceil(a: sympy.Basic) -> sympy.Basic:
+def _sympy_ceil(a):
     from torch.utils._sympy.functions import CeilToInt
 
     return CeilToInt(a)
 
 
-def _sympy_eq(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_eq(a, b):
     import sympy
 
     return sympy.Eq(a, b)
 
 
-def _sympy_ne(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_ne(a, b):
     import sympy
 
     return sympy.Ne(a, b)
 
 
-def _sympy_gt(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_gt(a, b):
     import sympy
 
     return sympy.Gt(a, b)
 
 
-def _sympy_lt(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_lt(a, b):
     import sympy
 
     return sympy.Lt(a, b)
 
 
-def _sympy_le(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_le(a, b):
     import sympy
 
     return sympy.Le(a, b)
 
 
-def _sympy_ge(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_ge(a, b):
     import sympy
 
     return sympy.Ge(a, b)
 
 
-def _sympy_min(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_min(a, b):
     from torch.utils._sympy.functions import Min
 
     return Min(a, b)
 
 
-def _sympy_max(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_max(a, b):
     from torch.utils._sympy.functions import Max
 
     return Max(a, b)
 
 
-def _sympy_ite(a: sympy.Basic, t: sympy.Basic, f: sympy.Basic) -> sympy.Basic:
+def _sympy_ite(a, t, f):
     import sympy
 
     return sympy.Piecewise((t, a), (f, True))
@@ -1148,8 +1083,8 @@ def _sympy_ite(a: sympy.Basic, t: sympy.Basic, f: sympy.Basic) -> sympy.Basic:
 current_module = sys.modules[__name__]
 
 
-def _get_sym_math_fn(name: str) -> Callable[[sympy.Basic], sympy.Basic]:
-    def fn(a: sympy.Basic) -> sympy.Basic:
+def _get_sym_math_fn(name):
+    def fn(a):
         import torch.utils._sympy.functions
 
         return getattr(torch.utils._sympy.functions, f"OpaqueUnaryFn_{name}")(a)
@@ -1166,15 +1101,13 @@ for name in math_op_names:
 del fn, name, priv_sympy_name  # type: ignore[possibly-undefined]
 
 
-def _sympy_abs(a: sympy.Basic) -> sympy.Basic:
+def _sympy_abs(a):
     import sympy
 
     return sympy.Abs(a)
 
 
-def _sympy_round(
-    number: sympy.Basic, ndigits: sympy.Basic | None = None
-) -> sympy.Basic:
+def _sympy_round(number, ndigits=None):
     from torch.utils._sympy.functions import RoundDecimal, RoundToInt
 
     if ndigits is None:
@@ -1183,7 +1116,7 @@ def _sympy_round(
         return RoundDecimal(number, ndigits)
 
 
-def _sympy_sym_float(a: sympy.Basic) -> sympy.Basic:
+def _sympy_sym_float(a):
     from torch.utils._sympy.functions import ToFloat
 
     # NB: Cannot use a * 1.0 here, because 0 * 1.0 is 0 which incorrectly
@@ -1191,7 +1124,7 @@ def _sympy_sym_float(a: sympy.Basic) -> sympy.Basic:
     return ToFloat(a)
 
 
-def _sympy_is_integer(a: sympy.Basic) -> sympy.Basic:
+def _sympy_is_integer(a):
     import sympy
 
     from torch.utils._sympy.functions import ToFloat
@@ -1230,16 +1163,12 @@ for name in math_op_names:
 del name, sym_name, math_op_names, current_module  # type: ignore[possibly-undefined]
 
 
-def sympy_is_contiguous(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic]
-) -> sympy.Basic:
+def sympy_is_contiguous(sizes, strides):
     dim = len(sizes)
     return sympy_is_contiguous_generic(sizes, strides, list(range(dim - 1, -1, -1)))
 
 
-def sympy_is_contiguous_generic(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic], dim_order: list[int]
-) -> sympy.Basic:
+def sympy_is_contiguous_generic(sizes, strides, dim_order):
     import sympy
 
     dim = len(sizes)
@@ -1263,21 +1192,15 @@ def sympy_is_contiguous_generic(
 # happens you will need to refactor this
 
 
-def sympy_is_channels_last_contiguous_2d(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic]
-) -> sympy.Basic:
+def sympy_is_channels_last_contiguous_2d(sizes, strides):
     return sympy_is_contiguous_generic(sizes, strides, [1, 3, 2, 0])
 
 
-def sympy_is_channels_last_contiguous_3d(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic]
-) -> sympy.Basic:
+def sympy_is_channels_last_contiguous_3d(sizes, strides):
     return sympy_is_contiguous_generic(sizes, strides, [1, 4, 3, 2, 0])
 
 
-def sympy_is_channels_last_strides_generic(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic], dim_order: list[int]
-) -> sympy.Basic:
+def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
     import sympy
 
     from torch.utils._sympy.functions import Max
@@ -1317,21 +1240,15 @@ def sympy_is_channels_last_strides_generic(
     return r
 
 
-def sympy_is_channels_last_strides_2d(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic]
-) -> sympy.Basic:
+def sympy_is_channels_last_strides_2d(sizes, strides):
     return sympy_is_channels_last_strides_generic(sizes, strides, [1, 3, 2, 0])
 
 
-def sympy_is_channels_last_strides_3d(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic]
-) -> sympy.Basic:
+def sympy_is_channels_last_strides_3d(sizes, strides):
     return sympy_is_channels_last_strides_generic(sizes, strides, [1, 4, 3, 2, 0])
 
 
-def _sympy_is_non_overlapping_and_dense_indicator(
-    sizes: list[sympy.Basic], strides: list[sympy.Basic]
-) -> sympy.Basic:
+def _sympy_is_non_overlapping_and_dense_indicator(sizes, strides):
     from torch.utils._sympy.functions import IsNonOverlappingAndDenseIndicator
 
     return IsNonOverlappingAndDenseIndicator(*sizes, *strides)
@@ -1349,7 +1266,7 @@ sizes_strides_methods = {
 }
 
 
-def to_node(self: SymNode, num: object) -> SymNode:
+def to_node(self, num):
     if isinstance(num, SymTypes):
         return num.node
     elif type(num) is bool:
@@ -1364,7 +1281,7 @@ def to_node(self: SymNode, num: object) -> SymNode:
         return NotImplemented
 
 
-def wrap_node(x: SymNode) -> SymInt | SymFloat | SymBool | int | float | bool:
+def wrap_node(x):
     # TODO: let C++ also take advantage of this
     if isinstance(x, SymNode) and x.constant is not None:
         return x.constant
@@ -1378,11 +1295,11 @@ def wrap_node(x: SymNode) -> SymInt | SymFloat | SymBool | int | float | bool:
         raise AssertionError(f"unrecognized return type {x}")
 
 
-def method_to_operator(method: str) -> Callable[..., object]:
+def method_to_operator(method):
     return METHOD_TO_OPERATOR[method]
 
 
-def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
+def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
     if method in magic_methods_on_operator_with_trailing_underscore:
@@ -1407,9 +1324,9 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             | {"<string>"}
         )
 
-    def capture_provenance(fn: Callable[..., SymNode]) -> Callable[..., SymNode]:
+    def capture_provenance(fn):
         @functools.wraps(fn)
-        def wrapper(self: SymNode, other: SymNode | None = None) -> SymNode:
+        def wrapper(self, other=None):
             if other is None:
                 result = fn(self)
             else:
@@ -1420,7 +1337,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
                 else:
                     arguments = [self]
 
-                def get_id(sym_node: SymNode) -> int | None:
+                def get_id(sym_node) -> int | None:
                     # We don't want to return an ID if the input is a constant
                     import sympy
 
@@ -1454,7 +1371,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         return wrapper
 
     @capture_provenance
-    def binary_magic_impl(self: SymNode, other: SymNode) -> SymNode:
+    def binary_magic_impl(self, other):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
             handle_sym_dispatch,
@@ -1480,8 +1397,6 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
                 # Special handling for mod that requires access to the value
                 # ranges
                 shape_env = self.shape_env
-                if shape_env is None:
-                    raise AssertionError("shape_env is required for mod")
                 if (
                     self.expr.is_nonnegative
                     or shape_env.bound_sympy(self.expr).lower >= 0
@@ -1565,8 +1480,6 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        if self.shape_env is None:
-            raise RuntimeError("shape_env is required for binary op")
         fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
@@ -1582,7 +1495,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         return result
 
     @capture_provenance
-    def unary_magic_impl(self: SymNode) -> SymNode:
+    def unary_magic_impl(self):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
             handle_sym_dispatch,
@@ -1593,8 +1506,6 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             return to_node(self, handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.expr
-        if self.shape_env is None:
-            raise RuntimeError("shape_env is required for unary op")
         if method == "floor" or method == "ceiling":
             expr = self.shape_env._simplify_floor_div(expr)
 
@@ -1624,9 +1535,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
     elif method == "sym_ite":
 
-        def sym_ite_impl(
-            pred_node: SymNode, then_node: SymNode, else_node: SymNode
-        ) -> SymNode:
+        def sym_ite_impl(pred_node, then_node, else_node):
             from torch.fx.experimental.proxy_tensor import (
                 get_proxy_mode,
                 handle_sym_dispatch,
@@ -1664,8 +1573,6 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
                 )
                 raise
 
-            if pred_node.shape_env is None:
-                raise RuntimeError("shape_env is required for sym_ite")
             fx_node, _ = pred_node.shape_env._create_fx_call_function(
                 sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node)
             )
@@ -1676,7 +1583,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         setattr(SymNode, f"_{method_attr}", sym_ite_impl)
     elif method == "round":
 
-        def round_impl(self: SymNode, ndigits: int | None = None) -> SymNode:
+        def round_impl(self, ndigits=None):
             from torch.fx.experimental.proxy_tensor import (
                 get_proxy_mode,
                 handle_sym_dispatch,
@@ -1702,9 +1609,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
 
             out_hint = None
             if self.hint is not None:
-                out_hint = op(  # pyrefly: ignore[no-matching-overload]
-                    self.hint, ndigits
-                )
+                out_hint = op(self.hint, ndigits)
 
             # Internally, None is used as sentinel to indicate that a something is not a node on an FX graph. At the
             # same time, there is no way to wrap a plain None into an FX node. Thus, there is no way to pass None here
@@ -1716,8 +1621,6 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             args = [self.fx_node]
             if ndigits is not None:
                 args.append(ndigits)
-            if self.shape_env is None:
-                raise RuntimeError("shape_env is required for round")
             fx_node, _ = self.shape_env._create_fx_call_function(op, tuple(args))
             return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
@@ -1726,12 +1629,10 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
 
-def _make_node_sizes_strides(method: str, func: Callable[..., sympy.Basic]) -> None:
+def _make_node_sizes_strides(method, func):
     # NB: don't LRU cache, lots of arguments
 
-    def sizes_strides_impl(
-        self: SymNode, sizes: list[SymNode], strides: list[SymNode]
-    ) -> SymNode:
+    def sizes_strides_impl(self, sizes, strides):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
             handle_sym_dispatch,
@@ -1784,9 +1685,7 @@ def _make_node_sizes_strides(method: str, func: Callable[..., sympy.Basic]) -> N
     # TODO: This is technically hotpath, but in the ideal end state
     # guards on this will resolve at a higher level so you never
     # spend time in this code
-    def sizes_strides_user(
-        sizes: list[object], strides: list[object]
-    ) -> SymInt | SymFloat | SymBool | int | float | bool:
+    def sizes_strides_user(sizes, strides):
         import sympy
 
         from torch.fx.experimental.symbolic_shapes import (
@@ -1802,10 +1701,7 @@ def _make_node_sizes_strides(method: str, func: Callable[..., sympy.Basic]) -> N
                     )
                 )
         if method == "is_non_overlapping_and_dense_indicator":
-            return eval_is_non_overlapping_and_dense(
-                sizes,  # pyrefly: ignore[bad-argument-type]
-                strides,  # pyrefly: ignore[bad-argument-type]
-            )
+            return eval_is_non_overlapping_and_dense(sizes, strides)
         else:
             # TODO: this is an awful implementation
             return bool(
@@ -1827,7 +1723,7 @@ for method, func in sizes_strides_methods.items():
     _make_node_sizes_strides(method, func)
 
 
-def _make_user_magic(method: str, user_type: type) -> None:
+def _make_user_magic(method, user_type):
     # User magic takes care of wrapping the other operand into a node,
     # so that our internal logic can assume everything is nodes
     if method in magic_methods_on_operator_with_trailing_underscore:
@@ -1835,9 +1731,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
     else:
         method_attr = method
 
-    def get_constant(
-        x: SymInt | int | SymFloat | float | SymBool | bool,
-    ) -> int | float | bool:
+    def get_constant(x: SymInt | int | SymFloat | float | SymBool | bool):
         if isinstance(x, (int, float, bool)):
             return x
         if isinstance(x, SymInt):
@@ -1846,7 +1740,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
             return x.node.guard_bool("", 0)
         raise AssertionError("expect to be called with constant SymBools")
 
-    def is_constant(x: SymInt | int | SymFloat | float | SymBool | bool) -> bool:
+    def is_constant(x):
         if isinstance(x, (int, float, bool)):
             return True
         if isinstance(x, (SymInt, SymFloat, SymBool)):
@@ -1881,7 +1775,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
 
     if method in bool_becomes_int_magic_methods:
 
-        def promote(x: object) -> Any:
+        def promote(x):
             """Implements True+True=2, which works in python but not sympy"""
             if isinstance(x, SymBool):
                 return SymInt(x.node.wrap_int(int(x)))
@@ -1889,10 +1783,10 @@ def _make_user_magic(method: str, user_type: type) -> None:
 
     else:
 
-        def promote(x: object) -> Any:
+        def promote(x):
             return x
 
-    def promote2(self: object, other: object) -> tuple[Any, Any]:
+    def promote2(self, other):
         # TODO: Remove eq and other relations from this list.
         # CPython has fancy implementations for these to get as much precision
         # as possible instead of just promoting to float64 and praying, so we
@@ -1934,13 +1828,13 @@ def _make_user_magic(method: str, user_type: type) -> None:
     # Alternatively, we could also rewrap into constant Symbool (i.e. by
     # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
     # today for no particular reason.
-    def unary_magic_impl(self: object) -> Any:
+    def unary_magic_impl(self):
         self = promote(self)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
-    def binary_magic_impl(self: object, other: object) -> Any:
+    def binary_magic_impl(self, other):
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
         sym_node_log.debug("MAGIC %s %s %s", method, self, other)
@@ -1957,7 +1851,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
         ret = wrap_node(getattr(self.node, method_attr)(other_node))
         return get_constant(ret) if is_constant(ret) else ret
 
-    def rbinary_magic_impl(self: object, other: object) -> Any:
+    def rbinary_magic_impl(self, other):
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
         self = promote(self)
@@ -1973,7 +1867,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
         ret = wrap_node(getattr(other_node, method_attr)(self.node))
         return get_constant(ret) if is_constant(ret) else ret
 
-    def setattrs(user_type: type, attr: str, symnode_impl: object) -> None:
+    def setattrs(user_type, attr, symnode_impl):
         """
         Registers the SymNode magic method on SymInt/Float/Bool,
         and optionally registers a corresponding wrapped method on DynamicInt.
@@ -1983,10 +1877,8 @@ def _make_user_magic(method: str, user_type: type) -> None:
         setattr(user_type, attr, symnode_impl)
 
         # DynamicInt impl
-        def dynamic_int_impl(*args: object) -> Any:
-            args = [  # pyrefly: ignore[bad-assignment]
-                x.real if isinstance(x, DynamicInt) else x for x in args
-            ]
+        def dynamic_int_impl(*args):
+            args = [x.real if isinstance(x, DynamicInt) else x for x in args]
             out = getattr(int, attr)(*args)
             if isinstance(out, int) and not isinstance(out, bool):
                 return DynamicInt(out)
@@ -2002,9 +1894,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
         setattrs(user_type, method, update_wrapper(unary_magic_impl, orig))
     elif method == "sym_ite":
 
-        def sym_ite_magic_impl(
-            pred: SymBool, then_val: object, else_val: object
-        ) -> Any:
+        def sym_ite_magic_impl(pred, then_val, else_val):
             pred_node = pred.node
             then_node = to_node(pred_node, then_val)
             else_node = to_node(pred_node, else_val)
@@ -2019,17 +1909,12 @@ def _make_user_magic(method: str, user_type: type) -> None:
                     "then_node and else_node must be SymNodes with same pytype"
                 )
             ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
-            return (
-                get_constant(ret)
-                # pyrefly: ignore[missing-attribute]
-                if ret.node.is_constant()
-                else ret
-            )
+            return get_constant(ret) if ret.node.is_constant() else ret
 
         setattrs(user_type, f"__{method}__", sym_ite_magic_impl)
     elif method == "round":
 
-        def round_magic_impl(self: SymFloat, ndigits: int | None = None) -> Any:
+        def round_magic_impl(self, ndigits=None):
             if is_constant(self):
                 return builtins.round(get_constant(self), ndigits)
 

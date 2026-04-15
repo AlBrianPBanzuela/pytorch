@@ -986,19 +986,13 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             partial(verify_choice_names, pattern="bias_addmm", expected_count=1)
         )
 
-        # Run with expanded bias (stride[0] == 0) so the inductor sees
-        # bias_addmm-eligible inputs and the lookup key matches.
-        # Limit backends to ATEN so only the lookup table entry is selected.
+        # Run with original unexpanded bias
         with inductor_config.patch(
-            {
-                "max_autotune_gemm": True,
-                "triton.autotune_cublasLt": True,
-                "max_autotune_gemm_backends": "ATEN",
-            }
+            {"max_autotune_gemm": True, "triton.autotune_cublasLt": True}
         ):
             model = UnifiedModel("addmm")
             compiled_model = torch.compile(model.to(self.device), mode="max-autotune")
-            compiled_model(expanded_bias, tensors[1], tensors[2])
+            compiled_model(bias_unexpanded, tensors[1], tensors[2])
 
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @fresh_cache()

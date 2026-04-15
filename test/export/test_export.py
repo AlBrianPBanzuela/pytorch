@@ -648,7 +648,7 @@ class TestExport(TestCase):
         # should not be copied to other nodes
         counter = 0
         for node in new_ep.graph.nodes:
-            if "quantization_tag" in node.meta.get("custom", {}):
+            if "custom" in node.meta:
                 counter += 1
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
                 self.assertTrue(node.target == torch.ops.aten.linear.default)

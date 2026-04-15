@@ -69,10 +69,13 @@ jobs:
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login

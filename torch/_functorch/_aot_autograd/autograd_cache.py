@@ -84,7 +84,8 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.compile_fx import _CompileFxKwargs, CompilerConfigExtra
+    from torch._inductor.compile_fx import _CompileFxKwargs
+    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
 
 
@@ -707,19 +708,13 @@ def normalize_placeholder_names(
 
 
 def create_fx_config(
-    compiler_config_extra: CompilerConfigExtra | None = None,
-    compile_region_name: str | None = None,
+    cudagraphs: BoxedBool | None, boxed_forward_device_index: BoxedDeviceIndex | None
 ) -> _CompileFxKwargs:
-    if compiler_config_extra is None:
+    if cudagraphs is None:
         cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
-        boxed_forward_device_index = None
-    else:
-        cudagraphs = compiler_config_extra.cudagraphs
-        boxed_forward_device_index = compiler_config_extra.forward_device
     return {
         "cudagraphs": cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
-        "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
 
 
@@ -727,7 +722,7 @@ def autograd_cache_key(
     mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
     example_inputs: Sequence[Any],
     config: AOTConfig,
-    compiler_config_extra: CompilerConfigExtra | None = None,
+    fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
 ) -> tuple[str, list[str]]:
     """
@@ -752,23 +747,16 @@ def autograd_cache_key(
                     raise BypassAOTAutogradCache(
                         "AOTAutogradCache requires triton 3.2.0"
                     )
-            details = AOTAutogradCacheDetails(
-                gm, example_inputs, config, create_fx_config(compiler_config_extra)
-            )
+            details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
             pickler = AOTAutogradCachePickler(gm)
             # The prefix distinguishes among the other kinds of objects we cache
             key = "a" + pickler.get_hash(details)
-            # debug_lines re-hashes every attribute individually and is
-            # expensive. Only compute when debug logging is enabled.
-            if log.isEnabledFor(logging.DEBUG):
-                debug_lines = pickler.debug_lines(details)
-                log.debug(
-                    "Autograd graph cache hash details for key %s:\n%s",
-                    key,
-                    LazyString(lambda: "\n".join(debug_lines)),
-                )
-            else:
-                debug_lines: list[str] = []
+            debug_lines = pickler.debug_lines(details)
+            log.debug(
+                "Autograd graph cache hash details for key %s:\n%s",
+                key,
+                LazyString(lambda: "\n".join(debug_lines)),
+            )
             return key, debug_lines
         except Exception:
             # If enable_aot_compile is set, we're in AOT precompile mode where we always
@@ -801,7 +789,6 @@ def sanitize_gm_for_cache(
     """
     # Mapping from each field to a default value
     IGNORED_FIELDS: dict[str, Any] = {
-        # pyrefly: ignore [implicit-any]
         "meta": {},  # metadata used by export
         "compile_subgraph_reason": None,  # Used by dynamo only for logging, no change in inductor/autograd behavior
         "_param_name_to_source": None,  # Encapsulated by aot_config.aot_autograd_arg_pos_to_source
@@ -881,10 +868,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
         args: list[Any],
         aot_config: AOTConfig,
-        compiler_config_extra: CompilerConfigExtra | None,
+        fx_config: _CompileFxKwargs,
         local: bool,
         remote: bool,
-        compile_region_name: str | None = None,
     ) -> Callable[..., Any] | None:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
@@ -897,7 +883,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         cache_state = None
         try:
             cache_key, debug_lines = autograd_cache_key(
-                mod, args, aot_config, compiler_config_extra
+                mod, args, aot_config, fx_config
             )
             result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
                 AOTAutogradCache._lookup(
@@ -906,7 +892,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             )
             if result is not None:
                 (entry, pickled_content) = result
-                fx_config = create_fx_config(compiler_config_extra, compile_region_name)
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content

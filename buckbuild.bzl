@@ -71,15 +71,15 @@ def read_bool(section, field, default, required = True):
     else:
         fail("`{}:{}`: no value set".format(section, field))
 
-def _select_if_build_mode_dev(dev_value, default = []):
+def _is_build_mode_dev():
+    if is_production_build_android():
+        # Android Prod builds
+        return False
     if is_production_build_ios() or is_profile_build_ios():
-        return default
+        # iOS Prod builds
+        return False
 
-    return select({
-        "DEFAULT": default,
-        "ovr_config//build_mode:optimization[dev]": dev_value,
-    })
-
+    return True
 
 def _get_enable_lightweight_dispatch():
     return read_bool("pt", "enable_lightweight_dispatch", False)
@@ -93,24 +93,10 @@ def get_enable_mobile_dispatch_keys_trimming():
 def get_disable_per_op_profiling():
     return read_bool("pt", "disable_per_op_profiling", True)
 
-def strip_error_messages_select(value, default = []):
+def get_strip_error_messages():
     if IS_OSS:
-        return value  # always strip in OSS CI to expose potential issues
-    strip_error = read_bool("pt", "strip_error_messages", default = None, required = False)
-
-    if strip_error == None:
-
-        if is_production_build_ios() or is_profile_build_ios():
-            return value
-
-        return select({
-            "DEFAULT": default,
-            "ovr_config//build_mode:optimization[opt]": value,
-        })
-
-    if strip_error:
-        return value
-    return default
+        return True  # always strip in OSS CI to expose potential issues
+    return read_bool("pt", "strip_error_messages", not _is_build_mode_dev())
 
 def get_disable_warn():
     return read_bool("pt", "disable_warn", False)
@@ -263,7 +249,9 @@ _COMMON_PREPROCESSOR_FLAGS = [
     "-DNO_EXPORT",
 ] + (
     ["-DC10_MOBILE_TRIM_DISPATCH_KEYS"] if get_enable_mobile_dispatch_keys_trimming() else []
-) + strip_error_messages_select(["-DSTRIP_ERROR_MESSAGES"]) + (
+) + (
+    ["-DSTRIP_ERROR_MESSAGES"] if get_strip_error_messages() else []
+) + (
     ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
@@ -294,9 +282,9 @@ def get_aten_preprocessor_flags():
         "-DUSE_RUY_QMATMUL",
     ]
     if get_disable_per_op_profiling():
-        ATEN_PREPROCESSOR_FLAGS += ["-DPYTORCH_DISABLE_PER_OP_PROFILING"]
+        ATEN_PREPROCESSOR_FLAGS.append("-DPYTORCH_DISABLE_PER_OP_PROFILING")
     if _get_enable_record_kernel_dtype():
-        ATEN_PREPROCESSOR_FLAGS += ["-DENABLE_RECORD_KERNEL_FUNCTION_DTYPE"]
+        ATEN_PREPROCESSOR_FLAGS.append("-DENABLE_RECORD_KERNEL_FUNCTION_DTYPE")
     return ATEN_PREPROCESSOR_FLAGS
 
 def get_pt_preprocessor_flags():
@@ -307,7 +295,8 @@ def get_pt_preprocessor_flags():
         "-DNO_CUDNN_DESTROY_HANDLE",
     ]
 
-    PT_PREPROCESSOR_FLAGS += _select_if_build_mode_dev(["-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS"])
+    if _is_build_mode_dev():
+        PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
     return PT_PREPROCESSOR_FLAGS
 
 # This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892  @lint-ignore

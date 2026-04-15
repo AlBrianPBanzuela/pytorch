@@ -198,7 +198,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "higher_order_ops/test_inline_asm_elementwise",
 ]
 
 # Add architecture-specific blocklist entries

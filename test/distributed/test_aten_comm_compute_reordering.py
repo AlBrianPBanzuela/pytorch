@@ -1638,9 +1638,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
-    )
     def test_manual_reordering_bucketing_pass_all_gather_separate_buckets(self):
         self._run_manual_bucketing_test(
             collective_type="all_gather",
@@ -1673,9 +1670,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
-    )
     def test_manual_bucketing_reordering_pass_all_gather_single_bucket(self):
         self._run_manual_bucketing_test(
             collective_type="all_gather",
@@ -1688,9 +1682,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
-    )
     def test_bucketing_reordering_pass_all_gather_single_bucket_custom_module_stack_fn(
         self,
     ):
@@ -1806,9 +1797,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
-    )
     def test_manual_bucketing_reordering_pass_reduce_scatter_separate_buckets(self):
         self._run_manual_bucketing_test(
             collective_type="reduce_scatter",
@@ -1824,9 +1812,6 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
-    )
     def test_manual_bucketing_reordering_pass_reduce_scatter_single_bucket(self):
         self._run_manual_bucketing_test(
             collective_type="reduce_scatter",

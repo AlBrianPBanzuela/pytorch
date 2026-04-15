@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import traceback
 from typing import Any, NamedTuple
 
@@ -16,8 +18,7 @@ __all__ = ["TensorMetadata", "ShapeProp"]
 
 @compatibility(is_backward_compatible=True)
 class TensorMetadata(NamedTuple):
-    # TensorMetadata is a structure containing pertinent information
-    # about a tensor within a PyTorch program.
+    """A structure containing pertinent information about a tensor within a PyTorch program."""
 
     # General Tensor metadata
     shape: torch.Size

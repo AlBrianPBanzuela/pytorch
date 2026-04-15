@@ -740,7 +740,6 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
 class TestTensorBoardFigure(BaseTestCase):
     @skipIfNoMatplotlib
-    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure(self):
         writer = self.createSummaryWriter()
 
@@ -766,7 +765,6 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
     @skipIfNoMatplotlib
-    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure_list(self):
         writer = self.createSummaryWriter()
 

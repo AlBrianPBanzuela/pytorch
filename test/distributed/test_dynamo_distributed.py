@@ -57,22 +57,6 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-try:
-    from importlib.metadata import version as pkg_version
-
-    _transformers_version = tuple(
-        int(x) for x in pkg_version("transformers").split(".")[:2]
-    )
-except Exception:
-    _transformers_version = (0, 0)
-
-# https://github.com/huggingface/transformers/issues/44188
-# expectedFailure only applies to transformers >= 5.2 which introduced the bug
-_expectedFailureIf_transformers_ge_5_2 = (
-    unittest.expectedFailure if _transformers_version >= (5, 2) else lambda fn: fn
-)
-
-
 log = logging.getLogger(__name__)
 
 
@@ -373,7 +357,8 @@ def run_hf_bert_ddp(self, model, inputs, backend):
 
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -386,7 +371,8 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "inductor")
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
         model, inputs = get_hf_bert(0)
@@ -891,7 +877,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "inductor")
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -900,7 +887,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_hf_bert_ddp_inductor(self):
         self._test_hf_bert_ddp_inductor(static_graph=False)
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -915,14 +903,16 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     def test_hf_bert_ddp_aot_eager(self):
         self._test_hf_bert_aot_eager(static_graph=False)
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
@@ -1125,7 +1115,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None
             )
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
@@ -1171,7 +1162,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 )
                 self.assertTrue(same(correct_results, opt_results))
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
@@ -2448,7 +2440,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_fsdp_staticmethod(self):
         """
@@ -2494,7 +2486,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
-            self.assertEqual(cnt.frame_count, 2)
+            # 3 is expected here for 1 forward.
+            # Graph 1 should be add and imul
+            self.assertEqual(cnt.frame_count, 1)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 

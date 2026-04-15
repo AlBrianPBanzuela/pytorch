@@ -1016,7 +1016,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        if self.maybe_subclass_meta is None and not runtime_metadata.act_input_indices:
+        if self.maybe_subclass_meta is None:
             return compiled_fn
 
         from .subclass_codegen import codegen_subclass_wrapper
@@ -1027,7 +1027,6 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             out_metas=runtime_metadata.subclass_fw_graph_out_meta,
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
             frozen_inp_indices=self._get_frozen_inp_indices(),
-            act_input_indices=runtime_metadata.act_input_indices,
         )
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
@@ -1920,7 +1919,6 @@ def merge_view_inputs(
                 raise AssertionError(
                     "every argument in the inner calling convention should be accounted for"
                 )
-        # pyrefly: ignore [bad-return]
         return (
             args_to_functionalization,
             args_to_functionalization_descs,

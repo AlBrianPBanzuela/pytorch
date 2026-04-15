@@ -289,16 +289,11 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
-        compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
-        compiler_fn = functools.partial(
-            unconfigured_compiler_fn,
-            compile_region_name=compile_region_name,
-            **kwargs,
-        )
+        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
         from torch._functorch.aot_autograd import get_aot_graph_name
 
@@ -587,8 +582,11 @@ if "__compile_source__" in globals():
     )
 
     def get_fn_name(kernel: Any) -> str:
-        fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
-        return fn.__name__.split(".")[-1]
+        fn_name = (
+            # pyrefly: ignore [missing-attribute]
+            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
+        )
+        return fn_name.split(".")[-1]
 
     def write_kernel_dependencies(
         kernel: Any,
@@ -691,8 +689,6 @@ if "__compile_source__" in globals():
             writer.const(placeholder)
         elif isinstance(arg, FakeScriptObject):
             writer.opaque(placeholder, arg.script_class_name)
-        elif isinstance(arg, torch._C.Generator):
-            writer.generator(placeholder, arg)
         else:
             writer.unsupported(placeholder, arg)
 
@@ -1029,7 +1025,7 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 
 def repro_common(
     options: Any, mod: nn.Module, load_args: Any
-) -> tuple[torch.fx.GraphModule, list[Any]]:
+) -> tuple[torch.fx.GraphModule, Sequence[Any]]:
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters())
     for n, b in mod.named_buffers():
@@ -1278,7 +1274,7 @@ def repro_get_args(
     options: Any, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
-    return mod, args
+    return mod, args  # type: ignore[return-value]
 
 
 def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
