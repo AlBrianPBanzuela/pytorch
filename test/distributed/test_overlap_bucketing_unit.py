@@ -1544,7 +1544,6 @@ class TestForeachGroupsUnit(InductorTestCase):
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestPreBucketingFsdpCollectives(InductorTestCase):
-    """Tests for FSDP pre-bucketing: saturation model and selective bucketing."""
 
     @classmethod
     def setUpClass(cls):
@@ -1561,7 +1560,7 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         dist.destroy_process_group()
 
     def test_empirical_saturation_model(self):
-        """Verify empirical saturation: IB floor, NVLink formula, monotonicity."""
+        """IB floor activates for small groups; NVLink uses formula; monotonic."""
         from torch._inductor.comm_analysis import (
             compute_empirical_saturation_bytes,
             INTERCONNECT_PROFILES,
@@ -1571,48 +1570,29 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
 
         _MB = 1024 * 1024
         ib_floor = INTERCONNECT_PROFILES[InterconnectType.IB_NDR].min_saturation_bytes
+        sat = compute_empirical_saturation_bytes
 
         with torch._inductor.config.patch(
             {"aten_distributed_optimizations.interconnect_type_override": "IB_NDR"}
         ):
-            # Small IB group: floor should activate
-            sat_ib_16 = compute_empirical_saturation_bytes(
-                16, NCCL_COLL.ALL_GATHER
-            )
-            self.assertEqual(sat_ib_16, ib_floor)
-
-            # Large IB group: formula exceeds floor, monotonic in group_size
-            sat_ib_64 = compute_empirical_saturation_bytes(
-                64, NCCL_COLL.ALL_GATHER
-            )
-            sat_ib_128 = compute_empirical_saturation_bytes(
-                128, NCCL_COLL.ALL_GATHER
-            )
-            self.assertGreater(sat_ib_64, ib_floor)
-            self.assertGreater(sat_ib_128, sat_ib_64)
+            self.assertEqual(sat(16, NCCL_COLL.ALL_GATHER), ib_floor)
+            sat_64 = sat(64, NCCL_COLL.ALL_GATHER)
+            sat_128 = sat(128, NCCL_COLL.ALL_GATHER)
+            self.assertGreater(sat_64, ib_floor)
+            self.assertGreater(sat_128, sat_64)
 
         with torch._inductor.config.patch(
             {"aten_distributed_optimizations.interconnect_type_override": "NVLINK_H100"}
         ):
-            # NVLink has no floor, result is formula-only
-            sat_nvlink = compute_empirical_saturation_bytes(
-                8, NCCL_COLL.ALL_GATHER
-            )
-            self.assertGreater(sat_nvlink, 50 * _MB)
-            self.assertLess(sat_nvlink, 200 * _MB)
+            sat_nv = sat(8, NCCL_COLL.ALL_GATHER)
+            self.assertGreater(sat_nv, 50 * _MB)
+            self.assertLess(sat_nv, 200 * _MB)
 
-        # gs=1 returns 0
-        self.assertEqual(
-            compute_empirical_saturation_bytes(1, NCCL_COLL.ALL_GATHER), 0
-        )
+        self.assertEqual(sat(1, NCCL_COLL.ALL_GATHER), 0)
 
     def test_pre_bucketing_only_merges_fsdp_collectives(self):
-        """Pre-bucketing merges FSDP collectives but leaves TP collectives alone."""
-        from torch._inductor.fx_passes.bucketing import (
-            is_all_gather_into_tensor,
-            is_all_reduce_tensor,
-            is_reduce_scatter_tensor,
-        )
+        """Pre-bucketing merges FSDP all-gathers but leaves TP all-gathers alone."""
+        from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
         from torch._inductor.fx_passes.fsdp import (
             _get_group_name,
             pre_bucket_fsdp_collectives,
@@ -1622,6 +1602,7 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         tp_group = "tp_test_group"
 
         def func(fsdp_p1, fsdp_p2, tp_a1, tp_a2):
+            # FSDP: each AG from a single placeholder (identified as FSDP)
             ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
                 fsdp_p1, 64, fsdp_group
             )
@@ -1630,44 +1611,33 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
             )
             w1 = torch.ops._c10d_functional.wait_tensor(ag1)
             w2 = torch.ops._c10d_functional.wait_tensor(ag2)
-            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
-                w1, "sum", 64, fsdp_group
-            )
-            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
-                w2, "sum", 64, fsdp_group
-            )
-            rw1 = torch.ops._c10d_functional.wait_tensor(rs1)
-            rw2 = torch.ops._c10d_functional.wait_tensor(rs2)
-            # TP: multi-input (not FSDP)
+            # TP: AG from multi-input computation (not identified as FSDP)
             tp_ag = torch.ops._c10d_functional.all_gather_into_tensor(
                 tp_a1 + tp_a2, 8, tp_group
             )
             tp_w = torch.ops._c10d_functional.wait_tensor(tp_ag)
-            return rw1, rw2, tp_w
+            return w1, w2, tp_w
 
         with FakeTensorMode():
             traced = make_fx(func)(
-                torch.ones(4, 4, device=self.device),
-                torch.ones(4, 4, device=self.device),
-                torch.ones(4, 4, device=self.device),
-                torch.ones(4, 4, device=self.device),
+                *(torch.ones(4, 4, device=self.device) for _ in range(4))
             )
 
-        def count_colls(is_fn, group):
+        def count_ag(group):
             return sum(
                 1
                 for n in traced.graph.nodes
-                if is_fn(n) and _get_group_name(n) == group
+                if is_all_gather_into_tensor(n) and _get_group_name(n) == group
             )
 
-        self.assertEqual(count_colls(is_all_gather_into_tensor, fsdp_group), 2)
-        self.assertEqual(count_colls(is_all_gather_into_tensor, tp_group), 1)
+        self.assertEqual(count_ag(fsdp_group), 2)
+        self.assertEqual(count_ag(tp_group), 1)
 
         pre_bucket_fsdp_collectives(traced, bucket_cap_mb=2000.0)
 
-        # FSDP merged, TP untouched
-        self.assertLess(count_colls(is_all_gather_into_tensor, fsdp_group), 2)
-        self.assertEqual(count_colls(is_all_gather_into_tensor, tp_group), 1)
+        self.assertLess(count_ag(fsdp_group), 2)  # FSDP merged
+        self.assertEqual(count_ag(tp_group), 1)  # TP untouched
+
 
 if __name__ == "__main__":
     run_tests()
