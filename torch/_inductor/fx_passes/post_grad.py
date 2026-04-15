@@ -339,8 +339,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
 
-    # Apply overlap scheduling if enabled
-    if config.aten_distributed_optimizations.enable_overlap_scheduling:
+    # Apply overlap scheduling if enabled and distributed is active
+    if (
+        config.aten_distributed_optimizations.enable_overlap_scheduling
+        and _is_distributed_available()
+    ):
         from torch._inductor.fx_passes.overlap_scheduling import (
             schedule_overlap_bucketing_from_inductor_configs,
         )
@@ -1058,8 +1061,17 @@ def register_noop_decomp(targets, nop_arg=0):
     return register_fun
 
 
+def _is_distributed_available() -> bool:
+    """Check if torch.distributed is available and initialized."""
+    import torch.distributed as dist
+
+    return dist.is_available() and dist.is_initialized()
+
+
 def _needs_spmd_graph_preservation() -> bool:
     """Check if SPMD graph preservation is needed for distributed overlap."""
+    if not _is_distributed_available():
+        return False
     return (
         config.aten_distributed_optimizations.enable_overlap_scheduling
         or config.reorder_for_compute_comm_overlap

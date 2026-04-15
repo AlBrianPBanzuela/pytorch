@@ -101,7 +101,11 @@ def spmd_check(gm: torch.fx.GraphModule) -> bool:
     """
     import torch.distributed as dist
 
-    if not dist.is_initialized() or dist.get_world_size() <= 1:
+    if (
+        not dist.is_available()
+        or not dist.is_initialized()
+        or dist.get_world_size() <= 1
+    ):
         return True
 
     structure_hash = _compute_hash(gm)

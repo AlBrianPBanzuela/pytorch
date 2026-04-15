@@ -1358,6 +1358,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_overlap_scheduling": False}
+    )
     def test_compiler_collectives_dim_mismatch(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
@@ -1467,6 +1470,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @enable_guard_collectives()
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_overlap_scheduling": False}
+    )
     def test_guard_collective(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
@@ -1677,6 +1683,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "fx_graph_cache", True)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
     @patch.object(torch._inductor.config, "sleep_sec_TESTING_ONLY", 10)
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_overlap_scheduling": False}
+    )
     def test_asymmetric_compilation_with_fx_cache(self):
         from torch._dynamo.utils import counters
         from torch._inductor.utils import fresh_cache

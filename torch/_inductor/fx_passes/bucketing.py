@@ -17,6 +17,7 @@ from torch._inductor.comm_analysis import (
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.operator_schemas import normalize_function
 from torch.fx.traceback import NodeSource, NodeSourceAction
 from torch.utils._ordered_set import OrderedSet
 
@@ -107,7 +108,8 @@ def _get_collective_node_from_wait(node: torch.fx.Node) -> torch.fx.Node | None:
 
     Handles both standard (wait -> collective) and coalesced
     (wait -> getitem -> coalesced_collective) patterns.
-    Returns None if the node is not a wait on a recognized NCCL collective.
+    Returns None if the node is not a wait on a recognized NCCL collective,
+    or if the collective has a symbolic (non-string) group_name.
     """
     if not is_wait_tensor(node):
         return None
@@ -120,11 +122,20 @@ def _get_collective_node_from_wait(node: torch.fx.Node) -> torch.fx.Node | None:
         arg = arg.args[0]
         if arg.op != "call_function":
             return None
-    if not isinstance(arg.target, Callable):
+    if not isinstance(arg.target, torch._ops.OpOverload):
         return None
-    # pyrefly: ignore [missing-attribute]
     coll: NCCL_COLL = get_collective_type_from_kernel_name(arg.target.name())
     if coll == NCCL_COLL.UNSUPPORTED:
+        return None
+    # Skip collectives with symbolic group_name (e.g. flattened submeshes)
+    # — runtime estimation needs to resolve the group to get its size.
+    opt = normalize_function(
+        arg.target,
+        args=arg.args,
+        kwargs=arg.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    if opt is None or not isinstance(opt[1].get("group_name"), str):
         return None
     return arg
 

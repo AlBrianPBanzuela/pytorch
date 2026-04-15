@@ -1834,7 +1834,16 @@ def schedule_overlap_bucketing_from_inductor_configs(
     Reads configuration from torch._inductor.config.aten_distributed_optimizations
     and calls schedule_overlap_bucketing with those settings.
     """
-    if not any(is_wait_tensor(n) for n in gm.graph.nodes):
+    # Find first wait_tensor — if none, nothing to schedule
+    first_wait = next((n for n in gm.graph.nodes if is_wait_tensor(n)), None)
+    if first_wait is None:
+        return gm
+
+    # Runtime estimation requires GPU — check the collective's device
+    from torch._inductor.utils import is_gpu
+
+    coll_val = first_wait.args[0].meta.get("val")  # type: ignore[union-attr]
+    if coll_val is None or not is_gpu(coll_val.device.type):
         return gm
 
     from torch._inductor import config

@@ -81,6 +81,7 @@ def run_and_get_aten_graph(fn, *inputs):
 def get_patches():
     return {
         "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime,
+        "aten_distributed_optimizations.enable_overlap_scheduling": True,
         "reorder_for_locality": False,
         "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
@@ -253,11 +254,10 @@ graph():
 
             inp = graph.placeholder("inp")
             group_size = graph.placeholder("group_size")
-            group_name = graph.placeholder("group_name")
 
             ag_0_out = graph.call_function(
                 torch.ops._c10d_functional.all_gather_into_tensor.default,
-                args=(inp, group_size, group_name),
+                args=(inp, group_size, "0"),
             )
             ag_0_wait = graph.call_function(
                 torch.ops._c10d_functional.wait_tensor.default,
@@ -265,7 +265,7 @@ graph():
             )
             ag_1_out = graph.call_function(
                 torch.ops._c10d_functional.all_gather_into_tensor.default,
-                args=(ag_0_wait, group_size, group_name),
+                args=(ag_0_wait, group_size, "0"),
             )
             ag_1_wait = graph.call_function(
                 torch.ops._c10d_functional.wait_tensor.default,
@@ -327,7 +327,7 @@ graph():
                 .run(aten_graph_str)
             )
             correct = func(inputs, **self.get_world_trs())
-            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
+            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 2)
             self.assertTrue(same(out_c, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -411,7 +411,7 @@ graph():
             FileCheck().check("all_reduce").check_same("arg0_1").check(
                 "all_reduce"
             ).check_same("arg1_1").check("all_reduce").check_same("arg2_1").run(code)
-            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 3)
+            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 6)
             # these have no overlap opportunities
             self.assertEqual(counters["inductor"]["overlap_scheduling_bad_exposed"], 0)
 
@@ -1807,7 +1807,10 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+        {
+            "aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype",
+            "aten_distributed_optimizations.enable_overlap_scheduling": False,
+        }
     )
     def test_manual_bucketing_reordering_pass_reduce_scatter_separate_buckets(self):
         self._run_manual_bucketing_test(

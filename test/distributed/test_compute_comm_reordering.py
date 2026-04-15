@@ -93,9 +93,13 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
     "native matmul is fused with surrounding ops",
 )
 @instantiate_parametrized_tests
+@torch._inductor.config.patch(
+    {"aten_distributed_optimizations.enable_overlap_scheduling": False}
+)
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
-    Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
+    Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under.
+    These tests use the old reorder_for_compute_comm_overlap passes.
     """
 
     def get_world_trs(self):
