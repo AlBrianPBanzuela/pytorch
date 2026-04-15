@@ -17,28 +17,12 @@ Tests verify that a "mutation_epilogue" artifact is emitted via
 trace_structured.
 """
 
-import importlib.util
 import logging
 from contextlib import contextmanager
 
 import torch
 import torch._functorch.config
-
-
-_orig_find_spec = importlib.util.find_spec
-
-
-def _no_numba_find_spec(name, *a, **kw):  # type: ignore[no-untyped-def]
-    if name == "numba":
-        return None
-    return _orig_find_spec(name, *a, **kw)
-
-
-importlib.util.find_spec = _no_numba_find_spec  # type: ignore[assignment]
-from torch.testing._internal.common_utils import run_tests, TestCase  # noqa: E402
-
-
-importlib.util.find_spec = _orig_find_spec  # type: ignore[assignment]
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 trace_log = logging.getLogger("torch.__trace")
@@ -94,7 +78,7 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertEqual(x.detach(), x_ref * 2)
         self.assertEqual(out, x_ref * 2 + y_ref)
 
-        self.assertGreaterEqual(
+        self.assertEqual(
             len(captured),
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
@@ -125,7 +109,7 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertEqual(c.detach(), c_ref + 1)
         self.assertEqual(out, a_ref * 2 + b + c_ref + 1)
 
-        self.assertGreaterEqual(
+        self.assertEqual(
             len(captured),
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
@@ -150,7 +134,7 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertEqual(x.detach(), x_ref * 2)
         self.assertEqual(out, x_ref * 2 + 1)
 
-        self.assertGreaterEqual(
+        self.assertEqual(
             len(captured),
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
