@@ -1294,6 +1294,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 Y,
                 *extra_inputs,
             ]
+            # Extend input_reorder to cover the extra epilogue/output inputs
+            if input_reorder is not None:
+                base_len = len(input_reorder)
+                input_reorder = input_reorder + list(
+                    range(base_len, len(inputs))
+                )
             input_names = [evt_arg_renames.get(name) for name in input_names]
             output_names = [evt_arg_renames.get(name) for name in output_names]
 
@@ -1557,6 +1563,32 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             name_to_buffer,  # type: ignore[arg-type]
             V.graph.sizevars.optimization_hint,
         )
+
+        # When epilogue nodes have different ndim from the template (e.g., 3D
+        # [batch, seq, N] vs 2D [M, N] due to a view/reshape), override their
+        # example tensors to use the accumulator's 2D shape.  EVT operations
+        # are element-wise so the shape is immaterial as long as numel matches.
+        from math import prod
+
+        acc_example = examples.get("accum")
+        if acc_example is not None:
+            acc_ndim = len(acc_example.shape)
+            acc_numel = prod(acc_example.shape)
+            for key in list(examples.keys()):
+                if key == "accum":
+                    continue
+                ex = examples[key]
+                if len(ex.shape) != acc_ndim and prod(ex.shape) == acc_numel:
+                    from cutlass_cppgen.backend.evt.ir.tensor import (  # type: ignore[import-not-found]
+                        Tensor as CutlassTensor,
+                    )
+
+                    examples[key] = CutlassTensor(
+                        shape=acc_example.shape,
+                        stride=acc_example.stride,
+                        element=ex.element,
+                    )
+
         evt_name, evt_args, evt_code, arg_renames = trace(
             evt_py_code,
             examples,

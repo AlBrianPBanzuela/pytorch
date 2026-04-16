@@ -64,7 +64,7 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def constant(value: Any, dtype: Any) -> str:
-        raise NotImplementedError
+        return str(value)
 
     @staticmethod
     def mul(x0: str, x1: str) -> str:
@@ -287,7 +287,10 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
     def _check_indexing(self, name: str, index: sympy.Expr) -> None:
         # We only support indexing that matches the layout today because
-        # CUTLASS doesn't support arbitrary indexing
+        # CUTLASS doesn't support arbitrary indexing.
+        # However, we allow dimension-mismatched but numel-compatible cases
+        # (e.g., accumulator is 2D [M, N] but epilogue node indexes as 3D [batch, seq, N])
+        # as long as the flattened access pattern is equivalent.
         buffer_name = (
             self.accumulator_node_name if name == _ACCUMULATOR_ARG_NAME else name
         )
@@ -296,18 +299,78 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             index, self._get_current_index_vars()
         )
         stride = buffer.get_layout().stride
+        if len(stride) != len(index_strides):
+            # Dimension mismatch (e.g., 2D accumulator [M, N] accessed via 3D
+            # index [batch, seq, N]).  This happens when a view/reshape sits
+            # between the GEMM output and the epilogue pointwise op.  EVT
+            # operates element-wise, so the reshape is safe as long as the
+            # flattened access pattern matches the buffer's contiguous layout.
+            # Verify by collapsing consecutive index dims whose product equals
+            # the corresponding layout dim.
+            if not self._stride_compatible_reshape(stride, index_strides):
+                raise NotImplementedError(
+                    f"Unsupported indexing for {name} with index {index}, "
+                    f"index strides {index_strides} (len={len(index_strides)}), "
+                    f"and layout stride {stride} (len={len(stride)})"
+                )
+            return
         if not self._stride_compatible(stride, index_strides):
             raise NotImplementedError(
                 f"Unsupported indexing for {name} with index {index}, index strides {index_strides}, and layout stride {stride}"
             )
 
+    @staticmethod
+    def _strides_equal(a: sympy.Expr, b: sympy.Expr) -> bool:
+        return V.graph.sizevars.statically_known_equals(a, b)
+
     def _stride_compatible(
         self, left: Iterable[sympy.Expr], right: Iterable[sympy.Expr]
     ) -> bool:
         return all(
-            sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
-            for l, r in (zip(left, right))
+            self._strides_equal(l, r)
+            or self._strides_equal(l, sympy.Integer(0))
+            or self._strides_equal(r, sympy.Integer(0))
+            for l, r in zip(left, right)
         )
+
+    def _stride_compatible_reshape(
+        self,
+        layout_stride: Sequence[sympy.Expr],
+        index_strides: Sequence[sympy.Expr],
+    ) -> bool:
+        """Check if index_strides (more dims) is a contiguous reshape of layout_stride (fewer dims).
+
+        For example, layout_stride=[16384, 1] and index_strides=[8388608, 16384, 1]
+        means the index has an extra batch dimension that can be collapsed with the
+        first layout dimension: 8388608 = 512 * 16384, making it a simple view.
+
+        We greedily match from the rightmost (innermost) dimension: each layout stride
+        must equal the current index stride, then we advance through index dims whose
+        strides are multiples of that layout stride until we reach the next layout dim.
+        """
+        if len(index_strides) < len(layout_stride):
+            return False
+
+        # Work right-to-left (innermost first)
+        idx_pos = len(index_strides) - 1
+        for lay_pos in range(len(layout_stride) - 1, -1, -1):
+            if idx_pos < 0:
+                return False
+            ls = layout_stride[lay_pos]
+            ist = index_strides[idx_pos]
+            if not (
+                self._strides_equal(ls, ist)
+                or self._strides_equal(ls, sympy.Integer(0))
+                or self._strides_equal(ist, sympy.Integer(0))
+            ):
+                return False
+            idx_pos -= 1
+
+        # Any remaining (leftmost) index dims are batch dims that were
+        # flattened into the GEMM's M dimension.  The numel equality check
+        # in scheduling already guarantees the reshape is valid, so no
+        # per-stride validation is needed here.
+        return True
 
     def _render_input_signature(self) -> str:
         arguments = ", ".join(

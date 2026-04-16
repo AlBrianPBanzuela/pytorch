@@ -214,6 +214,18 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             def render_argument_type(name: str, t: CutlassArgType) -> None:
                 if issubclass(t, ctypes.c_byte):
                     buffer.writeline(f"{{}}, /* {name} */")
+                elif name not in name_to_buffer:
+                    # Immediate/constant values (e.g., imm_3_0_k0) are baked
+                    # into the EVT type at compile time.  Their argument fields
+                    # are zero-initialized.
+                    fields = [
+                        (fname, _get_default_arg(ty))
+                        for fname, ty in t._fields_
+                    ]
+                    field_strs = [
+                        f"/* {fname} */ {str(field)}" for fname, field in fields
+                    ]
+                    buffer.writeline(f"{{{', '.join(field_strs)}}}, /* {name} */")
                 else:
                     fields = [
                         (
@@ -252,6 +264,25 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                 buffer.writeline("}")
 
         return buffer.getvalue(), arg_renames
+
+    def _get_default_arg(arg_ty: type) -> str:
+        """Return a zero/default C++ literal for an EVT argument field type.
+
+        Used for immediate/constant nodes (e.g. imm_3_0_k0) whose values are
+        baked into the EVT at compile time and don't correspond to any buffer.
+        """
+        if hasattr(arg_ty, "_fields_") and all(
+            issubclass(ft, ctypes.c_int64) for _, ft in arg_ty._fields_
+        ):
+            stride_len = len(arg_ty._fields_)
+            return f"{{{', '.join(['_0{}'] * stride_len)}}}"
+        elif issubclass(arg_ty, ctypes.c_void_p):
+            return "nullptr"
+        elif arg_ty in _CUTLASS_C_DTYPES:
+            return "0"
+        elif issubclass(arg_ty, EmptyByte):
+            return "{}"
+        return "{}"
 
     def _get_arg_from_node(
         arg_ty: type,
