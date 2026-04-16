@@ -1017,34 +1017,42 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return repr(value)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_not(a: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_and(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_or(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_xor(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_left_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_right_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def int_truediv(a: OpVarT, b: OpVarT) -> OpVarT:
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
@@ -2605,7 +2613,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(  # noqa: G200
+            log.info(
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),

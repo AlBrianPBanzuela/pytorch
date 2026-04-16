@@ -417,7 +417,7 @@ int main(int argc, char** argv) {
 }
 
 #endif
-"""  # noqa: B950
+"""
 
 
 @clear_on_fresh_cache
@@ -577,6 +577,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         input_tensor_meta: TensorMeta | list[TensorMeta] = TensorMeta.from_irnodes(
             self.input_nodes
         )
+        # When input_reorder is set (e.g. [2, 0, 1] for addmm), the kernel
+        # function signature is reordered (e.g. from [X, W, Bias] to
+        # [Bias, X, W]).  input_tensor_meta must follow the same order
+        # because subprocess benchmarking creates tensors from this metadata
+        # and passes them positionally to the compiled kernel.  Without this
+        # reorder the kernel receives mismatched pointers/strides, causing
+        # out-of-bounds GPU memory access for large shapes.
+        if self.input_reorder is not None and isinstance(input_tensor_meta, list):
+            input_tensor_meta = [input_tensor_meta[idx] for idx in self.input_reorder]
         output_tensor_meta: TensorMeta | list[TensorMeta] = TensorMeta.from_irnodes(
             self.output_node
         )
@@ -808,7 +817,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if all_match:
             return op
         log.warning(
-            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning/retuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance. Match List: {match_list}"  # noqa: G004, B950
+            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning/retuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance. Match List: {match_list}"  # noqa: G004
         )
         new_op = copy.deepcopy(op)
 
@@ -1368,7 +1377,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, 0, 0, 0, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, 0, 0, 0, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"
 
     def _render_evt(
         self,
@@ -1378,7 +1387,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         name_to_buffer: dict[str, Buffer],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
-    ) -> tuple[str, str, str, EVTArgRenames]:  # type: ignore[name-defined]  # noqa: F821
+    ) -> tuple[str, str, str, EVTArgRenames]:  # type: ignore[name-defined]
         raise NotImplementedError("_render_evt in CUTLASSGemmTemplate not implemented")
 
 
@@ -1428,7 +1437,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         return (GEMM_ARGS_CUTLASS_3X, GEMM_ARGS_CUTLASS_3X_EPILOGUE)
 
     @staticmethod
-    def _has_tma_epilogue(  # noqa: F821 # type: ignore[arg-type,name-defined]
+    def _has_tma_epilogue(  # type: ignore[arg-type,name-defined]
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined,arg-type] # noqa: F821
     ) -> bool:  # type: ignore[name-defined]
         """Helper method: Determine whether a given Cutlass GEMM op has a TMA Epilogue"""
@@ -1871,7 +1880,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         # SparseGemm in CUTLASS has specific alignment check that for
         # small k could make some of the choices throw kMisalignedOperand
         # CUTLASS error when run, see:
-        # https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/include/cutlass/gemm/kernel/sparse_gemm.h#L198-L200  # noqa: B950
+        # https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/include/cutlass/gemm/kernel/sparse_gemm.h#L198-L200
         # So, let's skip these choices if that would be the case.
         X = self.input_nodes[0]
         return (X.get_size()[1] * 2) % op.tile_description.tile_shape[2] == 0
