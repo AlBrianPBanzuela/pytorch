@@ -1649,6 +1649,26 @@ class FakeTensorConverterTest(TestCase):
         fake_t = mode.from_tensor(t)
         self.assertIsNone(fake_t.grad_dtype)
 
+    def test_grad_dtype_functional_tensor_no_crash(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = torch.float32
+
+        mode = FakeTensorMode()
+        fake_t = mode.from_tensor(t)
+        self.assertEqual(fake_t.grad_dtype, torch.float32)
+
+        with FunctionalTensorMode():
+            func_t = FunctionalTensor.to_functional(fake_t)
+            # Re-fakifying a FunctionalTensor should not crash even though
+            # the inner tensor has a custom grad_dtype.
+            re_faked = mode.from_tensor(func_t)
+        self.assertTrue(re_faked.requires_grad)
+
     def test_grad_dtype_make_fx(self):
         def train_step(w):
             y = (w.float() * 2).sum()
