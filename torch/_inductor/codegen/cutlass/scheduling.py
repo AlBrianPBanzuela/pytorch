@@ -236,10 +236,14 @@ class CUTLASSScheduling(BaseScheduling):
 
             name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
             # dtype can differ, and strides can differ as long as they are broadcastable
-            if node.get_size() != cutlass_template_buffer.get_size():
+            # Shape can differ as long as the total number of elements is the same
+            # (e.g., GEMM outputs 2D [M, N] but epilogue node may be 3D [batch, seq, N] after a reshape)
+            node_numel = sympy_product(node.get_size())
+            template_numel = sympy_product(cutlass_template_buffer.get_size())
+            if V.graph.sizevars.statically_known_equals(node_numel, template_numel) is False:
                 why(
-                    f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
-size: {cutlass_template_buffer.get_size()}"
+                    f"{name}'s numel: {node_numel} (size: {node.get_size()}) differs from {cutlass_template_buffer.get_name()}'s \
+numel: {template_numel} (size: {cutlass_template_buffer.get_size()})"
                 )
                 return False
 
