@@ -222,13 +222,6 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     return ConstantVariable.create(True)
 
 
-def _try_get_python_type(obj: VariableTracker) -> type | None:
-    try:
-        return obj.python_type()
-    except NotImplementedError:
-        return None
-
-
 def vt_getitem(
     tx: "InstructionTranslator",
     obj: VariableTracker,
@@ -249,38 +242,35 @@ def vt_getitem(
     """
     from ..exc import raise_observed_exception
 
-    obj_type = _try_get_python_type(obj)
-    if obj_type is not None:
-        # Branch 1: mp_subscript
-        if type_implements_mp_subscript(obj_type):
-            return obj.mp_subscript_impl(tx, key)
-        # Branch 2: sq_item (only if mp_subscript is absent)
-        # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t → sq_item
-        if type_implements_sq_item(obj_type):
-            key_type = _try_get_python_type(key)
-            if key_type is not None and not type_implements_nb_index(key_type):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"{obj_type.__name__} indices must be integers, not {key_type.__name__}"
-                    ],
-                )
+    obj_type = maybe_get_python_type(obj)
+    # Branch 1: mp_subscript
+    if type_implements_mp_subscript(obj_type):
+        return obj.mp_subscript_impl(tx, key)
+    # Branch 2: sq_item (only if mp_subscript is absent)
+    # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t → sq_item
+    if type_implements_sq_item(obj_type):
+        key_type = maybe_get_python_type(key)
+        if type_implements_nb_index(key_type):
             key = key.nb_index_impl(tx)
             return obj.sq_item_impl(tx, key)
-        # Branch 3: PyType_Check → __class_getitem__ (abstract.c L183-203)
-        # In 3.10+ type.__getitem__ sets mp_subscript so this is normally caught
-        # by Branch 1, but we check explicitly for safety.
-        if issubclass(obj_type, type):
-            return obj.mp_subscript_impl(tx, key)
-        # CPython: abstract.c L205
         raise_observed_exception(
             TypeError,
             tx,
-            args=[f"'{obj_type.__name__}' object is not subscriptable"],
+            args=[
+                f"{obj_type.__name__} indices must be integers, not {key_type.__name__}"
+            ],
         )
-    # Fallback for unknown types
-    return obj.mp_subscript_impl(tx, key)
+    # Branch 3: PyType_Check → __class_getitem__ (abstract.c L183-203)
+    # In 3.10+ type.__getitem__ sets mp_subscript so this is normally caught
+    # by Branch 1, but we check explicitly for safety.
+    if issubclass(obj_type, type):
+        return obj.mp_subscript_impl(tx, key)
+    # CPython: abstract.c L205
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[f"'{obj_type.__name__}' object is not subscriptable"],
+    )
 
 
 def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
