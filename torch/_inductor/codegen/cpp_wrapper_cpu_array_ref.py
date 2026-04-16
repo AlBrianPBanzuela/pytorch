@@ -176,6 +176,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     """
                 )
 
+            if not V.graph.is_const_graph:
+                self.generate_input_output_runtime_checks()
+
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
 
@@ -224,7 +227,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     ) {
                     """
 
-                self.generate_input_output_runtime_checks()
                 run_impl_proto += """
                     __check_inputs_outputs(input_handles, output_handles);
                 """
