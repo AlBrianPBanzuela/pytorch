@@ -293,3 +293,63 @@ class IntSpec:
                 self._backed_hint,
             )
         )
+
+
+def _apply_intspec_to_tensor(tensor: Any, shape_spec: Any) -> None:
+    """Apply per-dimension IntSpec entries to a tensor via mark_static/mark_dynamic/mark_unbacked."""
+    from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dynamic
+
+    if isinstance(shape_spec, dict):
+        items = shape_spec.items()
+    elif isinstance(shape_spec, (list, tuple)):
+        items = enumerate(shape_spec)
+    else:
+        return
+
+    for idx, spec in items:
+        if spec is None:
+            continue
+        if not isinstance(spec, IntSpec):
+            raise TypeError(
+                f"Expected IntSpec or None in dynamic_shapes, got {type(spec).__name__}"
+            )
+        if spec.type is None:
+            raise ValueError(f"IntSpec type must be set for dim {idx}")
+        if spec.type == IntSpecType.STATIC:
+            mark_static(tensor, idx)
+        elif spec.type == IntSpecType.BACKED:
+            maybe_mark_dynamic(tensor, idx)
+        elif spec.type == IntSpecType.UNBACKED:
+            mark_unbacked(tensor, idx)
+
+
+def _apply_dynamic_shapes(
+    compiled: Any, original: Any, dynamic_shapes: dict[str, Any]
+) -> Any:
+    """Wrap a compiled callable to apply dynamic_shapes IntSpec on each call."""
+    import functools
+    import inspect
+
+    import torch
+
+    sig = inspect.signature(
+        original.forward if isinstance(original, torch.nn.Module) else original
+    )
+
+    @functools.wraps(
+        compiled if not isinstance(compiled, torch.nn.Module) else compiled.forward
+    )
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        for name, shape_spec in dynamic_shapes.items():
+            if name in bound.arguments:
+                arg = bound.arguments[name]
+                if isinstance(arg, torch.Tensor):
+                    _apply_intspec_to_tensor(arg, shape_spec)
+        return compiled(*bound.args, **bound.kwargs)
+
+    if isinstance(compiled, torch.nn.Module):
+        compiled.forward = wrapper  # type: ignore[method-assign]
+        return compiled
+    return wrapper

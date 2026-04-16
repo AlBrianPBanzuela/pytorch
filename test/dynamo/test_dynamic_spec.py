@@ -222,36 +222,40 @@ class TestIntSpec(TestCase):
 
 
 class TestIntSpecCompile(TestCase):
-    """End-to-end tests: IntSpec with torch.compile via mark_dynamic_spec."""
+    """End-to-end tests: IntSpec with torch.compile(dynamic_shapes=...)."""
 
     def test_static_compile(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnt)
-        def fn(x):
-            return x + 1
+        fn = torch.compile(
+            lambda x: x + 1,
+            backend=cnt,
+            dynamic_shapes={"x": {0: IntSpec().static()}},
+        )
 
         x = torch.randn(4, 3)
-        torch._dynamo.decorators.mark_dynamic_spec(x, 0, IntSpec().static())
         result = fn(x)
         self.assertEqual(result, x + 1)
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_backed_compile(self):
+    def test_backed_no_recompile(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnt)
-        def fn(x):
+        def f(x):
             return x.sum(0)
 
+        fn = torch.compile(
+            f,
+            backend=cnt,
+            dynamic_shapes={"x": {0: IntSpec("batch").backed()}},
+        )
+
         x1 = torch.randn(4, 3)
-        torch._dynamo.decorators.mark_dynamic_spec(x1, 0, IntSpec("batch").backed())
         result1 = fn(x1)
         self.assertEqual(result1, x1.sum(0))
 
         # Different batch size should NOT trigger recompile
         x2 = torch.randn(8, 3)
-        torch._dynamo.decorators.mark_dynamic_spec(x2, 0, IntSpec("batch").backed())
         result2 = fn(x2)
         self.assertEqual(result2, x2.sum(0))
         self.assertEqual(cnt.frame_count, 1)
@@ -259,24 +263,30 @@ class TestIntSpecCompile(TestCase):
     def test_unbacked_compile(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnt)
-        def fn(x):
-            return x.sum(0)
+        fn = torch.compile(
+            lambda x: x.sum(0),
+            backend=cnt,
+            dynamic_shapes={"x": {0: IntSpec("batch").unbacked()}},
+        )
 
         x = torch.randn(4, 3)
-        torch._dynamo.decorators.mark_dynamic_spec(x, 0, IntSpec("batch").unbacked())
         result = fn(x)
         self.assertEqual(result, x.sum(0))
 
-    def test_no_type_errors(self):
-        x = torch.randn(4, 3)
-        with self.assertRaisesRegex(ValueError, "type must be set"):
-            torch._dynamo.decorators.mark_dynamic_spec(x, 0, IntSpec())
+    def test_list_form(self):
+        cnt = torch._dynamo.testing.CompileCounter()
 
-    def test_not_intspec_errors(self):
-        x = torch.randn(4, 3)
-        with self.assertRaisesRegex(TypeError, "Expected IntSpec"):
-            torch._dynamo.decorators.mark_dynamic_spec(x, 0, "bad")
+        fn = torch.compile(
+            lambda x: x + 1,
+            backend=cnt,
+            dynamic_shapes={"x": [IntSpec("batch").backed(), IntSpec().static()]},
+        )
+
+        x1 = torch.randn(4, 3)
+        self.assertEqual(fn(x1), x1 + 1)
+        x2 = torch.randn(8, 3)
+        self.assertEqual(fn(x2), x2 + 1)
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
