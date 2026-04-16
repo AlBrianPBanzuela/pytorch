@@ -361,8 +361,12 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 const std::vector<std::size_t>& ck::HostTensorDescriptor::GetStrides() const { return mStrides; }
                 std::size_t ck::HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
                 std::size_t ck::HostTensorDescriptor::GetElementSpaceSize() const {
-                    return std::accumulate(
-                        mLens.begin(), mLens.end(), std::size_t{1}, std::multiplies<std::size_t>());
+                    std::size_t space = 1;
+                    for(std::size_t i = 0; i < mLens.size(); ++i) {
+                        if(mLens[i] == 0) continue;
+                        space += (mLens[i] - 1) * mStrides[i];
+                    }
+                    return space;
                 }
             """
         )
