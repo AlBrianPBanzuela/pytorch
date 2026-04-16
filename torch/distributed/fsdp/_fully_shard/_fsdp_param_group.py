@@ -67,10 +67,13 @@ reference to avoid holding onto memory after forward.
 
 
 class FSDPCommContext:
-    """Communication state shared across FSDP states/parameter groups within a
-    single root. Cross-layer lifetime fields (all_gather_state,
-    reduce_scatter_states, mp_cast_all_reduce_state) assume a single-root
-    scope — sharing this context across disjoint FSDP roots is unsupported."""
+    """Communication state shared across FSDP states/parameter groups, and
+    optionally across multiple FSDP roots via `set_stream_share` (e.g., for
+    Pipeline Parallelism). Cross-layer lifetime fields (all_gather_state,
+    reduce_scatter_states, mp_cast_all_reduce_state) hold buffers/events
+    across layers within a single backward pass and are drained before the
+    next pass — this assumes backward passes sharing the context run
+    serially, not concurrently."""
 
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
@@ -239,8 +242,9 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
-        # No-cast path: param grads already hold refs to the all-reduce buffer,
-        # so this only carries the event for stream synchronization.
+        # No-cast path: reduce_output and all_reduce_input alias the same
+        # tensor, so param grads already hold refs to the all-reduce buffer.
+        # This field only carries the event for stream synchronization.
         self._all_reduce_state: AllReduceState | None = None
 
     # Initialization #
@@ -628,6 +632,11 @@ class FSDPParamGroup:
                 self._label_suffix,
                 prev_all_reduce_state,
             )
+            if prev_all_reduce_state is not None:
+                # Drop the last ref inside the all-reduce stream context so
+                # the caching allocator records the free against that stream.
+                with self.device_handle.stream(all_reduce_stream):
+                    del prev_all_reduce_state
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
             )
@@ -673,6 +682,11 @@ class FSDPParamGroup:
         self._all_reduce_state = None
 
     def _flush_comm_ctx_mp_cast_all_reduce_state(self):
+        # Invoked from finalize_backward, which runs in autograd's post-
+        # backward final callback on the default stream. First group to run
+        # drains the shared state; later groups see None. Safe because
+        # backward callbacks are serialized by autograd — don't call this
+        # from other contexts.
         if (
             self.comm_ctx.mp_cast_all_reduce_state is not None
             and self.comm_ctx.mp_cast_all_reduce_state.event is not None

@@ -698,11 +698,8 @@ def foreach_reduce(
             all_reduce_hook(reduce_output)
     # -- END: ops post reduce_scatter
 
-    if prev_all_reduce_state is not None:
-        if prev_all_reduce_state.event is not None:
-            all_reduce_stream.wait_event(prev_all_reduce_state.event)
-        with device_handle.stream(all_reduce_stream):
-            del prev_all_reduce_state
+    if prev_all_reduce_state is not None and prev_all_reduce_state.event is not None:
+        all_reduce_stream.wait_event(prev_all_reduce_state.event)
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
@@ -710,6 +707,9 @@ def foreach_reduce(
         if all_reduce_input is not None and reduce_output is not all_reduce_input:
             # The dtype cast created a new tensor, so the original higher-
             # precision all-reduce buffer has no refs from param grads.
+            # Overwrite the post-all-reduce event with a post-cast event,
+            # since the cast still reads all_reduce_input — the free must
+            # wait for the cast, not just the all-reduce.
             all_reduce_event = post_reduce_stream.record_event()
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]

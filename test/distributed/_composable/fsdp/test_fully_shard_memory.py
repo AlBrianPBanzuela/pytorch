@@ -3,6 +3,7 @@
 import functools
 import gc
 import unittest
+from unittest import mock
 
 import torch
 from torch.distributed.fsdp import (
@@ -375,8 +376,6 @@ class TestFullyShardHSDPMemory(FSDPTest):
 
         from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 
-        if self.world_size != 4:
-            return
         mesh = init_device_mesh(
             device_type.type, (2, 2), mesh_dim_names=("dp_replicate", "dp_shard")
         )
@@ -418,12 +417,11 @@ class TestFullyShardHSDPMemory(FSDPTest):
                 weakref.finalize(all_reduce_input, _on_dealloc)
             return result
 
-        _fsdp_param_group.foreach_reduce = tracking_foreach_reduce
-        try:
+        with mock.patch.object(
+            _fsdp_param_group, "foreach_reduce", tracking_foreach_reduce
+        ):
             inp = torch.randint(0, 32, (1, 4), device=device_type.type)
             model(inp).sum().backward()
-        finally:
-            _fsdp_param_group.foreach_reduce = orig_foreach_reduce
 
         # Post-fix upper bound: the "previous" state held by comm_ctx plus the
         # "current" state just created = 2. Pre-fix would grow to n_layers.
