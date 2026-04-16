@@ -22,11 +22,13 @@ def is_wildcard_only(patterns: list[str]) -> bool:
     return all(p in ("*", "**") for p in patterns)
 
 
-KNOWN_BOTS = frozenset({
-    "pytorchbot",
-    "pytorchmergebot",
-    "facebook-github-bot",
-})
+KNOWN_BOTS = frozenset(
+    {
+        "pytorchbot",
+        "pytorchmergebot",
+        "facebook-github-bot",
+    }
+)
 
 
 def is_bot(username: str) -> bool:
@@ -69,8 +71,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--merge-rules", required=True, type=Path)
     parser.add_argument("--changed-files", nargs="*", default=[])
-    parser.add_argument("--changed-files-stdin", action="store_true",
-                        help="Read changed files as JSON array from stdin")
+    parser.add_argument(
+        "--changed-files-stdin",
+        action="store_true",
+        help="Read changed files as JSON array from stdin",
+    )
     parser.add_argument("--pr-author", required=True)
     args = parser.parse_args()
 

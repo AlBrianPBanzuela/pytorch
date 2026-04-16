@@ -163,9 +163,7 @@ class TestMatchReviewers(TestCase):
                 "approved_by": ["alice"],
             },
         ]
-        reviewers, teams = match_reviewers(
-            rules, ["torch/foo/bar.py"], "someone"
-        )
+        reviewers, teams = match_reviewers(rules, ["torch/foo/bar.py"], "someone")
         self.assertEqual(reviewers, ["alice"])
 
 
