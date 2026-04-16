@@ -157,7 +157,9 @@ class TestCppExtensionJIT(common.TestCase):
             if IS_WINDOWS:
                 # rmtree returns permission error: [WinError 5] Access is denied
                 # on Windows, this is a workaround
-                subprocess.run(["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE, check=True)
+                subprocess.run(
+                    ["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE, check=True
+                )
             else:
                 shutil.rmtree(temp_dir)
 
@@ -305,7 +307,9 @@ class TestCppExtensionJIT(common.TestCase):
             if IS_WINDOWS:
                 # rmtree returns permission error: [WinError 5] Access is denied
                 # on Windows, this is a word-around
-                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE, check=True)
+                subprocess.run(
+                    ["rm", "-rf", temp_dir], stdout=subprocess.PIPE, check=True
+                )
             else:
                 shutil.rmtree(temp_dir)
 

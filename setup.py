@@ -699,7 +699,9 @@ def get_nightly_git_hash(version: str) -> str:
             torch_version_spec,
         ]
 
-        result = subprocess.run(download_cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            download_cmd, capture_output=True, text=True, check=False
+        )
         if result.returncode != 0:
             raise RuntimeError(
                 f"Failed to download {version} wheel for git hash extraction: {result.stderr}"
@@ -845,7 +847,9 @@ def download_and_extract_nightly_wheel(version: str) -> None:
         ]
 
         report("-- Downloading nightly PyTorch wheel...")
-        result = subprocess.run(download_cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            download_cmd, capture_output=True, text=True, check=False
+        )
         if result.returncode != 0:
             # Try to get the latest nightly version for the same variant to help the user
             variant = extract_variant_from_version(version)

@@ -194,9 +194,12 @@ if __name__ == "__main__":
 
     subprocess.run(["git", "checkout", "-b", branch_name], cwd=REPO_ROOT, check=True)
     subprocess.run(["git", "add", "test/slow_tests.json"], cwd=REPO_ROOT, check=True)
-    subprocess.run(["git", "commit", "-m", "Update slow tests"], cwd=REPO_ROOT, check=True)
     subprocess.run(
-        f"git push --set-upstream origin {branch_name} -f".split(), cwd=REPO_ROOT,
+        ["git", "commit", "-m", "Update slow tests"], cwd=REPO_ROOT, check=True
+    )
+    subprocess.run(
+        f"git push --set-upstream origin {branch_name} -f".split(),
+        cwd=REPO_ROOT,
         check=True,
     )
 

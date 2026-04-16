@@ -119,7 +119,9 @@ def gh(*args: str, json_output: bool = False) -> str | dict | list:
 
 
 def git(*args: str) -> str:
-    result = subprocess.run(["git"] + list(args), capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        ["git"] + list(args), capture_output=True, text=True, check=True
+    )
     return result.stdout.strip()
 
 

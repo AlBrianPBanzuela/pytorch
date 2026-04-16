@@ -250,7 +250,6 @@ class TestGpuWrapper(InductorTestCase):
         for p, e in zip(params, expected):
             self.assertEqual(p, e)
 
-
     def test_cpp_wrapper_backward_lazy_compile(self):
         """Test that options={"cpp_wrapper": True} works with backward pass.
 
@@ -273,6 +272,7 @@ class TestGpuWrapper(InductorTestCase):
         opt_fn = torch.compile(options={"cpp_wrapper": True})(fn)
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
