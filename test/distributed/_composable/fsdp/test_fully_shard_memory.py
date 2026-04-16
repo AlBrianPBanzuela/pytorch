@@ -5,7 +5,13 @@ import gc
 import unittest
 
 import torch
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
+from torch.distributed.tensor import init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
@@ -343,6 +349,90 @@ class TestFullyShardMemory(FSDPTest):
 
         for param in model.parameters():
             param.register_post_accumulate_grad_hook(optim_hook)
+
+
+class TestFullyShardHSDPMemory(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(4, torch.get_device_module(device_type).device_count())
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        TEST_HPU or TEST_XPU, "HSDP mixed-precision memory test is CUDA-only"
+    )
+    def test_hsdp_mixed_precision_no_buffer_accumulation(self):
+        """Regression guard for https://github.com/pytorch/pytorch/issues/179128:
+        under HSDP with bf16 params + fp32 reduce, the fp32 reduce-scatter output
+        buffers must not accumulate across layers within a single backward pass.
+
+        Peak-memory tests are unreliable here because in unit-test conditions
+        (localhost NCCL), all-reduces finish fast enough that the CUDA caching
+        allocator can reuse buffers even in the buggy code path. Instead, we
+        directly count simultaneously-alive fp32 all-reduce input tensors via
+        weakref tracking: pre-fix grows to n_layers, post-fix stays at O(1).
+        """
+        import weakref
+
+        from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+
+        if self.world_size != 4:
+            return
+        mesh = init_device_mesh(
+            device_type.type, (2, 2), mesh_dim_names=("dp_replicate", "dp_shard")
+        )
+        mp = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+
+        n_layers = 8
+        # Create params in bf16 so orig_dtype != reduce_dtype (fp32) — this
+        # is what exercises the `mp_cast_all_reduce_state` path being tested.
+        model = Transformer(
+            ModelArgs(
+                vocab_size=32,
+                n_layers=n_layers,
+                dim=768,
+                n_heads=12,
+                weight_tying=False,
+            )
+        ).to(device_type, dtype=torch.bfloat16)
+        for m in model.modules():
+            if isinstance(m, TransformerBlock):
+                fully_shard(m, mesh=mesh, mp_policy=mp)
+        fully_shard(model, mesh=mesh, mp_policy=mp)
+
+        alive = [0]
+        max_alive = [0]
+        orig_foreach_reduce = _fsdp_param_group.foreach_reduce
+
+        def tracking_foreach_reduce(*args, **kwargs):
+            result = orig_foreach_reduce(*args, **kwargs)
+            all_reduce_input = result[3]
+            if all_reduce_input is not None:
+                alive[0] += 1
+                max_alive[0] = max(max_alive[0], alive[0])
+
+                def _on_dealloc(*_):
+                    alive[0] -= 1
+
+                weakref.finalize(all_reduce_input, _on_dealloc)
+            return result
+
+        _fsdp_param_group.foreach_reduce = tracking_foreach_reduce
+        try:
+            inp = torch.randint(0, 32, (1, 4), device=device_type.type)
+            model(inp).sum().backward()
+        finally:
+            _fsdp_param_group.foreach_reduce = orig_foreach_reduce
+
+        # Post-fix upper bound: the "previous" state held by comm_ctx plus the
+        # "current" state just created = 2. Pre-fix would grow to n_layers.
+        self.assertLessEqual(
+            max_alive[0],
+            2,
+            f"fp32 reduce-scatter output buffers accumulated: max_alive="
+            f"{max_alive[0]} for {n_layers} layers",
+        )
 
 
 if __name__ == "__main__":
