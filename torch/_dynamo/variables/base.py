@@ -594,8 +594,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        # TODO: raise TypeError for non-subscriptable objects (blocked on
-        # branch 3 __class_getitem__ support for type objects).
+        # vt_getitem handles dispatch and raises TypeError for non-subscriptable
+        # objects.  This base fallback fires for types with mp_subscript at the
+        # C level but no Dynamo override yet.
         unimplemented(
             gb_type="missing_mp_subscript",
             context=f"mp_subscript_impl not defined for {type(self).__name__}",

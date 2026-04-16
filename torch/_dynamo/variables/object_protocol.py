@@ -240,8 +240,6 @@ def vt_getitem(
     Branch 2 fires for types with only sq_item (e.g. deque).
     Branch 3 delegates to mp_subscript_impl for type objects (__class_getitem__).
     """
-    from ..exc import raise_observed_exception
-
     obj_type = maybe_get_python_type(obj)
     # Branch 1: mp_subscript
     if type_implements_mp_subscript(obj_type):
