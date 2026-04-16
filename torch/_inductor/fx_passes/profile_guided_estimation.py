@@ -25,6 +25,7 @@ from torch._inductor.analysis.profile_analysis import (
     _create_extern_mapping,
     _dtype_map,
     _get_size_from_string,
+    ParseException,
 )
 from torch._inductor.fx_passes.bucketing import (
     is_all_gather_into_tensor,
@@ -37,18 +38,6 @@ from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
-
-# Profiler TypeMeta string -> torch.dtype. Extends profile_analysis._dtype_map
-# with c10:: prefixed types and C++ native type names from caffe2::TypeMeta::name().
-_TYPEMETA_TO_DTYPE: dict[str, torch.dtype] = {
-    **_dtype_map,
-    "c10::Half": torch.float16,
-    "c10::BFloat16": torch.bfloat16,
-    "double": torch.float64,
-    "signed char": torch.int8,
-    "unsigned char": torch.uint8,
-    "bool": torch.bool,
-}
 
 
 def _rank_stride(ranks: tuple[int, ...]) -> int | None:
@@ -90,6 +79,7 @@ class OpRecord:
 
     op_name: str  # normalized name, e.g. "aten::mm", "mylib::my_custom_op"
     input_shapes: tuple[tuple[int, ...], ...]
+    input_strides: tuple[tuple[int, ...], ...]
     dtype: torch.dtype | None
     duration_us: float  # sum of all GPU kernels for this CPU op
 
@@ -122,9 +112,15 @@ class ProfileData:
     # Count of distinct PGs per mesh dimension (stride, group_size) — used for
     # ambiguity check (skip fallback if multiple PGs share the same mesh dim).
     _pg_count_by_mesh_dim: dict[tuple[int, int], int] = field(default_factory=dict)
-    # Generic op index: (op_name, input_shapes, dtype) -> avg_dur_us
+    # Generic op index: (op_name, input_shapes, input_strides, dtype) -> avg_dur_us
     _op_index: dict[
-        tuple[str, tuple[tuple[int, ...], ...], torch.dtype | None], float
+        tuple[
+            str,
+            tuple[tuple[int, ...], ...],
+            tuple[tuple[int, ...], ...],
+            torch.dtype | None,
+        ],
+        float,
     ] = field(default_factory=dict)
     # Peak observed bandwidth per PG (GB/s), computed from largest messages
     _pg_peak_bw: dict[tuple[int, ...], float] = field(default_factory=dict)
@@ -176,8 +172,8 @@ class ProfileData:
         # Reuse profile_analysis's External id -> CPU op mapping
         try:
             extern_mapping = _create_extern_mapping(data)
-        except (KeyError, IndexError, RuntimeError):
-            # _create_extern_mapping raises on malformed traces; build manually
+        except (ParseException, KeyError):
+            # Malformed trace (e.g. duplicate External ids, missing traceEvents)
             extern_mapping = defaultdict(list)
             for ev in events:
                 if (
@@ -258,16 +254,22 @@ class ProfileData:
     def _parse_op(self, name: str, args: dict[str, Any], total_dur: float) -> None:
         """Parse any CPU op into a generic OpRecord."""
         input_dims = args.get("Input Dims", [])
+        input_strides = args.get("Input Strides", [])
         input_types = args.get("Input type", [])
         if not input_dims:
             return
         dtype_str = input_types[0] if input_types else ""
-        dtype = _TYPEMETA_TO_DTYPE.get(dtype_str)
-        # Skip empty entries (non-tensor args like scalars/None) so the shape
-        # tuple matches what _get_node_input_shapes extracts from FX nodes.
+        dtype = _dtype_map.get(dtype_str)
+        # Skip empty entries (non-tensor args like scalars/None) so the
+        # tuples match what _get_node_input_shapes/strides extract from FX nodes.
         shapes = tuple(
             _to_nested_tuple(d)
             for d in input_dims
+            if isinstance(d, (list, tuple)) and d
+        )
+        strides = tuple(
+            _to_nested_tuple(d)
+            for d in input_strides
             if isinstance(d, (list, tuple)) and d
         )
         if not shapes:
@@ -276,6 +278,7 @@ class ProfileData:
             OpRecord(
                 op_name=name,
                 input_shapes=shapes,
+                input_strides=strides,
                 dtype=dtype,
                 duration_us=total_dur,
             )
@@ -321,7 +324,7 @@ class ProfileData:
             defaultdict(list)
         )
         for rec in self.ops:
-            key = (rec.op_name, rec.input_shapes, rec.dtype)
+            key = (rec.op_name, rec.input_shapes, rec.input_strides, rec.dtype)
             op_groups[key].append(rec.duration_us)
         self._op_index = {k: sum(v) / len(v) for k, v in op_groups.items()}
 
@@ -379,7 +382,7 @@ class ProfileData:
 
     def get_op_names(self) -> list[str]:
         """Return distinct op names in the op index."""
-        return list(OrderedSet(name for name, _, _ in self._op_index))
+        return list(OrderedSet(name for name, _, _, _ in self._op_index))
 
     @staticmethod
     def _dtype_elem_bytes(dtype: str) -> int:
@@ -530,10 +533,11 @@ class ProfileData:
         self,
         op_name: str,
         input_shapes: tuple[tuple[int, ...], ...],
+        input_strides: tuple[tuple[int, ...], ...],
         dtype: torch.dtype | None,
     ) -> float | None:
-        """Look up op duration in ms by exact shape match. Returns None on miss."""
-        key = (op_name, input_shapes, dtype)
+        """Look up op duration in ms by exact shape+stride match. Returns None on miss."""
+        key = (op_name, input_shapes, input_strides, dtype)
         dur_us = self._op_index.get(key)
         if dur_us is not None:
             return dur_us / 1e3  # us -> ms
@@ -584,33 +588,39 @@ def _fx_target_to_profile_name(node: fx.Node) -> str | None:
     return None
 
 
-def _get_node_input_shapes(
+def _get_node_input_shapes_and_strides(
     node: fx.Node,
-) -> tuple[tuple[int, ...], ...] | None:
-    """Extract input shapes from FX node args, matching profile's Input Dims format."""
+) -> tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, ...], ...]] | None:
+    """Extract input shapes and strides from FX node tensor args.
+
+    Returns (shapes, strides) or None if no tensor args or symbolic dims.
+    """
     from torch._inductor.fx_passes.node_runtime_estimation import get_hint
 
     shapes: list[tuple[int, ...]] = []
+    strides: list[tuple[int, ...]] = []
     for arg in node.args:
         if not isinstance(arg, fx.Node):
             continue
         val = arg.meta.get("val")
         if isinstance(val, torch.Tensor):
-            resolved = []
+            resolved_shape = []
             for s in val.shape:
                 h = get_hint(s)
                 if h is None:
-                    log.debug(
-                        "PGE: unresolved symbolic dim in %s shape %s",
-                        node.name,
-                        val.shape,
-                    )
                     return None
-                resolved.append(h)
-            shapes.append(tuple(resolved))
+                resolved_shape.append(h)
+            resolved_stride = []
+            for s in val.stride():
+                h = get_hint(s)
+                if h is None:
+                    return None
+                resolved_stride.append(h)
+            shapes.append(tuple(resolved_shape))
+            strides.append(tuple(resolved_stride))
     if not shapes:
         return None
-    return tuple(shapes)
+    return tuple(shapes), tuple(strides)
 
 
 def _is_collective_node(node: fx.Node) -> bool:
@@ -721,10 +731,11 @@ class ProfileGuidedEstimator:
             {
                 "op": op_name,
                 "shapes": [list(s) for s in shapes],
+                "strides": [list(s) for s in strides],
                 "dtype": str(dtype) if dtype is not None else "",
                 "profile_ms": dur_us / 1e3,
             }
-            for (op_name, shapes, dtype), dur_us in profile._op_index.items()
+            for (op_name, shapes, strides, dtype), dur_us in profile._op_index.items()
         ]
 
         diagnostics: list[dict[str, Any]] = []
@@ -800,12 +811,13 @@ class ProfileGuidedEstimator:
         return None
 
     def _estimate_op(self, node: fx.Node) -> float | None:
-        """Estimate any non-collective op via exact shape match in profile."""
+        """Estimate any non-collective op via exact shape+stride match in profile."""
         profile_name = _fx_target_to_profile_name(node)
         if profile_name is None:
             return None
-        input_shapes = _get_node_input_shapes(node)
-        if input_shapes is None:
+        result = _get_node_input_shapes_and_strides(node)
+        if result is None:
             return None
+        input_shapes, input_strides = result
         dtype = _get_node_dtype(node)
-        return self.profile.lookup_op(profile_name, input_shapes, dtype)
+        return self.profile.lookup_op(profile_name, input_shapes, input_strides, dtype)

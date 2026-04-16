@@ -1744,6 +1744,9 @@ def _make_pge_trace(
                 "args": {
                     "External id": eid,
                     "Input Dims": mm["shapes"],
+                    "Input Strides": mm.get(
+                        "strides", [[s[-1], 1] for s in mm["shapes"]]
+                    ),
                     "Input type": mm.get("dtypes", ["float", "float"]),
                 },
             }
@@ -1768,6 +1771,9 @@ def _make_pge_trace(
                 "args": {
                     "External id": eid,
                     "Input Dims": sdpa["input_dims"],
+                    "Input Strides": sdpa.get(
+                        "input_strides", [[1] * len(d) for d in sdpa["input_dims"]]
+                    ),
                     "Input type": sdpa.get("dtypes", ["c10::BFloat16"]),
                 },
             }
@@ -1860,17 +1866,32 @@ class TestProfileGuidedEstimation(TestCase):
             profile.lookup_collective("all_to_all", (0, 2, 4, 6), 1000, "Float")
         )
 
-        # Op: exact match, shape miss, dtype miss
+        # Op: exact match (shapes + strides), shape miss, dtype miss
         self.assertAlmostEqual(
-            profile.lookup_op("aten::mm", ((128, 256), (256, 512)), torch.float32),
+            profile.lookup_op(
+                "aten::mm",
+                ((128, 256), (256, 512)),
+                ((256, 1), (512, 1)),
+                torch.float32,
+            ),
             0.05,
             places=4,
         )
         self.assertIsNone(
-            profile.lookup_op("aten::mm", ((999, 999), (999, 999)), torch.float32)
+            profile.lookup_op(
+                "aten::mm",
+                ((999, 999), (999, 999)),
+                ((999, 1), (999, 1)),
+                torch.float32,
+            )
         )
         self.assertIsNone(
-            profile.lookup_op("aten::mm", ((128, 256), (256, 512)), torch.float16)
+            profile.lookup_op(
+                "aten::mm",
+                ((128, 256), (256, 512)),
+                ((256, 1), (512, 1)),
+                torch.float16,
+            )
         )
 
 
