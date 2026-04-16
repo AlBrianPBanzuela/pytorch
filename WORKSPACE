@@ -7,6 +7,7 @@ http_archive(
     name = "rules_cc",
     patches = [
         "//:tools/rules_cc/cuda_support.patch",
+        "//:tools/rules_cc/cc_library_shim.patch",
     ],
     strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
     urls = [
@@ -131,8 +132,14 @@ new_local_repository(
 
 new_local_repository(
     name = "org_pytorch_cpuinfo",
-    build_file = "//third_party:cpuinfo.BUILD",
+    build_file = "//third_party:cpuinfo/BUILD.bazel",
     path = "third_party/cpuinfo",
+)
+
+new_local_repository(
+    name = "rules_license",
+    path = "third_party/stubs/rules_license",
+    build_file_content = "",
 )
 
 new_local_repository(
