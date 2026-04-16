@@ -1560,26 +1560,30 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
-    def test_explicit_precision_cast_not_elided(self):
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_preserves_explicit_precision_cast(
+        self, lowp_dtype
+    ):
         torch.manual_seed(0)
         torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+        x = torch.randn(4, 32, 32, device=device_type, dtype=torch.float32)
+        w = torch.randn(32, 32, device=device_type, dtype=torch.float32)
 
-        for lowp_dtype in (torch.bfloat16, torch.float16):
-            with self.subTest(dtype=lowp_dtype):
-                x = torch.randn(4, 32, 32, device=device_type, dtype=torch.float32)
-                w = torch.randn(32, 32, device=device_type, dtype=torch.float32)
+        def fn(x, w):
+            x = torch.matmul(x, w)
+            x = x.to(lowp_dtype).float()
+            x = x * torch.sigmoid(x)
+            return x.sum(dim=1)
 
-                def fn(x, w):
-                    x = torch.matmul(x, w)
-                    x = x.to(lowp_dtype).float()
-                    x = x * torch.sigmoid(x)
-                    return x.sum(dim=1)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
-                opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
-                expected = fn(x, w)
-                actual = opt_fn(x.clone(), w.clone())
-                self.assertEqual(expected, actual)
+        expected = fn(x, w)
+        actual, (code,) = run_and_get_code(opt_fn, x.clone(), w.clone())
+        self.assertEqual(expected, actual)
+        self.assertIn("args = (%convert_element_type, torch.float32)", code)
+        self.assertIn(f".to(tl.{lowp_name})", code)
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
     @torch._inductor.config.patch(pattern_matcher=False)
