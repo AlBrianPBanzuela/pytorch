@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
 import unittest
 
 import torch
@@ -13,6 +14,7 @@ from torch._dynamo.exc import (
     UserError,
     UserErrorType,
 )
+from torch._dynamo.variables.base import SourceLocation
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -401,6 +403,92 @@ Target Expressions:
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
         )
+
+
+# Module-level storage for comptime inspection (avoids free-variable closure issues).
+_source_loc_capture: dict = {}
+
+
+def _capture_y_source_loc(ctx) -> None:
+    """Comptime callback: capture source_loc of 'y' from symbolic_locals."""
+    tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+    y_vt = tx.symbolic_locals.get("y")
+    if y_vt is not None:
+        _source_loc_capture["source_loc"] = y_vt.source_loc
+
+
+class SourceLocationTests(LoggingTestCase):
+    def test_source_location_format_no_col_info(self):
+        loc = SourceLocation(filename=__file__, lineno=1)
+        result = loc.format()
+        self.assertIn(f'File "{__file__}", line 1', result)
+        # No carets without col info
+        self.assertNotIn("^", result)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "positions only available in 3.11+")
+    def test_source_location_format_with_col_info(self):
+        loc = SourceLocation(
+            filename=__file__,
+            lineno=1,
+            end_lineno=1,
+            col_offset=0,
+            end_col_offset=10,
+        )
+        result = loc.format()
+        self.assertIn(f'File "{__file__}", line 1', result)
+        self.assertIn("^" * 10, result)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "positions only available in 3.11+")
+    def test_vt_source_loc_set_during_tracing(self):
+        """VTs computed during tracing get source_loc set to their originating instruction."""
+        _source_loc_capture.clear()
+
+        def fn(x):
+            y = x + 1
+            comptime(_capture_y_source_loc)
+            return y
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+
+        loc = _source_loc_capture.get("source_loc")
+        self.assertIsNotNone(loc, "source_loc should be set on computed VT")
+        assert loc is not None
+        self.assertEqual(loc.filename, __file__.replace(".pyc", ".py"))
+        self.assertIsNotNone(loc.lineno)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "positions only available in 3.11+")
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_source_attribution(self, records):
+        """Graph break messages always include source attribution for the break location."""
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+        record = self.getRecord(records, "Graph break in user code")
+        msg = record.getMessage()
+        self.assertIn("Source of graph break:", msg)
+        self.assertIn("torch._dynamo.graph_break()", msg)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "positions only available in 3.11+")
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_source_attribution_with_stack_values(self, records):
+        """Source attribution also reports values on the stack that originated elsewhere."""
+
+        def fn(x):
+            # (x + 1) is computed first and sits on the stack while graph_break() is
+            # set up. The graph break happens during CALL, leaving (x + 1)'s VT on the
+            # stack with a different source_loc than the break instruction itself.
+            # At runtime, graph_break() returns None; tuple indexing avoids TypeError.
+            return (x + 1, torch._dynamo.graph_break())[0]  # noqa: GB_REGISTRY
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+        record = self.getRecord(records, "Graph break in user code")
+        msg = record.getMessage()
+        self.assertIn("Source of graph break:", msg)
+        self.assertIn("Related values:", msg)
 
 
 if __name__ == "__main__":
