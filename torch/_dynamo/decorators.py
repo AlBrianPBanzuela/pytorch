@@ -1202,6 +1202,36 @@ def mark_unbacked(
         mark_unbacked(t, i, shape_id=shape_id, min=min, max=max)
 
 
+def mark_dynamic_spec(
+    t: Any,
+    index: int,
+    spec: Any,
+) -> None:
+    """Apply an IntSpec to a tensor dimension for use with torch.compile.
+
+    Dispatches to mark_static / maybe_mark_dynamic / mark_unbacked based on
+    the IntSpec's type.
+
+    Args:
+        t: The tensor to mark.
+        index: The dimension index.
+        spec: An IntSpec instance.
+    """
+    from .dynamic_spec import IntSpec, IntSpecType
+
+    if not isinstance(spec, IntSpec):
+        raise TypeError(f"Expected IntSpec, got {type(spec).__name__}")
+    if spec.type is None:
+        raise ValueError("IntSpec type must be set before applying to a tensor")
+
+    if spec.type == IntSpecType.STATIC:
+        mark_static(t, index)
+    elif spec.type == IntSpecType.BACKED:
+        maybe_mark_dynamic(t, index)
+    elif spec.type == IntSpecType.UNBACKED:
+        mark_unbacked(t, index)
+
+
 @forbid_in_graph
 def mark_dynamic(
     t: Any,
