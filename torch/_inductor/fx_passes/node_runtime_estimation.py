@@ -472,7 +472,8 @@ def _collect_analytical_estimates(
                 node
             )
             analytical[node.name] = est
-        # Compute: use roofline estimation
+        # Compute: use roofline as the analytical baseline for PGE comparison
+        # logging only — not used for scheduling decisions
         elif is_compute_node(node) and node.name in matched_names:
             est = estimate_roofline_runtime_ms(node)
             if est is not None:

@@ -20,6 +20,7 @@ from typing import Any
 
 import torch
 import torch.fx as fx
+from torch._inductor.analysis.profile_analysis import _create_extern_mapping
 from torch._inductor.fx_passes.bucketing import (
     is_all_gather_into_tensor,
     is_all_reduce_tensor,
@@ -67,29 +68,18 @@ class CollectiveRecord:
 
 
 @dataclass
-class MatmulRecord:
-    """A single matmul observation from the profile (mm, bmm, or addmm)."""
+class OpRecord:
+    """A single op observation from the profile (any CPU op with GPU kernels)."""
 
-    # input shapes: ((M, K), (K, N))
-    input_shapes: tuple[tuple[int, ...], tuple[int, ...]]
+    op_name: str  # normalized name, e.g. "aten::mm", "mylib::my_custom_op"
+    input_shapes: tuple[tuple[int, ...], ...]
     dtype: str
     duration_us: float  # sum of all GPU kernels for this CPU op
 
 
-@dataclass
-class SdpaRecord:
-    """A single SDPA (scaled dot product attention) observation."""
-
-    batch: int
-    num_heads: int
-    seq_len: int
-    head_dim: int
-    dtype: str
-    is_backward: bool
-    duration_us: float  # sum of all GPU kernels for this CPU op
-
-
-_DTYPE_BYTES: dict[str, int] = {
+# NCCL dtype strings (CamelCase) to bytes per element, used for collective
+# bandwidth calculations. NCCL uses a different dtype format from TypeMeta.
+_NCCL_DTYPE_BYTES: dict[str, int] = {
     "Float": 4,
     "Half": 2,
     "BFloat16": 2,
@@ -106,8 +96,7 @@ class ProfileData:
     """Parse Chrome Trace JSON and build lookup tables for kernel runtimes."""
 
     collectives: list[CollectiveRecord] = field(default_factory=list)
-    matmuls: list[MatmulRecord] = field(default_factory=list)
-    sdpa_records: list[SdpaRecord] = field(default_factory=list)
+    ops: list[OpRecord] = field(default_factory=list)
     pg_configs: dict[str, tuple[int, ...]] = field(default_factory=dict)
 
     # Lookup indices built after loading
@@ -123,10 +112,8 @@ class ProfileData:
     # Count of distinct PGs per mesh dimension (stride, group_size) — used for
     # ambiguity check (skip fallback if multiple PGs share the same mesh dim).
     _pg_count_by_mesh_dim: dict[tuple[int, int], int] = field(default_factory=dict)
-    _matmul_index: dict[tuple[tuple[int, ...], tuple[int, ...], str], float] = field(
-        default_factory=dict
-    )
-    _sdpa_index: dict[tuple[int, int, int, int, str, bool], float] = field(
+    # Generic op index: (op_name, input_shapes, dtype) -> avg_dur_us
+    _op_index: dict[tuple[str, tuple[tuple[int, ...], ...], str], float] = field(
         default_factory=dict
     )
     # Peak observed bandwidth per PG (GB/s), computed from largest messages
@@ -147,15 +134,14 @@ class ProfileData:
             data = json.load(f)
 
         self._parse_pg_configs(data)
-        self._parse_events(data.get("traceEvents", []))
-        del data  # free raw JSON — can be 100MB+ for large traces
+        self._parse_events(data)
         self._build_indices()
 
         log.info(
-            "PGE loaded: %d collectives, %d matmuls, %d sdpa records, %d PGs",
+            "PGE loaded: %d collectives, %d op records (%d distinct shapes), %d PGs",
             len(self.collectives),
-            len(self.matmuls),
-            len(self.sdpa_records),
+            len(self.ops),
+            len(self._op_index),
             len(self.pg_configs),
         )
 
@@ -175,20 +161,27 @@ class ProfileData:
                 if ranks:
                     self.pg_configs[pg_name] = tuple(sorted(ranks))
 
-    def _parse_events(self, events: list[dict[str, Any]]) -> None:
-        # Build External id -> CPU op mapping
-        cpu_ops: dict[int, dict[str, Any]] = {}
-        for ev in events:
-            cat = ev.get("cat", "")
-            if cat == "cpu_op":
-                eid = ev.get("args", {}).get("External id")
-                if eid is not None:
-                    cpu_ops[eid] = ev
+    def _parse_events(self, data: dict[str, Any]) -> None:
+        events = data.get("traceEvents", [])
+        # Reuse profile_analysis's External id -> CPU op mapping
+        try:
+            extern_mapping = _create_extern_mapping(data)
+        except Exception:
+            # _create_extern_mapping raises on malformed traces; build manually
+            extern_mapping = defaultdict(list)
+            for ev in events:
+                if (
+                    isinstance(ev, dict)
+                    and ev.get("cat") == "cpu_op"
+                    and "args" in ev
+                    and "External id" in ev["args"]
+                ):
+                    extern_mapping[ev["args"]["External id"]].append(ev)
 
         # Build External id -> list of GPU kernel durations
         gpu_kernels: dict[int, list[tuple[str, float]]] = defaultdict(list)
         for ev in events:
-            if ev.get("cat") != "kernel":
+            if not isinstance(ev, dict) or ev.get("cat") != "kernel":
                 continue
             args = ev.get("args", {})
             eid = args.get("External id")
@@ -200,7 +193,7 @@ class ProfileData:
         # Parse collectives from GPU kernel events directly
         # (NCCL kernels carry collective metadata in args)
         for ev in events:
-            if ev.get("cat") != "kernel":
+            if not isinstance(ev, dict) or ev.get("cat") != "kernel":
                 continue
             args = ev.get("args", {})
             coll_name = args.get("Collective name")
@@ -230,21 +223,18 @@ class ProfileData:
                 )
             )
 
-        # Parse matmuls and SDPA from CPU ops correlated to GPU kernels
-        for eid, cpu_ev in cpu_ops.items():
+        # Parse all CPU ops that have associated GPU kernels
+        for eid, cpu_evs in extern_mapping.items():
+            if not cpu_evs:
+                continue
+            cpu_ev = cpu_evs[0]
             name = cpu_ev.get("name", "")
             cpu_args = cpu_ev.get("args", {})
             kernels = gpu_kernels.get(eid, [])
             if not kernels:
                 continue
             total_dur = sum(dur for _, dur in kernels)
-
-            if name in ("aten::mm", "aten::bmm"):
-                self._parse_mm(cpu_args, total_dur)
-            elif name == "aten::addmm":
-                self._parse_addmm(cpu_args, total_dur)
-            elif "attention" in name.lower() or "sdpa" in name.lower():
-                self._parse_sdpa(name, cpu_args, total_dur)
+            self._parse_op(name, cpu_args, total_dur)
 
     def _parse_ranks(self, ranks_str: str, pg_name: str) -> tuple[int, ...]:
         """Parse rank list from profile string or fall back to pg_configs."""
@@ -259,52 +249,30 @@ class ProfileData:
             return self.pg_configs[pg_name]
         return ()
 
-    def _parse_mm(self, args: dict[str, Any], total_dur: float) -> None:
+    @staticmethod
+    def _to_nested_tuple(x: Any) -> tuple[Any, ...]:
+        """Recursively convert nested lists to tuples for hashability."""
+        if isinstance(x, (list, tuple)):
+            return tuple(ProfileData._to_nested_tuple(i) for i in x)
+        return x
+
+    def _parse_op(self, name: str, args: dict[str, Any], total_dur: float) -> None:
+        """Parse any CPU op into a generic OpRecord."""
         input_dims = args.get("Input Dims", [])
         input_types = args.get("Input type", [])
-        if len(input_dims) < 2:
+        if not input_dims:
             return
         dtype = input_types[0] if input_types else ""
-        shapes = (tuple(input_dims[0]), tuple(input_dims[1]))
-        self.matmuls.append(
-            MatmulRecord(input_shapes=shapes, dtype=dtype, duration_us=total_dur)
+        shapes = tuple(
+            self._to_nested_tuple(d) for d in input_dims if isinstance(d, (list, tuple))
         )
-
-    def _parse_addmm(self, args: dict[str, Any], total_dur: float) -> None:
-        # addmm(bias, mat1, mat2): Input Dims = [[M], [M, K], [K, N]]
-        input_dims = args.get("Input Dims", [])
-        input_types = args.get("Input type", [])
-        if len(input_dims) < 3:
+        if not shapes:
             return
-        dtype = (
-            input_types[1]
-            if len(input_types) > 1
-            else (input_types[0] if input_types else "")
-        )
-        shapes = (tuple(input_dims[1]), tuple(input_dims[2]))
-        self.matmuls.append(
-            MatmulRecord(input_shapes=shapes, dtype=dtype, duration_us=total_dur)
-        )
-
-    def _parse_sdpa(self, op_name: str, args: dict[str, Any], total_dur: float) -> None:
-        input_dims = args.get("Input Dims", [])
-        input_types = args.get("Input type", [])
-        if not input_dims or not input_dims[0]:
-            return
-        # Q tensor shape: [batch, num_heads, seq_len, head_dim]
-        q_shape = input_dims[0]
-        if len(q_shape) != 4:
-            return
-        dtype = input_types[0] if input_types else ""
-        is_backward = "backward" in op_name.lower()
-        self.sdpa_records.append(
-            SdpaRecord(
-                batch=q_shape[0],
-                num_heads=q_shape[1],
-                seq_len=q_shape[2],
-                head_dim=q_shape[3],
+        self.ops.append(
+            OpRecord(
+                op_name=name,
+                input_shapes=shapes,
                 dtype=dtype,
-                is_backward=is_backward,
                 duration_us=total_dur,
             )
         )
@@ -344,30 +312,14 @@ class ProfileData:
             k: len(pgs) for k, pgs in pg_sets_by_mesh_dim.items()
         }
 
-        # Matmul index: (shape_a, shape_b, dtype) -> avg_dur_us
-        mm_groups: dict[tuple[tuple[int, ...], tuple[int, ...], str], list[float]] = (
+        # Generic op index: (op_name, input_shapes, dtype) -> avg_dur_us
+        op_groups: dict[tuple[str, tuple[tuple[int, ...], ...], str], list[float]] = (
             defaultdict(list)
         )
-        for rec in self.matmuls:
-            key = (rec.input_shapes[0], rec.input_shapes[1], rec.dtype)
-            mm_groups[key].append(rec.duration_us)
-        self._matmul_index = {k: sum(v) / len(v) for k, v in mm_groups.items()}
-
-        # SDPA index: (batch, heads, seq_len, head_dim, dtype, is_bwd) -> avg_dur_us
-        sdpa_groups: dict[tuple[int, int, int, int, str, bool], list[float]] = (
-            defaultdict(list)
-        )
-        for rec in self.sdpa_records:
-            key = (
-                rec.batch,
-                rec.num_heads,
-                rec.seq_len,
-                rec.head_dim,
-                rec.dtype,
-                rec.is_backward,
-            )
-            sdpa_groups[key].append(rec.duration_us)
-        self._sdpa_index = {k: sum(v) / len(v) for k, v in sdpa_groups.items()}
+        for rec in self.ops:
+            key = (rec.op_name, rec.input_shapes, rec.dtype)
+            op_groups[key].append(rec.duration_us)
+        self._op_index = {k: sum(v) / len(v) for k, v in op_groups.items()}
 
         # Per-PG peak bandwidth: compute bytes/us for each collective observation,
         # then take the max from the top-N largest messages per PG (where bandwidth
@@ -417,19 +369,18 @@ class ProfileData:
         return list(self._collective_index.keys())
 
     @property
-    def matmul_count(self) -> int:
-        """Number of distinct matmul shapes in the index."""
-        return len(self._matmul_index)
+    def op_count(self) -> int:
+        """Number of distinct op shapes in the index."""
+        return len(self._op_index)
 
-    @property
-    def sdpa_count(self) -> int:
-        """Number of distinct SDPA shapes in the index."""
-        return len(self._sdpa_index)
+    def get_op_names(self) -> list[str]:
+        """Return distinct op names in the op index."""
+        return list(OrderedSet(name for name, _, _ in self._op_index.keys()))
 
     @staticmethod
     def _dtype_elem_bytes(dtype: str) -> int:
-        """Return bytes per element for a profile dtype string."""
-        return _DTYPE_BYTES.get(dtype, 2)  # default bf16
+        """Return bytes per element for NCCL dtype string."""
+        return _NCCL_DTYPE_BYTES.get(dtype, 2)  # default bf16
 
     @staticmethod
     def _normalize_collective_name(name: str) -> str:
@@ -571,96 +522,38 @@ class ProfileData:
 
         return None
 
-    def lookup_mm(
+    def lookup_op(
         self,
-        input_shapes: tuple[tuple[int, ...], tuple[int, ...]],
+        op_name: str,
+        input_shapes: tuple[tuple[int, ...], ...],
         dtype: str,
     ) -> float | None:
-        """Look up matmul duration in ms.
-
-        Tries exact shape match first, then interpolates by FLOP ratio from
-        the nearest matmul with the same dtype.
-        """
-        key = (input_shapes[0], input_shapes[1], dtype)
-        dur_us = self._matmul_index.get(key)
+        """Look up op duration in ms by exact shape match. Returns None on miss."""
+        key = (op_name, input_shapes, dtype)
+        dur_us = self._op_index.get(key)
         if dur_us is not None:
             return dur_us / 1e3  # us -> ms
-        # Interpolate: scale by FLOP ratio from nearest same-dtype matmul
-        target_flops = self._mm_flops(input_shapes[0], input_shapes[1])
-        if target_flops <= 0:
-            return None
-        best_ratio = float("inf")
-        best_dur: float | None = None
-        for (sa, sb, dt), d in self._matmul_index.items():
-            if dt != dtype:
-                continue
-            ref_flops = self._mm_flops(sa, sb)
-            if ref_flops <= 0:
-                continue
-            ratio = max(target_flops / ref_flops, ref_flops / target_flops)
-            if ratio < best_ratio:
-                best_ratio = ratio
-                best_dur = d * (target_flops / ref_flops)
-        if best_dur is not None:
-            return best_dur / 1e3
-        return None
-
-    @staticmethod
-    def _mm_flops(a: tuple[int, ...], b: tuple[int, ...]) -> int:
-        """Compute FLOPs for matmul. Handles 2D (mm/addmm) and 3D (bmm).
-
-        A=[M,K] @ B=[K,N] → 2*M*N*K
-        A=[B,M,K] @ B=[B,K,N] → 2*B*M*N*K
-        """
-        if len(a) < 2 or len(b) < 2:
-            return 0
-        flops = 2 * a[-2] * b[-1] * a[-1]
-        # Batch dimension for bmm
-        if len(a) >= 3:
-            flops *= a[-3]
-        return flops
-
-    def lookup_sdpa(
-        self,
-        batch: int,
-        num_heads: int,
-        seq_len: int,
-        head_dim: int,
-        dtype: str,
-        is_backward: bool,
-    ) -> float | None:
-        """Look up SDPA duration in ms.
-
-        Tries exact shape match first, then interpolates by FLOP ratio from
-        the nearest SDPA with the same dtype and direction (fwd/bwd).
-        """
-        key = (batch, num_heads, seq_len, head_dim, dtype, is_backward)
-        dur_us = self._sdpa_index.get(key)
-        if dur_us is not None:
-            return dur_us / 1e3  # us -> ms
-        # Interpolate: SDPA FLOPs ~ batch * heads * seq_len^2 * head_dim
-        target_flops = batch * num_heads * seq_len * seq_len * head_dim
-        if target_flops <= 0:
-            return None
-        best_ratio = float("inf")
-        best_dur: float | None = None
-        for (b2, h2, s2, d2, dt2, bwd2), dur in self._sdpa_index.items():
-            if dt2 != dtype or bwd2 != is_backward:
-                continue
-            ref_flops = b2 * h2 * s2 * s2 * d2
-            if ref_flops <= 0:
-                continue
-            ratio = max(target_flops / ref_flops, ref_flops / target_flops)
-            if ratio < best_ratio:
-                best_ratio = ratio
-                best_dur = dur * (target_flops / ref_flops)
-        if best_dur is not None:
-            return best_dur / 1e3
         return None
 
 
-# Mapping from torch dtype to profile dtype strings
-_DTYPE_TO_PROFILE_STR: dict[torch.dtype, str] = {
+# Mapping from torch.dtype to C++ caffe2::TypeMeta::name() string, as emitted
+# by the Kineto profiler in the "Input type" field of Chrome Trace JSON events.
+# Related: profile_analysis._dtype_map provides the inverse for a subset of types.
+_DTYPE_TO_TYPEMETA_STR: dict[torch.dtype, str] = {
+    torch.float32: "float",
+    torch.float16: "c10::Half",
+    torch.bfloat16: "c10::BFloat16",
+    torch.float64: "double",
+    torch.int32: "int",
+    torch.int64: "long int",
+    torch.int8: "signed char",
+    torch.uint8: "unsigned char",
+    torch.bool: "bool",
+}
+
+# Mapping from torch.dtype to the NCCL dtype string used in collective kernel
+# events (e.g. "Float", "BFloat16"). Different from TypeMeta names above.
+_DTYPE_TO_NCCL_STR: dict[torch.dtype, str] = {
     torch.float32: "Float",
     torch.float16: "Half",
     torch.bfloat16: "BFloat16",
@@ -671,134 +564,77 @@ _DTYPE_TO_PROFILE_STR: dict[torch.dtype, str] = {
     torch.uint8: "Byte",
 }
 
-# Also map C10 type strings to normalized form
-_C10_DTYPE_TO_PROFILE_STR: dict[str, str] = {
-    "c10::Float": "Float",
-    "c10::Half": "Half",
-    "c10::BFloat16": "BFloat16",
-    "c10::Double": "Double",
-    "c10::Int": "Int",
-    "c10::Long": "Long",
-    "c10::Char": "Char",
-    "c10::Byte": "Byte",
-}
-
 
 def _dtype_to_profile_str(dtype: torch.dtype) -> str:
-    return _DTYPE_TO_PROFILE_STR.get(dtype, str(dtype))
+    """Convert torch.dtype to NCCL dtype string (for collective matching)."""
+    return _DTYPE_TO_NCCL_STR.get(dtype, str(dtype))
 
 
-def _normalize_profile_dtype(dtype_str: str) -> str:
-    """Normalize profile dtype string (may be 'c10::BFloat16' or 'BFloat16')."""
-    return _C10_DTYPE_TO_PROFILE_STR.get(dtype_str, dtype_str)
+def _dtype_to_typemeta_str(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to TypeMeta name string (for op matching)."""
+    return _DTYPE_TO_TYPEMETA_STR.get(dtype, str(dtype))
 
 
 def _get_node_dtype_str(node: fx.Node) -> str:
-    """Extract dtype string from FX node metadata."""
+    """Extract dtype as TypeMeta name string from FX node metadata (for op matching)."""
     val = node.meta.get("val")
     if isinstance(val, torch.Tensor):
-        return _dtype_to_profile_str(val.dtype)
+        return _dtype_to_typemeta_str(val.dtype)
     if isinstance(val, (list, tuple)) and val:
         first = val[0]
         if isinstance(first, torch.Tensor):
-            return _dtype_to_profile_str(first.dtype)
+            return _dtype_to_typemeta_str(first.dtype)
     return ""
 
 
-def _is_mm_node(node: fx.Node) -> bool:
-    """Check if node is a matrix multiplication (mm, bmm, or addmm)."""
-    return node.target in (
-        torch.ops.aten.mm.default,
-        torch.ops.aten.mm.out,
-        torch.ops.aten.bmm.default,
-        torch.ops.aten.bmm.out,
-        torch.ops.aten.addmm.default,
-        torch.ops.aten.addmm.out,
-    )
+def _fx_target_to_profile_name(node: fx.Node) -> str | None:
+    """Convert FX node target to the profile op name format.
 
-
-def _is_sdpa_node(node: fx.Node) -> bool:
-    """Check if node is a scaled dot-product attention op."""
+    FX: torch.ops.aten.mm.default → "aten::mm"
+    FX: torch.ops.deepep.dispatch.default → "deepep::dispatch"
+    """
     target = node.target
-    if not hasattr(target, "__name__"):
-        return False
-    name = target.__name__
-    return any(
-        kw in name.lower()
-        for kw in ("scaled_dot_product", "cudnn_attention", "flash_attention", "sdpa")
-    )
+    if isinstance(target, torch._ops.OpOverload):
+        # e.g. "aten::mm" from torch.ops.aten.mm.default
+        ns = target.namespace
+        op_name = target._schema.name.split("::")[-1]
+        return f"{ns}::{op_name}"
+    if hasattr(target, "__name__"):
+        name = target.__name__
+        # Higher-order ops or other callables — use the name directly
+        if "::" in name:
+            return name
+        return name
+    return None
 
 
-def _is_sdpa_backward(node: fx.Node) -> bool:
-    """Check if SDPA node is a backward op."""
-    target = node.target
-    name = target.__name__ if hasattr(target, "__name__") else str(target)
-    return "backward" in name.lower()
-
-
-def _get_mm_shapes(
+def _get_node_input_shapes(
     node: fx.Node,
-) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
-    """Extract (A_shape, B_shape) from mm/bmm/addmm node metadata."""
-    # addmm: args = (bias, mat1, mat2); mm/bmm: args = (mat1, mat2)
-    is_addmm = node.target in (
-        torch.ops.aten.addmm.default,
-        torch.ops.aten.addmm.out,
-    )
-    if is_addmm:
-        if len(node.args) < 3:
-            return None
-        a_node, b_node = node.args[1], node.args[2]
-    else:
-        if len(node.args) < 2:
-            return None
-        a_node, b_node = node.args[0], node.args[1]
-    if not isinstance(a_node, fx.Node) or not isinstance(b_node, fx.Node):
-        return None
-    a_val = a_node.meta.get("val")
-    b_val = b_node.meta.get("val")
-    if not isinstance(a_val, torch.Tensor) or not isinstance(b_val, torch.Tensor):
-        return None
+) -> tuple[tuple[int, ...], ...] | None:
+    """Extract input shapes from FX node args, matching profile's Input Dims format."""
+    from torch._inductor.fx_passes.node_runtime_estimation import get_hint
 
-    def _resolve_shape(t: torch.Tensor) -> tuple[int, ...] | None:
-        from torch._inductor.fx_passes.node_runtime_estimation import get_hint
-
-        shape = [get_hint(s) for s in t.shape]
-        if any(s is None for s in shape):
-            log.debug("PGE: unresolved symbolic dims in shape %s", t.shape)
-            return None
-        return tuple(shape)  # type: ignore[arg-type]
-
-    a_shape = _resolve_shape(a_val)
-    b_shape = _resolve_shape(b_val)
-    if a_shape is None or b_shape is None:
+    shapes: list[tuple[int, ...]] = []
+    for arg in node.args:
+        if not isinstance(arg, fx.Node):
+            continue
+        val = arg.meta.get("val")
+        if isinstance(val, torch.Tensor):
+            resolved = []
+            for s in val.shape:
+                h = get_hint(s)
+                if h is None:
+                    log.debug(
+                        "PGE: unresolved symbolic dim in %s shape %s",
+                        node.name,
+                        val.shape,
+                    )
+                    return None
+                resolved.append(h)
+            shapes.append(tuple(resolved))
+    if not shapes:
         return None
-    return (a_shape, b_shape)
-
-
-def _get_sdpa_key(
-    node: fx.Node,
-) -> tuple[int, int, int, int, str, bool] | None:
-    """Extract (batch, heads, seq_len, head_dim, dtype, is_bwd) from SDPA node."""
-    # Q is first input
-    if not node.args:
-        return None
-    q_node = node.args[0]
-    if not isinstance(q_node, fx.Node):
-        return None
-    q_val = q_node.meta.get("val")
-    if not isinstance(q_val, torch.Tensor):
-        return None
-    shape = q_val.shape
-    if len(shape) != 4:
-        return None
-    try:
-        batch, heads, seq_len, head_dim = (int(s) for s in shape)
-    except (TypeError, ValueError):
-        return None
-    dtype = _dtype_to_profile_str(q_val.dtype)
-    is_bwd = _is_sdpa_backward(node)
-    return (batch, heads, seq_len, head_dim, dtype, is_bwd)
+    return tuple(shapes)
 
 
 def _is_collective_node(node: fx.Node) -> bool:
@@ -875,62 +711,15 @@ def _get_collective_info(
     return (collective_name, pg_ranks, nelems, dtype)
 
 
-def _normalize_profile_indices(profile: ProfileData) -> None:
-    """Normalize dtype strings in profile indices to match profile format."""
-    # Rebuild collective indices with normalized dtypes
-    new_coll: dict[tuple[str, tuple[int, ...], str], list[tuple[int, float]]] = {}
-    for (coll_name, pg_ranks, dtype), entries in profile._collective_index.items():
-        norm_dtype = _normalize_profile_dtype(dtype)
-        key = (coll_name, pg_ranks, norm_dtype)
-        if key in new_coll:
-            new_coll[key].extend(entries)
-        else:
-            new_coll[key] = list(entries)
-    profile._collective_index = {
-        k: sorted(v, key=lambda x: x[0]) for k, v in new_coll.items()
-    }
-
-    new_coll_by_mesh_dim: dict[tuple[str, int, int, str], list[tuple[int, float]]] = {}
-    for (
-        coll_name,
-        stride,
-        gs,
-        dtype,
-    ), entries in profile._collective_index_by_mesh_dim.items():
-        norm_dtype = _normalize_profile_dtype(dtype)
-        key = (coll_name, stride, gs, norm_dtype)
-        if key in new_coll_by_mesh_dim:
-            new_coll_by_mesh_dim[key].extend(entries)
-        else:
-            new_coll_by_mesh_dim[key] = list(entries)
-    profile._collective_index_by_mesh_dim = {
-        k: sorted(v, key=lambda x: x[0]) for k, v in new_coll_by_mesh_dim.items()
-    }
-
-    # Rebuild matmul index with normalized dtypes (average on collision)
-    mm_groups: dict[tuple[tuple[int, ...], tuple[int, ...], str], list[float]] = (
-        defaultdict(list)
-    )
-    for (sa, sb, dtype), dur in profile._matmul_index.items():
-        norm_dtype = _normalize_profile_dtype(dtype)
-        mm_groups[(sa, sb, norm_dtype)].append(dur)
-    profile._matmul_index = {k: sum(v) / len(v) for k, v in mm_groups.items()}
-
-    # Rebuild sdpa index with normalized dtypes (average on collision)
-    sdpa_groups: dict[tuple[int, int, int, int, str, bool], list[float]] = defaultdict(
-        list
-    )
-    for (b, h, s, d, dtype, bwd), dur in profile._sdpa_index.items():
-        norm_dtype = _normalize_profile_dtype(dtype)
-        sdpa_groups[(b, h, s, d, norm_dtype, bwd)].append(dur)
-    profile._sdpa_index = {k: sum(v) / len(v) for k, v in sdpa_groups.items()}
-
-
 class ProfileGuidedEstimator:
     """Profile-guided runtime estimator for FX nodes.
 
     Implements the ``custom_runtime_estimation`` interface:
     ``(fx.Node, int | None) -> float | None`` (returns ms or None for fallback).
+
+    Handles collectives via interpolation (latency + bandwidth model) and all
+    other ops (matmul, SDPA, custom ops, etc.) via exact shape match from the
+    profile trace.
     """
 
     profile: ProfileData
@@ -942,19 +731,11 @@ class ProfileGuidedEstimator:
         self.estimation_log: list[dict[str, Any]] = []
         self.miss_log: list[dict[str, Any]] = []
         self.profile.load(trace_path)
-        _normalize_profile_indices(self.profile)
 
     def __call__(self, node: fx.Node, override_size: int | None = None) -> float | None:
-        # Collectives
         if _is_collective_node(node):
             return self._estimate_collective(node, override_size)
-        # Matmul
-        if _is_mm_node(node):
-            return self._estimate_mm(node)
-        # SDPA
-        if _is_sdpa_node(node):
-            return self._estimate_sdpa(node)
-        return None
+        return self._estimate_op(node)
 
     def _estimate_collective(
         self, node: fx.Node, override_size: int | None
@@ -979,8 +760,6 @@ class ProfileGuidedEstimator:
                 if elem_size > 0:
                     nelems = override_size // elem_size
             else:
-                # Can't convert override_size (bytes) to nelems without dtype info;
-                # fall through using original nelems from _get_collective_info.
                 log.debug(
                     "PGE: override_size=%d but val is not a tensor for %s",
                     override_size,
@@ -1016,25 +795,22 @@ class ProfileGuidedEstimator:
         )
         return None
 
-    def _estimate_mm(self, node: fx.Node) -> float | None:
-        shapes = _get_mm_shapes(node)
-        if shapes is None:
-            self.miss_log.append(
-                {
-                    "node": node.name,
-                    "target": str(node.target),
-                    "reason": "get_mm_shapes returned None",
-                }
-            )
+    def _estimate_op(self, node: fx.Node) -> float | None:
+        """Estimate any non-collective op via exact shape match in profile."""
+        profile_name = _fx_target_to_profile_name(node)
+        if profile_name is None:
+            return None
+        input_shapes = _get_node_input_shapes(node)
+        if input_shapes is None:
             return None
         dtype = _get_node_dtype_str(node)
-        est = self.profile.lookup_mm(shapes, dtype)
+        est = self.profile.lookup_op(profile_name, input_shapes, dtype)
         if est is not None:
             self.estimation_log.append(
                 {
                     "node": node.name,
-                    "op": "mm",
-                    "shapes": [list(s) for s in shapes],
+                    "op": profile_name,
+                    "shapes": [list(s) for s in input_shapes],
                     "dtype": dtype,
                     "pge_ms": est,
                     "source": "profile",
@@ -1044,49 +820,25 @@ class ProfileGuidedEstimator:
             self.miss_log.append(
                 {
                     "node": node.name,
-                    "op": "mm",
-                    "shapes": [list(s) for s in shapes],
+                    "op": profile_name,
+                    "shapes": [list(s) for s in input_shapes],
                     "dtype": dtype,
                     "reason": "no match in profile",
                 }
             )
         return est
 
-    def _estimate_sdpa(self, node: fx.Node) -> float | None:
-        sdpa_key = _get_sdpa_key(node)
-        if sdpa_key is None:
-            self.miss_log.append(
-                {
-                    "node": node.name,
-                    "target": str(node.target),
-                    "reason": "get_sdpa_key returned None",
-                }
-            )
-            return None
-        batch, heads, seq_len, head_dim, dtype, is_bwd = sdpa_key
-        est = self.profile.lookup_sdpa(batch, heads, seq_len, head_dim, dtype, is_bwd)
-        if est is not None:
-            self.estimation_log.append(
-                {
-                    "node": node.name,
-                    "op": "sdpa_bwd" if is_bwd else "sdpa_fwd",
-                    "shape": [batch, heads, seq_len, head_dim],
-                    "dtype": dtype,
-                    "pge_ms": est,
-                    "source": "profile",
-                }
-            )
-        else:
-            self.miss_log.append(
-                {
-                    "node": node.name,
-                    "op": "sdpa",
-                    "shape": [batch, heads, seq_len, head_dim],
-                    "dtype": dtype,
-                    "reason": "no match in profile",
-                }
-            )
-        return est
+    def log_diagnostics(
+        self,
+        gm: fx.GraphModule,
+    ) -> None:
+        """Log PGE vs analytical comparison to trace_structured for tlparse."""
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _collect_analytical_estimates,
+        )
+
+        analytical = _collect_analytical_estimates(gm, self)
+        log_pge_estimations(self, analytical)
 
 
 def log_pge_estimations(
