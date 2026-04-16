@@ -5,8 +5,8 @@ on:
     types: [opened, synchronize]
   workflow_dispatch:
     inputs:
-      pr_number:
-        description: "PR number to request reviewers for"
+      pr_url:
+        description: "PR link (e.g. https://github.com/pytorch/pytorch/pull/12345)"
         type: string
         required: true
 
@@ -30,7 +30,18 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const prNumber = ${{ inputs.pr_number || 0 }} || context.payload.pull_request.number;
+            let prNumber;
+            const prUrl = '${{ inputs.pr_url }}';
+            if (prUrl) {
+              const match = prUrl.match(/\/pull\/(\d+)/);
+              if (!match) {
+                core.setFailed(`Invalid PR link: ${prUrl}. Expected format: https://github.com/pytorch/pytorch/pull/12345`);
+                return;
+              }
+              prNumber = parseInt(match[1]);
+            } else {
+              prNumber = context.payload.pull_request.number;
+            }
             const {data: pr} = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
