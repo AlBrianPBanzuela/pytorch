@@ -19,6 +19,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
+    FunctionalTensorMode,
 )
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
@@ -319,10 +320,24 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
         fake_mode = fake_mode_det
         tracing_mode = "real"
 
+    # Check if FunctionalTensorMode is already active to avoid double-functionalization.
+    # Note: This checks for any active FunctionalTensorMode at the current dispatch level.
+    # For complex nested mode scenarios, additional mode tracking may be needed in the future.
+    functional_mode_active = (
+        torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+        is not None
+    )
+
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
-    with fake_mode, disable_proxy_modes_tracing():
+    # We enable FunctionalTensorMode during tracing to safely handle any FunctionalTensors
+    # that may be present in the GraphModule (e.g., tensor constants in cond branches).
+    functional_mode: AbstractContextManager = (
+        nullcontext() if functional_mode_active else FunctionalTensorMode()
+    )
+
+    with fake_mode, disable_proxy_modes_tracing(), functional_mode:
         gm = make_fx(
             fn,
             tracing_mode=tracing_mode,
