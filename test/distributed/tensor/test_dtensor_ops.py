@@ -413,7 +413,6 @@ dtensor_fails_no_strategy = {
     xfail("log_normal"),
     xfail("logspace", "tensor_overload"),
     xfail("masked_scatter"),
-    xfail("multinomial"),
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
     xfail("nn.functional.group_norm"),
