@@ -460,6 +460,8 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         # disable 1x1 and odd-channels conv specializations for now
         if "Default" not in op.conv_forward_specialization:
             return None
+        if self.is_blocked_by_tf32_setting(op):
+            return None
         return op
 
     def gen_ops(self):

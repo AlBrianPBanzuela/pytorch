@@ -27,6 +27,20 @@ class CKTemplate(ROCmTemplate):
         torch.float8_e5m2: "BF8",  # gfx95
     }
 
+    @staticmethod
+    def is_blocked_by_tf32_setting(op) -> bool:
+        """True if op internally computes in TF32 but the user has disabled TF32.
+
+        CK exposes this via {a,b}_compute_dtype on op (None == strict compute
+        matching the element type). Some F32 instances ship with `TF32` here.
+        """
+        if torch.backends.cuda.matmul.allow_tf32:
+            return False
+        return (
+            getattr(op, "a_compute_dtype", None) == "TF32"
+            or getattr(op, "b_compute_dtype", None) == "TF32"
+        )
+
     def header(self) -> IndentedBuffer:
         res = super().header()
         res.splice(
