@@ -1,7 +1,7 @@
 import warnings
 
 import torch
-from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
@@ -22,15 +22,15 @@ def get_untyped_storages(t: torch.Tensor) -> set[torch.UntypedStorage]:
         if is_traceable_wrapper_subclass(obj):
             attrs, _ = obj.__tensor_flatten__()
             for attr in attrs:
-                inner = getattr(obj, attr)
-                if isinstance(inner, torch.Tensor):
-                    unflattened_tensors.append(inner)
-                elif is_opaque_value(inner):
-                    pass
-                else:
-                    raise AssertionError(
-                        f"expected Tensor or opaque, got {type(inner)}"
-                    )
+                match getattr(obj, attr):
+                    case torch.Tensor() as v:
+                        unflattened_tensors.append(v)
+                    case OpaqueBase():
+                        pass
+                    case unexpected:
+                        raise AssertionError(
+                            f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        )
         else:
             if not hasattr(obj, "untyped_storage"):
                 warnings.warn(

@@ -40,6 +40,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
+from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -2462,7 +2463,10 @@ class _AutogradSavedState:
         opaque_object_outs = fw_outs[
             self.metadata.opaque_objects_saved_for_backwards_slice
         ]
-        if not all(is_opaque_type(type(obj)) for obj in opaque_object_outs):
+        if not all(
+            is_opaque_type(type(obj)) or isinstance(obj, OpaqueBase)
+            for obj in opaque_object_outs
+        ):
             raise AssertionError(
                 "expected all opaque_object_outs to be opaque types, "
                 f"got types: {[type(obj) for obj in opaque_object_outs]}"

@@ -35,6 +35,7 @@ from torch._guards import CompileContext, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._logging import getArtifactLogger, trace_structured
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
@@ -1840,9 +1841,7 @@ def _categorize_saved_tensors_for_backward(
                 }
                 if dynamic_dims:
                     fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
-            elif isinstance(node.meta["val"], FakeScriptObject) or is_opaque_value(
-                node.meta["val"]
-            ):
+            elif isinstance(node.meta["val"], (FakeScriptObject, OpaqueBase)):
                 num_opaque_objects_saved_for_bw += 1
 
     fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw

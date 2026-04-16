@@ -85,6 +85,7 @@ from torch._inductor.cudagraph_utils import (
     WrappedFunction,
 )
 from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -1749,9 +1750,7 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.Generator)) or is_opaque_value(
-                        inp
-                    )
+                    assert isinstance(inp, (int, torch.Generator, OpaqueBase))
 
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:

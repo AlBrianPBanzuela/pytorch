@@ -567,17 +567,17 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         Get stable hash for a tensor or opaque object, dispatching to custom or default implementation.
         """
-        from torch._library.opaque_object import is_opaque_value
+        from torch._opaque_base import OpaqueBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         if hasattr(obj, "_stable_hash_for_caching"):
             return obj._stable_hash_for_caching()
         elif isinstance(obj, torch.Tensor) and is_traceable_wrapper_subclass(obj):
             return self._default_stable_hash_for_caching(obj)
-        elif is_opaque_value(obj):
+        elif isinstance(obj, OpaqueBase):
             # Opaque objects are runtime pass-throughs; only the type matters
             # for cache key purposes, not the instance identity or value.
-            type_name = type(obj).__qualname__  # pyrefly: ignore[missing-attribute]
+            type_name = type(obj).__qualname__
             return hashlib.blake2b(type_name.encode(), digest_size=16).hexdigest()
         elif isinstance(obj, torch.Tensor):
             metadata = extract_tensor_metadata_for_cache_key(obj)
@@ -589,7 +589,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         Default stable hash implementation for traceable wrapper subclasses.
         """
-        from torch._library.opaque_object import is_opaque_value
+        from torch._opaque_base import OpaqueBase
 
         inner_tensor_names, subclass_metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
 
@@ -599,11 +599,11 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             inner = getattr(tensor, name)
             inner_hashes[name] = self._get_stable_hash(inner)
 
-        # Stabilize metadata: replace opaque instances with their type name
+        # Stabilize metadata: replace OpaqueBase instances with their type name
         # since their repr includes memory addresses
         def _stabilize(obj: Any) -> Any:
-            if is_opaque_value(obj):
-                return type(obj).__qualname__  # pyrefly: ignore[missing-attribute]
+            if isinstance(obj, OpaqueBase):
+                return type(obj).__qualname__
             if isinstance(obj, tuple):
                 return tuple(_stabilize(x) for x in obj)
             if isinstance(obj, list):

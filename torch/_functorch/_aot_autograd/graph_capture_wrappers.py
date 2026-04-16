@@ -24,7 +24,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
@@ -673,13 +673,15 @@ def sc_visit(
             return
 
         for a in e.__tensor_flatten__()[0]:
-            inner = getattr(e, a)
-            if isinstance(inner, torch.Tensor):
-                visit(inner)
-            elif is_opaque_value(inner):
-                pass
-            else:
-                raise AssertionError(f"expected Tensor or opaque, got {type(inner)}")
+            match getattr(e, a):
+                case torch.Tensor() as inner:
+                    visit(inner)
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
 
     visit(t)
     return accum

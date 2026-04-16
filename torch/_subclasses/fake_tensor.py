@@ -24,8 +24,8 @@ from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
-from torch._library.opaque_object import is_opaque_value
 from torch._logging import dtrace_structured
+from torch._opaque_base import OpaqueBase
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -57,7 +57,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
-    from torch._opaque_base import OpaqueBase
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -208,17 +207,19 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
         attrs, _ = type(x).__tensor_flatten__(x)
         got_fake: bool | None = None
         for attr in attrs:
-            inner = getattr(x, attr)
-            if isinstance(inner, Tensor):
-                fake = is_fake(inner)
-                if got_fake is None:
-                    got_fake = fake
-                elif got_fake != fake:
-                    raise AssertionError("got mixed fake and real tensors!")
-            elif is_opaque_value(inner):
-                pass
-            else:
-                raise AssertionError(f"expected Tensor or opaque, got {type(inner)}")
+            match getattr(x, attr):
+                case Tensor() as v:
+                    fake = is_fake(v)
+                    if got_fake is None:
+                        got_fake = fake
+                    elif got_fake != fake:
+                        raise AssertionError("got mixed fake and real tensors!")
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
         return got_fake or False
     elif isinstance(x, FunctionalTensor):
         return is_fake(x.elem)
@@ -241,17 +242,19 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
         inner_tensor_names, _ = t.__tensor_flatten__()
         mode: FakeTensorMode | None = None
         for t_name in inner_tensor_names:
-            inner = getattr(t, t_name)
-            if isinstance(inner, Tensor):
-                m = maybe_get_fake_mode(inner)
-                if mode is None:
-                    mode = m
-                elif mode is not m:
-                    raise AssertionError("All fake tensor modes must be the same")
-            elif is_opaque_value(inner):
-                pass
-            else:
-                raise AssertionError(f"expected Tensor or opaque, got {type(inner)}")
+            match getattr(t, t_name):
+                case Tensor() as v:
+                    m = maybe_get_fake_mode(v)
+                    if mode is None:
+                        mode = m
+                    elif mode is not m:
+                        raise AssertionError("All fake tensor modes must be the same")
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
         return mode
     elif isinstance(t, FunctionalTensor):
         return maybe_get_fake_mode(t.elem)

@@ -12,7 +12,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
-from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
@@ -1129,15 +1129,15 @@ def _sync_module_params_and_buffers(
                 # in both model's buffers and params
                 attrs, _ = detached_buffer.__tensor_flatten__()  # type: ignore[attr-defined]
                 for attr in attrs:
-                    inner = getattr(detached_buffer, attr)
-                    if isinstance(inner, torch.Tensor):
-                        module_states.append(inner)
-                    elif is_opaque_value(inner):
-                        pass
-                    else:
-                        raise AssertionError(
-                            f"expected Tensor or opaque, got {type(inner)}"
-                        )
+                    match getattr(detached_buffer, attr):
+                        case torch.Tensor() as v:
+                            module_states.append(v)
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
             else:
                 module_states.append(detached_buffer)
 
@@ -1146,15 +1146,15 @@ def _sync_module_params_and_buffers(
         if is_traceable_wrapper_subclass(detached_param):
             attrs, _ = detached_param.__tensor_flatten__()  # type: ignore[attr-defined]
             for attr in attrs:
-                inner = getattr(detached_param, attr)
-                if isinstance(inner, torch.Tensor):
-                    module_states.append(inner)
-                elif is_opaque_value(inner):
-                    pass
-                else:
-                    raise AssertionError(
-                        f"expected Tensor or opaque, got {type(inner)}"
-                    )
+                match getattr(detached_param, attr):
+                    case torch.Tensor() as v:
+                        module_states.append(v)
+                    case OpaqueBase():
+                        pass
+                    case unexpected:
+                        raise AssertionError(
+                            f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        )
         else:
             module_states.append(detached_param)
 

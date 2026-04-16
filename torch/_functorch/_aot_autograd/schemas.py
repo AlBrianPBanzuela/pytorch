@@ -15,7 +15,6 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._library.opaque_object import is_opaque_value
 from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
@@ -315,8 +314,8 @@ class SubclassCreationMeta:
         for attr, creation_meta in self.attrs.items():
             if isinstance(creation_meta, OpaqueMeta):
                 opaque = all_args[curr_start_idx]
-                if not is_opaque_value(opaque):
-                    raise AssertionError(f"opaque value expected, got {type(opaque)}")
+                if not isinstance(opaque, OpaqueBase):
+                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
                 inner_tensors[attr] = opaque
                 curr_start_idx += 1
                 continue

@@ -61,6 +61,7 @@ from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+from torch._opaque_base import OpaqueBase
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -6048,23 +6049,23 @@ class ShapeEnv:
                 ]
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
-                    inner_val = getattr(t, attr)
-                    if isinstance(inner_val, torch.Tensor):
-                        inner_context = context.inner_contexts[attr]
-                        sources_tensors_constraints.append(
-                            (
-                                AttrSource(source, attr),
-                                inner_val,
-                                inner_context.constraint_sizes,  # type: ignore[attr-defined]
-                                inner_context.constraint_strides,  # type: ignore[attr-defined]
+                    match getattr(t, attr):
+                        case torch.Tensor() as inner_t:
+                            inner_context = context.inner_contexts[attr]
+                            sources_tensors_constraints.append(
+                                (
+                                    AttrSource(source, attr),
+                                    inner_t,
+                                    inner_context.constraint_sizes,  # type: ignore[attr-defined]
+                                    inner_context.constraint_strides,  # type: ignore[attr-defined]
+                                )
                             )
-                        )
-                    elif is_opaque_value(inner_val):
-                        pass
-                    else:
-                        raise AssertionError(
-                            f"expected Tensor or opaque, got {type(inner_val)}"
-                        )
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
             else:
                 sources_tensors_constraints = [
                     (source, t, context.constraint_sizes, context.constraint_strides)  # type: ignore[attr-defined]

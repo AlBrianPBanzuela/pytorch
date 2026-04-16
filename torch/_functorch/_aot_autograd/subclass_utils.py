@@ -13,11 +13,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
-from torch._library.opaque_object import (
-    is_opaque_reference_type,
-    is_opaque_type,
-    is_opaque_value,
-)
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.types import IntLikeType
@@ -95,15 +91,15 @@ def get_subclass_typing_container(
         tracker[type(tensor_subclass)].append(tensor_subclass)
         inner_keys, _ = tensor_subclass.__tensor_flatten__()
         for key in inner_keys:
-            inner_value = getattr(tensor_subclass, key)
-            if isinstance(inner_value, torch.Tensor):
-                _get_types_for_subclass(inner_value)
-            elif is_opaque_value(inner_value):
-                pass
-            else:
-                raise AssertionError(
-                    f"expected Tensor or opaque, got {type(inner_value)}"
-                )
+            match getattr(tensor_subclass, key):
+                case torch.Tensor() as inner_value:
+                    _get_types_for_subclass(inner_value)
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
 
     tracker: dict[Any, list[Any]] = collections.defaultdict(list)
     _get_types_for_subclass(tensor_subclass)
@@ -132,29 +128,32 @@ def create_subclass_metadata(
 
     for key in inner_keys:
         inner_value = getattr(a, key)
-        if is_opaque_value(inner_value):
-            # During tracing, opaques are wrapped in FakeScriptObject;
-            # unwrap to check the real type.
-            real_type = type(maybe_unwrap_fake_script_object(inner_value))
-            if not is_opaque_reference_type(real_type):
-                raise RuntimeError(
-                    f"{real_type.__name__!r} found in tensor attrs of "
-                    f"{type(a).__name__}.__tensor_flatten__(). "
-                    "Only tensors and reference-type opaques are allowed "
-                    "in tensor attrs."
+        match inner_value:
+            case OpaqueBase():
+                # During tracing, opaques are wrapped in FakeScriptObject;
+                # unwrap to check the real type.
+                real_type = type(maybe_unwrap_fake_script_object(inner_value))
+                if not is_opaque_reference_type(real_type):
+                    raise RuntimeError(
+                        f"{real_type.__name__!r} found in tensor attrs of "
+                        f"{type(a).__name__}.__tensor_flatten__(). "
+                        "Only tensors and reference-type opaques are allowed "
+                        "in tensor attrs."
+                    )
+                attrs[key] = OpaqueMeta()
+                new_start_idx += 1
+            case Tensor():
+                new_subclass_meta, new_start_idx = create_subclass_metadata(
+                    inner_value,
+                    new_start_idx,
+                    count_symints=count_symints,
+                    with_memory_format=with_memory_format,
                 )
-            attrs[key] = OpaqueMeta()
-            new_start_idx += 1
-        elif isinstance(inner_value, Tensor):
-            new_subclass_meta, new_start_idx = create_subclass_metadata(
-                inner_value,
-                new_start_idx,
-                count_symints=count_symints,
-                with_memory_format=with_memory_format,
-            )
-            attrs[key] = new_subclass_meta
-        else:
-            raise AssertionError(f"expected Tensor or opaque, got {type(inner_value)}")
+                attrs[key] = new_subclass_meta
+            case _:
+                raise AssertionError(
+                    f"expected Tensor or OpaqueBase, got {type(inner_value)}"
+                )
 
     # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
     if not isinstance(a, Tensor):
@@ -261,12 +260,13 @@ def unwrap_tensor_subclasses(
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
         # compile-time FX tracing (proxy slot tracking, hashability, etc.).
-        if is_opaque_type(type(v)):
+        if isinstance(v, OpaqueBase):
             from torch._guards import detect_fake_mode
             from torch._library.fake_class_registry import maybe_to_fake_obj
+            from torch._library.opaque_object import is_opaque_type
 
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and is_opaque_type(type(v)):
                 return maybe_to_fake_obj(fake_mode, v)
         return v
 
@@ -346,15 +346,16 @@ def runtime_unwrap_tensor_subclasses(
 
         for attr in attrs:
             inner_value = getattr(x, attr)
-            if is_opaque_value(inner_value):
-                out.append(inner_value)  # pyrefly: ignore[bad-argument-type]
-            elif isinstance(inner_value, Tensor):
-                inner_meta = subclass_meta.attrs.get(attr)
-                flatten_subclass(inner_value, inner_meta, out=out)
-            else:
-                raise AssertionError(
-                    f"expected Tensor or opaque, got {type(inner_value)}"
-                )
+            match inner_value:
+                case OpaqueBase():
+                    out.append(inner_value)
+                case Tensor():
+                    inner_meta = subclass_meta.attrs.get(attr)
+                    flatten_subclass(inner_value, inner_meta, out=out)
+                case _:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(inner_value)}"
+                    )
 
         if append_symints:
             # outer_size

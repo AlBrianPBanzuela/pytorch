@@ -7,7 +7,8 @@ from typing import Any, cast, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_type, is_opaque_value
+from torch._library.opaque_object import is_opaque_type
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -111,22 +112,22 @@ def process_inputs(
                 # See if all inner tensors are FakeTensors from this mode
                 all_this_fake = True
                 for a in attrs:
-                    v = getattr(x, a)
-                    if isinstance(v, FakeTensor):
-                        if v.fake_mode is not fake_mode:
-                            # FakeTensor subclass from a different mode.
-                            # Fall through to refakify.
+                    match getattr(x, a):
+                        case FakeTensor() as v:
+                            if v.fake_mode is not fake_mode:
+                                # FakeTensor subclass from a different mode.
+                                # Fall through to refakify.
+                                all_this_fake = False
+                                break
+                        case torch.Tensor():
                             all_this_fake = False
                             break
-                    elif isinstance(v, torch.Tensor):
-                        all_this_fake = False
-                        break
-                    elif is_opaque_value(v):
-                        pass
-                    else:
-                        raise AssertionError(
-                            f"expected Tensor or opaque, got {type(v)}"
-                        )
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
 
                 if all_this_fake:
                     return x
