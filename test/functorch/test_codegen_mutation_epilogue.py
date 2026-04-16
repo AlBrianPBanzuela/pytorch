@@ -83,6 +83,7 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
+        self.assertIn("copy_", captured[0])
 
     def test_multiple_data_mutations(self):
         """
@@ -114,6 +115,7 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
+        self.assertIn("copy_", captured[0])
 
     def test_leaf_mutation_under_no_grad(self):
         """
@@ -139,6 +141,99 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
+        self.assertIn("detach().copy_", captured[0])
+
+    def test_metadata_only_mutation(self):
+        """
+        Metadata-only mutation via transpose_(). Codegen should emit
+        as_strided_() without copy_().
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(a, b):
+                a.transpose_(1, 0)
+                return a + b
+
+            a = torch.randn(3, 4, requires_grad=True).clone()
+            a.retain_grad()
+            b = torch.randn(4, 3)
+            out = f(a, b)
+
+        self.assertEqual(a.shape, (4, 3))
+        self.assertEqual(out.shape, (4, 3))
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn("as_strided_", captured[0])
+        self.assertNotIn("copy_", captured[0])
+
+    def test_data_and_metadata_mutation(self):
+        """
+        Both data and metadata mutated (transpose_ then mul_). Codegen
+        should emit as_strided_() followed by copy_().
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(a):
+                a.transpose_(1, 0)
+                a.mul_(2)
+                return a + 1
+
+            a = torch.randn(3, 4, requires_grad=True).clone()
+            a.retain_grad()
+            a_ref = a.detach().clone()
+            out = f(a)
+
+        self.assertEqual(a.shape, (4, 3))
+        self.assertEqual(a.detach(), a_ref.transpose(1, 0) * 2)
+        self.assertEqual(out, a_ref.transpose(1, 0) * 2 + 1)
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn("as_strided_", captured[0])
+        self.assertIn("copy_", captured[0])
+
+    def test_storage_metadata_mutation(self):
+        """
+        Storage mutation via set_(). Codegen should emit set_() under
+        no_grad.
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(a):
+                b = torch.arange(9, dtype=a.dtype).reshape(3, 3)
+                with torch.no_grad():
+                    a.set_(b)
+                return a * b
+
+            a = torch.ones(3, 3, requires_grad=True)
+            out = f(a)
+
+        expected = torch.arange(9, dtype=a.dtype).reshape(3, 3).float()
+        self.assertEqual(a.detach(), expected)
+        self.assertEqual(out, expected * expected)
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn("set_", captured[0])
+
+    def test_no_mutation_no_epilogue(self):
+        """
+        No mutations at all. No mutation_epilogue artifact should be
+        emitted.
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x, y):
+                return x + y
+
+            x = torch.randn(4, requires_grad=True)
+            y = torch.randn(4)
+            out = f(x, y)
+
+        self.assertEqual(out, x + y)
+        self.assertEqual(len(captured), 0)
 
 
 if __name__ == "__main__":
