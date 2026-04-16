@@ -11,7 +11,12 @@ import torch.backends.cudnn
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfTorchDynamo, TEST_XPU
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    skipIfTorchDynamo,
+    TEST_XPU,
+    xfailIfTorchDynamo,
+)
 
 
 try:
@@ -365,6 +370,7 @@ class TestRNGExtension(common.TestCase):
     def setUp(self):
         super().setUp()
 
+    @xfailIfTorchDynamo
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
 
