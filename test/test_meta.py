@@ -1973,7 +1973,10 @@ class TestMetaKernelRegistrations(TestCase):
         )
         self.assertEqual(cpp_result, decomp_result)
 
-    def _assert_linalg_eig_strides_match_meta(self, device):
+
+class TestMetaKernelRegistrationsDeviceType(TestCase):
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_linalg_eig_strides(self, device):
         matrix = torch.randn(3, 3, device=device)
         matrix_meta = torch.randn(3, 3, device="meta")
         _, eigvecs = torch.linalg.eig(matrix)
@@ -1982,18 +1985,11 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(eigvecs.shape, eigvecs_meta.shape)
         self.assertEqual(eigvecs.dtype, eigvecs_meta.dtype)
 
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_linalg_eig_strides(self):
-        devices = ["cpu"]
-        if torch.cuda.is_available():
-            devices.append("cuda")
-
-        for device in devices:
-            with self.subTest(device=device):
-                self._assert_linalg_eig_strides_match_meta(device)
-
 
 instantiate_device_type_tests(TestMeta, globals())
+instantiate_device_type_tests(
+    TestMetaKernelRegistrationsDeviceType, globals(), only_for=("cpu", "cuda")
+)
 
 
 def print_op_str_if_not_supported(op_str):
