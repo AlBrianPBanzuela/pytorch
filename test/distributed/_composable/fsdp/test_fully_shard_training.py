@@ -894,7 +894,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             propagation so failures localize to the right code path.
             """
             h = model(tokens, skip_head=True)
-            h_detached = h.detach().requires_grad_(True)
+            h_detached = h.detach()
             chunks = torch.chunk(h_detached, n_chunks, dim=1)
             h_grads: list[torch.Tensor] = []
             total_loss = torch.tensor(0.0, device=h.device)
@@ -1081,7 +1081,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # error.
         h = model(tokens, skip_head=True)
         self.assertEqual(h.dtype, output_dtype, msg="output_dtype cast lost")
-        h_detached = h.detach().to(torch.float32).requires_grad_(True)
+        h_detached = h.detach().to(torch.float32)
         chunks = torch.chunk(h_detached, n_chunks, dim=1)
         h_grads: list[torch.Tensor] = []
         for chunk in chunks:
@@ -1253,10 +1253,14 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             ),
         )
         # Backward through the cast should still trigger FSDP's pre_backward
-        # for the inner state.
+        # for the inner state. ``head`` never ran forward so its grad stays
+        # None; ``embed`` and ``norm`` are in the autograd graph of ``h``.
         h.sum().backward()
         for name, param in model.named_parameters():
-            self.assertIsNotNone(param.grad, f"grad is None for {name}")
+            if name.startswith("head."):
+                self.assertIsNone(param.grad, f"unexpected grad for {name}")
+            else:
+                self.assertIsNotNone(param.grad, f"grad is None for {name}")
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_partial_group_forward_with_activation_checkpoint(self):
@@ -1335,7 +1339,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
         for _ in range(2):
             h = model(tokens, skip_head=True)
-            h_detached = h.detach().requires_grad_(True)
+            h_detached = h.detach()
             chunks = torch.chunk(h_detached, n_chunks, dim=1)
             h_grads: list[torch.Tensor] = []
             for chunk in chunks:
@@ -1396,7 +1400,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
         def _run_chunked_microbatch(m: nn.Module, tokens: torch.Tensor) -> None:
             h = m(tokens, skip_head=True)
-            h_detached = h.detach().requires_grad_(True)
+            h_detached = h.detach()
             chunks = torch.chunk(h_detached, n_chunks, dim=1)
             h_grads: list[torch.Tensor] = []
             for chunk in chunks:
@@ -1525,7 +1529,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # second-pass state_first_in_pass gating).
         for _ in range(2):
             h = compiled_model(tokens, skip_head=True)
-            h_detached = h.detach().requires_grad_(True)
+            h_detached = h.detach()
             chunks = torch.chunk(h_detached, n_chunks, dim=1)
             h_grads: list[torch.Tensor] = []
             for chunk in chunks:

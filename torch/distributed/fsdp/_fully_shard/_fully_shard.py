@@ -148,14 +148,23 @@ def fully_shard(
     norm+head group is split between the main forward and a per-chunk head
     call). Post-forward work (reshard, pre-backward hook registration,
     ``output_dtype`` cast) is completed from the root's post-forward for any
-    incomplete group.
+    incomplete group. Caveats:
 
-    Note on ``mp_policy.cast_forward_inputs`` with grouped ``fully_shard``:
-    the input cast applies to every module in the group. Previously the
-    group pre-hook only fired on the first module to run, which silently
-    skipped the cast for subsequent modules — a latent bug that could
-    surface as a dtype mismatch when an intermediate user op between
-    grouped modules ran in a different dtype.
+    - Each standalone per-chunk invocation registers its own post_backward
+      autograd node, so N chunk calls produce N reduce-scatters for that
+      group — acceptable for correctness but observable in comm volume.
+    - ``output_dtype`` on an inner group's policy is applied to the root's
+      output (via force-complete), not to the output of standalone per-chunk
+      calls; users who need the cast on per-chunk outputs should apply it
+      explicitly.
+    - If the main forward runs under ``torch.no_grad`` (so no backward fires)
+      *and* standalone group modules are invoked for probing,
+      ``iter_forward_root`` may remain stale since the post-backward final
+      callback does not run. A subsequent training forward will self-heal.
+
+    ``mp_policy.cast_forward_inputs`` applies to every module in a grouped
+    ``fully_shard``, and the input cast fires per module rather than only on
+    the group's first-called module.
 
     Args:
         module (Union[nn.Module, List[nn.Module]): The module or modules to

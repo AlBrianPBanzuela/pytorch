@@ -482,6 +482,12 @@ class FSDPParamGroup:
             # FORWARD at entry -> another module in ``fully_shard([a, b])``
             # already registered post_backward this pass; skip to avoid
             # duplicate ``RegisterPostBackwardFunction`` autograd nodes.
+            # Relies on post_forward/post_backward/force_complete to reset
+            # ``_training_state`` away from FORWARD between passes. If a
+            # forward exception propagates, ``_training_state`` is stuck at
+            # FORWARD until the next successful pass hits post_forward or
+            # the next backward's final callback; this is the same exposure
+            # that existed before the fix, not a new risk.
             group_first_in_pass = self._training_state != TrainingState.FORWARD
             self._training_state = TrainingState.FORWARD
             self.unshard(self.unshard_async_op)
@@ -490,7 +496,10 @@ class FSDPParamGroup:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
 
-    def post_forward(self, module: nn.Module, input: Any, output: Any):
+    def post_forward(self, module: nn.Module | None, input: Any, output: Any) -> Any:
+        # ``module``/``input`` are accepted for the ``register_forward_hook``
+        # signature but unused here; callers driving post_forward outside the
+        # hook (e.g. ``_force_complete_incomplete_states``) may pass ``None``.
         logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
@@ -761,10 +770,12 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        # Called at most once per forward pass: ``group_first_in_pass`` in
-        # ``pre_forward`` deduplicates within a grouped ``fully_shard``, and
-        # the preceding ``post_forward`` (normal or force-completed) resets
-        # ``_training_state`` to IDLE so each standalone call re-registers.
+        # Called at most once per group pre_forward entry:
+        # ``group_first_in_pass`` in ``pre_forward`` deduplicates within a
+        # grouped ``fully_shard``, and the preceding ``post_forward`` (normal
+        # or force-completed) or ``post_backward`` resets ``_training_state``
+        # so each standalone call (e.g. per chunk in chunked loss)
+        # re-registers its own autograd node.
         # ``_root_post_backward_final_callback`` is the safety net for any
         # state that misses post_backward via the autograd graph.
         if not torch.is_grad_enabled():
