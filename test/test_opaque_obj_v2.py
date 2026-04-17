@@ -1395,10 +1395,10 @@ def forward(self, arg0_1, arg1_1):
         inp = (NestedCounters([Counter(1, 5), Counter(2, 5)]), torch.ones(2, 3))
         torch.compile(foo, backend=backend, fullgraph=True)(*inp)
 
-        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(Counter))
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(Counter))  # noqa: F841
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
-            f"""\
+            """\
 def forward(self, L_x_ : torch.Tensor, L_nested_counter_c_0_ : test_opaque_obj_v2_Counter, L_nested_counter_c_1_ : test_opaque_obj_v2_Counter):
     l_x_ = L_x_
     l_nested_counter_c_0_ = L_nested_counter_c_0_
@@ -1428,10 +1428,10 @@ def forward(self, L_x_ : torch.Tensor, L_nested_counter_c_0_ : test_opaque_obj_v
         res = torch.compile(foo, fullgraph=True, backend=backend)(*inp)
         self.assertEqual(res, foo(*inp))
 
-        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(OpaqueQueue))
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(OpaqueQueue))  # noqa: F841
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
-            f"""\
+            """\
 def forward(self, L_x_ : torch.Tensor, L_nested_queue_q : test_opaque_obj_v2_OpaqueQueue):
     l_x_ = L_x_
     l_nested_queue_q = L_nested_queue_q
