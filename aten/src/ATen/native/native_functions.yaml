@@ -6033,14 +6033,12 @@
 - func: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: nansum
-    MPS: nansum_mps
+    CPU, CUDA, MPS: nansum
   tags: reduction
 
 - func: nansum.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: nansum_out
-    MPS: nansum_out_mps
+    CPU, CUDA, MPS: nansum_out
   tags: reduction
 
 - func: hash_tensor(Tensor self, int[1] dim=[], *, bool keepdim=False, int mode=0) -> Tensor

@@ -891,7 +891,9 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   }
 }
 
-static void sum_kernel_mps(TensorIterator& iter) {
+// Shared implementation for sum and nansum Metal kernels.
+// `kernel_prefix` is "sum_" or "nansum_" — selects which kernel variant to dispatch.
+static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kernel_prefix) {
   const Tensor& output = iter.output(0);
   const Tensor& input = iter.input(0);
 
@@ -912,8 +914,8 @@ static void sum_kernel_mps(TensorIterator& iter) {
 
   constexpr uint32_t NCHAINS = 4;
 
-  auto kernel_name =
-      fmt::format("sum_reduction_{}_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output), NCHAINS);
+  auto kernel_name = fmt::format(
+      "{}reduction_{}_{}_{}", kernel_prefix, scalarToMetalTypeString(input), scalarToMetalTypeString(output), NCHAINS);
 
   MPSStream* stream = getCurrentMPSStream();
 
@@ -925,13 +927,13 @@ static void sum_kernel_mps(TensorIterator& iter) {
         std::min(static_cast<uint32_t>(512),
                  (reduction_size + MAX_THREADGROUP_SIZE * NCHAINS - 1) / (MAX_THREADGROUP_SIZE * NCHAINS));
 
-    auto partials = at::empty({num_groups}, output.options().dtype(kFloat));
+    auto partials = at::empty({num_groups}, output.options());
     uint32_t elems_per_group = (reduction_size + num_groups - 1) / num_groups;
 
-    // Pass 1 kernel name: input_type -> float (partials are always float)
-    auto p1_kernel = fmt::format("sum_reduction_{}_float_{}", scalarToMetalTypeString(input), NCHAINS);
-    // Pass 2 kernel name: float -> output_type
-    auto p2_kernel = fmt::format("sum_reduction_float_{}_{}", scalarToMetalTypeString(output), NCHAINS);
+    auto out_metal = scalarToMetalTypeString(output);
+    auto p1_kernel =
+        fmt::format("{}reduction_{}_{}_{}", kernel_prefix, scalarToMetalTypeString(input), out_metal, NCHAINS);
+    auto p2_kernel = fmt::format("{}reduction_{}_{}_{}", kernel_prefix, out_metal, out_metal, NCHAINS);
 
     // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1
     // Dim 0 (non-reduced): size=num_groups, input_stride=elems_per_group, output_stride=1
@@ -1005,8 +1007,8 @@ static void sum_kernel_mps(TensorIterator& iter) {
       uint32_t M = input.size(0);
       uint32_t N = input.numel() / M;
 
-      auto outer_kernel =
-          fmt::format("sum_reduction_outer_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output));
+      auto outer_kernel = fmt::format(
+          "{}reduction_outer_{}_{}", kernel_prefix, scalarToMetalTypeString(input), scalarToMetalTypeString(output));
       constexpr uint32_t TG_X = 32, TG_Y = 32;
       uint32_t num_tg_x = (N + TG_X - 1) / TG_X;
 
@@ -1033,8 +1035,8 @@ static void sum_kernel_mps(TensorIterator& iter) {
       uint32_t N = input.size(input.dim() - 1);
       uint32_t M = input.numel() / N;
 
-      auto inner_kernel =
-          fmt::format("sum_reduction_inner_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output));
+      auto inner_kernel = fmt::format(
+          "{}reduction_inner_{}_{}", kernel_prefix, scalarToMetalTypeString(input), scalarToMetalTypeString(output));
       // Pack multiple rows per TG: each SIMD group (32 threads) handles one row
       constexpr uint32_t TG_SIZE = 256; // 8 SIMD groups = 8 rows per TG
       uint32_t rows_per_tg = TG_SIZE / 32;
@@ -1090,31 +1092,19 @@ static void sum_kernel_mps(TensorIterator& iter) {
   });
 }
 
+static void sum_kernel_mps(TensorIterator& iter) {
+  sum_nansum_kernel_mps(iter, "sum_");
+}
+
+static void nansum_kernel_mps(TensorIterator& iter) {
+  auto in_dtype = iter.input(0).scalar_type();
+  bool is_float = c10::isFloatingType(in_dtype) || c10::isComplexType(in_dtype);
+  sum_nansum_kernel_mps(iter, is_float ? "nansum_" : "sum_");
+}
+
 } // namespace mps
 
 using namespace mps;
-
-Tensor& nansum_out_mps(const Tensor& self,
-                       OptionalIntArrayRef dim,
-                       bool keepdim,
-                       std::optional<ScalarType> opt_dtype,
-                       Tensor& result) {
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on MPS does not support complex inputs");
-  if (c10::isIntegralType(self.scalar_type(), true)) {
-    return at::sum_out(result, self, dim, keepdim, opt_dtype);
-  }
-  ScalarType dtype = get_dtype_from_result(result, opt_dtype);
-  const auto mask = make_dim_mask(dim, self.dim());
-  resize_reduction_result(result, self, mask, keepdim, dtype);
-  reduction_out_mps(self, dim, keepdim, dtype, result, MPSReductionType::NANSUM, "nansum_out_mps");
-  return result;
-}
-
-Tensor nansum_mps(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
-  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
-  return nansum_out_mps(self, dim, keepdim, dtype, result);
-}
 
 Tensor trace_mps(const Tensor& self) {
   TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
@@ -1710,5 +1700,6 @@ std::tuple<Tensor, Tensor> var_mean_mps(const Tensor& self,
 
 REGISTER_DISPATCH(norm_stub, &mps::norm_kernel_mps)
 REGISTER_DISPATCH(sum_stub, &mps::sum_kernel_mps)
+REGISTER_DISPATCH(nansum_stub, &mps::nansum_kernel_mps)
 
 } // namespace at::native

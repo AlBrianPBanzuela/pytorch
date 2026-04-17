@@ -178,6 +178,26 @@ REGISTER_NORM(half2, half);
 
 #include <c10/metal/reduction_utils.h>
 
+// Load helper: cast to opmath_t, optionally replacing NaN with zero.
+template <
+    bool NAN_TO_ZERO,
+    typename TI,
+    ::metal::enable_if_t<!NAN_TO_ZERO, bool> = true>
+inline opmath_t<TI> load_val(TI v) {
+  return static_cast<opmath_t<TI>>(v);
+}
+
+template <
+    bool NAN_TO_ZERO,
+    typename TI,
+    ::metal::enable_if_t<NAN_TO_ZERO, bool> = true>
+inline opmath_t<TI> load_val(TI v) {
+  auto r = static_cast<opmath_t<TI>>(v);
+  if (::metal::isnan(static_cast<float>(r)))
+    r = 0;
+  return r;
+}
+
 // Sum reduction kernel with multiple independent accumulation chains (ILP).
 // Each thread maintains NCHAINS independent accumulators to hide ALU latency
 // and keep the memory pipeline saturated.
@@ -186,7 +206,9 @@ REGISTER_NORM(half2, half);
 //   - Single reduced dim (or full reduction): compute input_base + k * stride
 //     once per TG, then direct indexing — no per-element dim loop.
 //   - Multiple reduced dims: fall back to get_input_offset per element.
-template <typename TI, typename TO, uint NCHAINS>
+// NAN_TO_ZERO: when true, NaN inputs are treated as zero (nansum behavior).
+// The compiler eliminates the dead branch when false.
+template <typename TI, typename TO, uint NCHAINS, bool NAN_TO_ZERO = false>
 kernel void sum_reduction(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -219,6 +241,8 @@ kernel void sum_reduction(
     }
   }
 
+  // Load helper: cast to accumulator type, optionally replacing NaN with zero
+
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = 0;
@@ -232,25 +256,25 @@ kernel void sum_reduction(
     // Fast path: direct indexing with base + k * reduction_stride
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
-        acc[j] +=
-            static_cast<TA>(input[input_base + (base + j) * reduction_stride]);
+        acc[j] += load_val<NAN_TO_ZERO>(
+            input[input_base + (base + j) * reduction_stride]);
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
       acc[idx % NCHAINS] +=
-          static_cast<TA>(input[input_base + idx * reduction_stride]);
+          load_val<NAN_TO_ZERO>(input[input_base + idx * reduction_stride]);
     }
   } else {
     // Generic path: per-element strided offset for multi-dim reductions
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
-        acc[j] +=
-            static_cast<TA>(input[get_input_offset(base + j, tgid, params)]);
+        acc[j] += load_val<NAN_TO_ZERO>(
+            input[get_input_offset(base + j, tgid, params)]);
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
       acc[idx % NCHAINS] +=
-          static_cast<TA>(input[get_input_offset(idx, tgid, params)]);
+          load_val<NAN_TO_ZERO>(input[get_input_offset(idx, tgid, params)]);
     }
   }
 
@@ -306,7 +330,13 @@ kernel void sum_reduction(
 //
 // Grid: (ceil(N/TG_X), 1) threadgroups, each (TG_X, TG_Y) threads.
 // TG_X threads cover adjacent columns (coalesced), TG_Y threads split rows.
-template <typename TI, typename TO, uint TG_X, uint TG_Y, uint NCHAINS>
+template <
+    typename TI,
+    typename TO,
+    uint TG_X,
+    uint TG_Y,
+    uint NCHAINS,
+    bool NAN_TO_ZERO = false>
 kernel void sum_reduction_outer(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -335,11 +365,11 @@ kernel void sum_reduction_outer(
   uint row = row_start;
   for (; row + NCHAINS <= row_end; row += NCHAINS) {
     for (uint j = 0; j < NCHAINS; j++) {
-      acc[j] += static_cast<TA>(input[(row + j) * N + col]);
+      acc[j] += load_val<NAN_TO_ZERO>(input[(row + j) * N + col]);
     }
   }
   for (; row < row_end; row++) {
-    acc[row % NCHAINS] += static_cast<TA>(input[row * N + col]);
+    acc[row % NCHAINS] += load_val<NAN_TO_ZERO>(input[row * N + col]);
   }
 
   TA sum = acc[0];
@@ -362,14 +392,19 @@ kernel void sum_reduction_outer(
   }
 }
 
-#define REGISTER_SUM_OUTER(TI, TO)                           \
-  template [[host_name("sum_reduction_outer_" #TI "_" #TO)]] \
-  kernel void sum_reduction_outer<TI, TO, 32, 32, 4>(        \
-      constant TI * input [[buffer(0)]],                     \
-      device TO * output [[buffer(1)]],                      \
-      constant uint3 & sizes [[buffer(2)]],                  \
-      uint2 tid_tg [[thread_position_in_threadgroup]],       \
+#define REGISTER_SUM_OUTER_IMPL(TI, TO, PREFIX, NTZ)            \
+  template [[host_name(PREFIX "reduction_outer_" #TI "_" #TO)]] \
+  kernel void sum_reduction_outer<TI, TO, 32, 32, 4, NTZ>(      \
+      constant TI * input [[buffer(0)]],                        \
+      device TO * output [[buffer(1)]],                         \
+      constant uint3 & sizes [[buffer(2)]],                     \
+      uint2 tid_tg [[thread_position_in_threadgroup]],          \
       uint2 tg_pos [[threadgroup_position_in_grid]]);
+
+#define REGISTER_SUM_OUTER(TI, TO) \
+  REGISTER_SUM_OUTER_IMPL(TI, TO, "sum_", false)
+#define REGISTER_NANSUM_OUTER(TI, TO) \
+  REGISTER_SUM_OUTER_IMPL(TI, TO, "nansum_", true)
 
 REGISTER_SUM_OUTER(float, float);
 REGISTER_SUM_OUTER(half, half);
@@ -394,7 +429,7 @@ REGISTER_SUM_OUTER(half2, half2);
 // Input [M, N] -> output [M], each SIMD group reduces one row of N elements.
 // Multiple SIMD groups per TG handle different rows for occupancy.
 // No shared memory needed — simd_sum suffices for intra-row reduction.
-template <typename TI, typename TO, uint NCHAINS>
+template <typename TI, typename TO, uint NCHAINS, bool NAN_TO_ZERO = false>
 kernel void sum_reduction_inner(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -427,12 +462,12 @@ kernel void sum_reduction_inner(
   uint base = simd_lane_id * NCHAINS;
   for (; base < aligned_N; base += stride) {
     for (uint j = 0; j < NCHAINS; j++) {
-      acc[j] += static_cast<TA>(row_ptr[base + j]);
+      acc[j] += load_val<NAN_TO_ZERO>(row_ptr[base + j]);
     }
   }
   // Tail: remaining elements after last full block, one per lane
   for (uint i = aligned_N + simd_lane_id; i < N; i += 32) {
-    acc[0] += static_cast<TA>(row_ptr[i]);
+    acc[0] += load_val<NAN_TO_ZERO>(row_ptr[i]);
   }
 
   TA sum = acc[0];
@@ -446,17 +481,22 @@ kernel void sum_reduction_inner(
   }
 }
 
-#define REGISTER_SUM_INNER(TI, TO)                           \
-  template [[host_name("sum_reduction_inner_" #TI "_" #TO)]] \
-  kernel void sum_reduction_inner<TI, TO, 4>(                \
-      constant TI * input [[buffer(0)]],                     \
-      device TO * output [[buffer(1)]],                      \
-      constant uint2 & sizes [[buffer(2)]],                  \
-      uint tid [[thread_position_in_threadgroup]],           \
-      uint tptg [[threads_per_threadgroup]],                 \
-      uint tgid [[threadgroup_position_in_grid]],            \
-      uint simd_lane_id [[thread_index_in_simdgroup]],       \
+#define REGISTER_SUM_INNER_IMPL(TI, TO, PREFIX, NTZ)            \
+  template [[host_name(PREFIX "reduction_inner_" #TI "_" #TO)]] \
+  kernel void sum_reduction_inner<TI, TO, 4, NTZ>(              \
+      constant TI * input [[buffer(0)]],                        \
+      device TO * output [[buffer(1)]],                         \
+      constant uint2 & sizes [[buffer(2)]],                     \
+      uint tid [[thread_position_in_threadgroup]],              \
+      uint tptg [[threads_per_threadgroup]],                    \
+      uint tgid [[threadgroup_position_in_grid]],               \
+      uint simd_lane_id [[thread_index_in_simdgroup]],          \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+
+#define REGISTER_SUM_INNER(TI, TO) \
+  REGISTER_SUM_INNER_IMPL(TI, TO, "sum_", false)
+#define REGISTER_NANSUM_INNER(TI, TO) \
+  REGISTER_SUM_INNER_IMPL(TI, TO, "nansum_", true)
 
 REGISTER_SUM_INNER(float, float);
 REGISTER_SUM_INNER(half, half);
@@ -477,21 +517,21 @@ REGISTER_SUM_INNER(bool, int);
 REGISTER_SUM_INNER(float2, float2);
 REGISTER_SUM_INNER(half2, half2);
 
-#define REGISTER_SUM_NC(TI, TO, NC)                            \
-  template [[host_name("sum_reduction_" #TI "_" #TO "_" #NC)]] \
-  kernel void sum_reduction<TI, TO, NC>(                       \
-      constant TI * input [[buffer(0)]],                       \
-      device TO * output [[buffer(1)]],                        \
-      constant NormParams<> & params [[buffer(2)]],            \
-      uint tid [[thread_position_in_threadgroup]],             \
-      uint tptg [[threads_per_threadgroup]],                   \
-      uint tgid [[threadgroup_position_in_grid]],              \
-      uint simd_lane_id [[thread_index_in_simdgroup]],         \
-      uint simdgroup_id [[simdgroup_index_in_threadgroup]],    \
+#define REGISTER_SUM_NC_IMPL(TI, TO, NC, PREFIX, NTZ)             \
+  template [[host_name(PREFIX "reduction_" #TI "_" #TO "_" #NC)]] \
+  kernel void sum_reduction<TI, TO, NC, NTZ>(                     \
+      constant TI * input [[buffer(0)]],                          \
+      device TO * output [[buffer(1)]],                           \
+      constant NormParams<> & params [[buffer(2)]],               \
+      uint tid [[thread_position_in_threadgroup]],                \
+      uint tptg [[threads_per_threadgroup]],                      \
+      uint tgid [[threadgroup_position_in_grid]],                 \
+      uint simd_lane_id [[thread_index_in_simdgroup]],            \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]],       \
       uint simdgroup_size [[threads_per_simdgroup]]);
 
-// Register with NCHAINS=4 (good balance of ILP vs register pressure)
-#define REGISTER_SUM(TI, TO) REGISTER_SUM_NC(TI, TO, 4)
+#define REGISTER_SUM(TI, TO) REGISTER_SUM_NC_IMPL(TI, TO, 4, "sum_", false)
+#define REGISTER_NANSUM(TI, TO) REGISTER_SUM_NC_IMPL(TI, TO, 4, "nansum_", true)
 
 REGISTER_SUM(float, float);
 REGISTER_SUM(float, half);
@@ -513,3 +553,22 @@ REGISTER_SUM(bool, long);
 REGISTER_SUM(bool, int);
 REGISTER_SUM(float2, float2);
 REGISTER_SUM(half2, half2);
+
+// nansum variants (floating-point only — integers can't have NaN)
+REGISTER_NANSUM(float, float);
+REGISTER_NANSUM(half, half);
+REGISTER_NANSUM(half, float);
+REGISTER_NANSUM(bfloat, bfloat);
+REGISTER_NANSUM(bfloat, float);
+
+REGISTER_NANSUM_OUTER(float, float);
+REGISTER_NANSUM_OUTER(half, half);
+REGISTER_NANSUM_OUTER(half, float);
+REGISTER_NANSUM_OUTER(bfloat, bfloat);
+REGISTER_NANSUM_OUTER(bfloat, float);
+
+REGISTER_NANSUM_INNER(float, float);
+REGISTER_NANSUM_INNER(half, half);
+REGISTER_NANSUM_INNER(half, float);
+REGISTER_NANSUM_INNER(bfloat, bfloat);
+REGISTER_NANSUM_INNER(bfloat, float);
