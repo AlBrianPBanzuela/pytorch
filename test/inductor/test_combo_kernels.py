@@ -1496,6 +1496,7 @@ class ComboKernelPeakMemoryTests(TestCase):
             "combo groups that co-allocate large intermediates",
         )
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
