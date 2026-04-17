@@ -363,7 +363,14 @@ def get_caching_autotuner_plugins(
     Each plugin adds an entry here, gated on its own config flag, with
     imports kept inside the relevant branch.
     """
-    return []
+    from torch._inductor import config
+
+    plugins: list[CachingAutotunerPlugin] = []
+    if config.incremental_autotune:
+        from .incremental import IncrementalAutotunePlugin
+
+        plugins.append(IncrementalAutotunePlugin())
+    return plugins
 
 
 class CachingAutotuner(KernelInterface):

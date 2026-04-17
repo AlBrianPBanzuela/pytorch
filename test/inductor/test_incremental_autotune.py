@@ -420,5 +420,97 @@ class CacheTest(TestCase):
         self.assertEqual(len(pool), 2)
 
 
+class PluginTest(TestCase):
+    """Coverage for IncrementalAutotunePlugin's activation gates and hook contracts."""
+
+    @staticmethod
+    def _make_autotuner_mock():
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        autotuner = MagicMock(spec=CachingAutotuner)
+        autotuner.fn = MagicMock()
+        autotuner.fn.__name__ = "triton_kernel"
+        return autotuner
+
+    @staticmethod
+    def _patch_gates(
+        incremental: bool = True,
+        autotune_at_compile_time: bool = False,
+        cudagraphs: bool = False,
+        jk_passes: bool = True,
+    ):
+        """Combined patch for the four gates _should_apply consults."""
+        from torch._inductor import config as inductor_config
+        from torch._inductor.config import triton as inductor_triton_config
+        from torch._inductor.runtime.incremental import _plugin
+
+        return (
+            patch.object(inductor_config, "incremental_autotune", incremental),
+            patch.object(
+                inductor_triton_config,
+                "autotune_at_compile_time",
+                autotune_at_compile_time,
+            ),
+            patch.object(inductor_triton_config, "cudagraphs", cudagraphs),
+            patch.object(_plugin, "_jk_passes", lambda: jk_passes),
+        )
+
+    def _run_should_apply(self, **gate_kwargs) -> bool:
+        from torch._inductor.runtime.incremental import IncrementalAutotunePlugin
+
+        autotuner = self._make_autotuner_mock()
+        patches = self._patch_gates(**gate_kwargs)
+        for p in patches:
+            p.start()
+        try:
+            return IncrementalAutotunePlugin._should_apply(autotuner)
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_should_apply_false_when_config_disabled(self):
+        self.assertFalse(self._run_should_apply(incremental=False))
+
+    def test_should_apply_false_when_autotune_at_compile_time(self):
+        self.assertFalse(self._run_should_apply(autotune_at_compile_time=True))
+
+    def test_should_apply_false_when_cudagraphs(self):
+        self.assertFalse(self._run_should_apply(cudagraphs=True))
+
+    def test_should_apply_false_when_jk_blocks(self):
+        self.assertFalse(self._run_should_apply(jk_passes=False))
+
+    def test_should_apply_true_when_all_gates_pass(self):
+        self.assertTrue(self._run_should_apply())
+
+    def test_pre_dispatch_defers_when_no_state(self):
+        from torch._inductor.runtime.incremental import IncrementalAutotunePlugin
+        from torch._inductor.runtime.triton_heuristics import DEFER
+
+        plugin = IncrementalAutotunePlugin()
+        result = plugin.pre_dispatch(self._make_autotuner_mock(), stream=0)
+        self.assertIs(result, DEFER)
+
+    def test_pre_dispatch_delegates_to_state(self):
+        from torch._inductor.runtime.incremental import IncrementalAutotunePlugin
+
+        plugin = IncrementalAutotunePlugin()
+        plugin._state = MagicMock()
+        plugin._state.dispatch.return_value = "from_state"
+        result = plugin.pre_dispatch(self._make_autotuner_mock(), 1, 2, stream=0)
+        self.assertEqual(result, "from_state")
+        plugin._state.dispatch.assert_called_once_with(1, 2, stream=0)
+
+    def test_pre_autotune_defers_when_init_state_returns_none(self):
+        from torch._inductor.runtime.incremental import IncrementalAutotunePlugin
+        from torch._inductor.runtime.triton_heuristics import DEFER
+
+        plugin = IncrementalAutotunePlugin()
+        with patch.object(plugin, "_init_state", return_value=None):
+            result = plugin.pre_autotune(self._make_autotuner_mock(), stream=0)
+        self.assertIs(result, DEFER)
+        self.assertIsNone(plugin._state)
+
+
 if __name__ == "__main__":
     run_tests()
