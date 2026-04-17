@@ -478,16 +478,19 @@ class FSDPParamGroup:
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
+            # ``_training_state == FORWARD`` at entry means another module
+            # in the same group already fired pre_forward for this pass
+            # (e.g. ``a`` in ``fully_shard([a, b])`` ran before ``b``). In
+            # that case, skip ``_register_post_backward_hook`` to avoid
+            # inserting redundant ``RegisterPostBackwardFunction`` autograd
+            # nodes. Multiple forward passes before a single backward must
+            # each register so each pass's autograd graph triggers
+            # post_backward.
+            first_in_pass = self._training_state != TrainingState.FORWARD
             self._training_state = TrainingState.FORWARD
-            # _register_post_backward_hook is gated here because it wraps
-            # inputs in RegisterPostBackwardFunction — calling it per
-            # module would insert redundant autograd nodes. The
-            # is_unsharded check provides exactly-once semantics: the
-            # first module unshards and registers, subsequent modules
-            # (already unsharded) skip both.
-            if not self.is_unsharded:
-                self.unshard(self.unshard_async_op)
-                self.wait_for_unshard()
+            self.unshard(self.unshard_async_op)
+            self.wait_for_unshard()
+            if first_in_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
 
@@ -762,17 +765,18 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        # This is called only on the first forward that actually unshards
-        # (gated by ``not is_unsharded`` in ``pre_forward``). That means:
-        # - In partial-group-forward + standalone-call patterns (chunked loss
-        #   calling ``model.head(chunk)`` multiple times), only the first
-        #   forward that unshards wraps its inputs in
-        #   RegisterPostBackwardFunction. Subsequent forwards' inputs are
-        #   unwrapped because params stay unsharded across them.
-        #   Per-forward post_backward therefore does NOT fire via the
-        #   autograd path for those subsequent forwards. We rely on
-        #   ``_root_post_backward_final_callback`` to force-run post_backward
-        #   for any state whose training_state is not POST_BACKWARD.
+        # This is called at most once per forward pass (gated by the
+        # ``first_in_pass`` check in ``pre_forward`` so non-first modules
+        # in ``fully_shard([a, b, ...])`` don't insert redundant
+        # ``RegisterPostBackwardFunction`` autograd nodes). In
+        # partial-group-forward + standalone-call patterns (chunked loss
+        # calling ``model.head(chunk)`` multiple times) each standalone
+        # call is its own forward pass — the post_forward from
+        # ``_force_complete_incomplete_states`` resets ``_training_state``
+        # to IDLE, so each chunk's pre_forward re-registers. The
+        # root-level ``_root_post_backward_final_callback`` is the safety
+        # net: it force-runs post_backward for any state whose
+        # training_state is not POST_BACKWARD at the end of backward.
         if not torch.is_grad_enabled():
             return args, kwargs
 
