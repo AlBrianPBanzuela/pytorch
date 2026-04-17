@@ -653,17 +653,17 @@ class FSDPParamGroup:
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
             )
             if all_reduce_input is not None:
+                # foreach_reduce returns all_reduce_input only when the post-
+                # reduce dtype cast orphaned the buffer (no-cast case returns
+                # None since param grads already hold refs via reduce_output).
                 if self.device.type != "cpu":
                     if all_reduce_event is None:
                         raise AssertionError(
                             "Expected all_reduce_event to be set for non-CPU device"
                         )
-                # Only the cast case orphans the buffer. No-cast: param grads
-                # hold refs via reduce_output, and _post_reduce_event syncs.
-                if all_reduce_input.dtype != self._orig_dtype:
-                    self.comm_ctx.mp_cast_all_reduce_state = AllReduceState(
-                        all_reduce_input, all_reduce_event
-                    )
+                self.comm_ctx.mp_cast_all_reduce_state = AllReduceState(
+                    all_reduce_input, all_reduce_event
+                )
 
     def finalize_backward(self):
         self._wait_for_post_backward()

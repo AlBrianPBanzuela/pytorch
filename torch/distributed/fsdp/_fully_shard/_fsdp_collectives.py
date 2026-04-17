@@ -700,10 +700,16 @@ def foreach_reduce(
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
-        if all_reduce_input is not None and reduce_output is not all_reduce_input:
-            # Cast created a new tensor: the orphaned all_reduce_input's free
-            # must wait for the cast to finish reading it, not just all-reduce.
-            all_reduce_event = post_reduce_stream.record_event()
+        if all_reduce_input is not None:
+            if reduce_output is not all_reduce_input:
+                # Cast created a new tensor: the orphaned all_reduce_input's
+                # free must wait for the cast to finish reading it, not just
+                # all-reduce. Returned as a keep-alive to the caller.
+                all_reduce_event = post_reduce_stream.record_event()
+            else:
+                # No cast: reduce_output aliases all_reduce_input and param
+                # grads hold refs to it, so no keep-alive is needed.
+                all_reduce_input = None
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(

@@ -2026,11 +2026,24 @@ class TestFullyShardShareCommContext(FSDPTest):
         orig_foreach_reduce = foreach_reduce
 
         @torch.no_grad()
-        def foreach_reduce_with_assert(*args, **kwargs):
+        def foreach_reduce_with_assert(
+            fsdp_params,
+            unsharded_grads,
+            reduce_scatter_group,
+            reduce_scatter_stream,
+            *args,
+            **kwargs,
+        ):
             nonlocal reduce_scatter_streams
-            # reduce_scatter_stream is the 4th positional arg
-            reduce_scatter_streams.add(args[3])
-            return orig_foreach_reduce(*args, **kwargs)
+            reduce_scatter_streams.add(reduce_scatter_stream)
+            return orig_foreach_reduce(
+                fsdp_params,
+                unsharded_grads,
+                reduce_scatter_group,
+                reduce_scatter_stream,
+                *args,
+                **kwargs,
+            )
 
         with (
             patch_foreach_all_gather(foreach_all_gather_with_assert),

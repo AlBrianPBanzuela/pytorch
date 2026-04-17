@@ -425,6 +425,14 @@ class TestFullyShardHSDPMemory(FSDPTest):
             inp = torch.randint(0, 32, (1, 4), device=device_type.type)
             model(inp).sum().backward()
 
+        # Sanity: the HSDP all-reduce path must have fired, else this test is
+        # a no-op (e.g., if the result tuple shape changes and index 3 stops
+        # being all_reduce_input).
+        self.assertGreater(
+            max_alive[0],
+            0,
+            "foreach_reduce was never observed with a non-None all_reduce_input",
+        )
         # Post-fix upper bound: the "previous" state held by comm_ctx plus the
         # "current" state just created = 2. Pre-fix would grow to n_layers.
         self.assertLessEqual(
