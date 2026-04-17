@@ -273,6 +273,7 @@ class TestGpuWrapper(InductorTestCase):
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
 
+
 instantiate_parametrized_tests(TestGpuWrapper)
 
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
