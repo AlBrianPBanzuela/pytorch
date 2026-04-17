@@ -8371,7 +8371,7 @@ class TestQuantizedConv(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/177254
         # On aarch64, fbgemmSupportedCPU() incorrectly returned True, causing
         # the default quantized engine to be X86 which crashed in FBGEMM with
-        # "RuntimeError: unknown architecure".
+        # "RuntimeError: unknown architecure".  # codespell:ignore architecure
         qconv1d = torch.ao.nn.quantized.Conv1d(4, 8, 3)
         x = torch.quantize_per_tensor(
             torch.randn(1, 4, 16), scale=1.0, zero_point=0, dtype=torch.quint8
