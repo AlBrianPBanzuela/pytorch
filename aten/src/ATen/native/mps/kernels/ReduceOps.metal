@@ -178,24 +178,51 @@ REGISTER_NORM(half2, half);
 
 #include <c10/metal/reduction_utils.h>
 
-// Load helper: cast to opmath_t, optionally replacing NaN with zero.
+// Load modes for sum_reduction: identity (sum), nan-to-zero (nansum),
+// or nonzero-as-one (count_nonzero).
+enum LoadMode : uint {
+  LOAD_IDENTITY = 0,
+  LOAD_NAN_TO_ZERO = 1,
+  LOAD_NONZERO = 2
+};
+
+template <typename T, ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline bool load_is_nonzero(T v) {
+  return v != T(0);
+}
+
+template <typename T, ::metal::enable_if_t<is_complex_v<T>, bool> = true>
+inline bool load_is_nonzero(T v) {
+  return v.x != 0 || v.y != 0;
+}
+
+// Load helper: cast to opmath_t, optionally replacing NaN with zero,
+// or map nonzero to 1 for count_nonzero semantics.
 template <
-    bool NAN_TO_ZERO,
+    LoadMode MODE,
     typename TI,
-    ::metal::enable_if_t<!NAN_TO_ZERO, bool> = true>
+    ::metal::enable_if_t<MODE == LOAD_IDENTITY, bool> = true>
 inline opmath_t<TI> load_val(TI v) {
   return static_cast<opmath_t<TI>>(v);
 }
 
 template <
-    bool NAN_TO_ZERO,
+    LoadMode MODE,
     typename TI,
-    ::metal::enable_if_t<NAN_TO_ZERO, bool> = true>
+    ::metal::enable_if_t<MODE == LOAD_NAN_TO_ZERO, bool> = true>
 inline opmath_t<TI> load_val(TI v) {
   auto r = static_cast<opmath_t<TI>>(v);
   if (::metal::isnan(static_cast<float>(r)))
     r = 0;
   return r;
+}
+
+template <
+    LoadMode MODE,
+    typename TI,
+    ::metal::enable_if_t<MODE == LOAD_NONZERO, bool> = true>
+inline long load_val(TI v) {
+  return load_is_nonzero(v) ? 1 : 0;
 }
 
 // Sum reduction kernel with multiple independent accumulation chains (ILP).
@@ -206,13 +233,14 @@ inline opmath_t<TI> load_val(TI v) {
 //   - Single reduced dim (or full reduction): compute input_base + k * stride
 //     once per TG, then direct indexing — no per-element dim loop.
 //   - Multiple reduced dims: fall back to get_input_offset per element.
-// NAN_TO_ZERO: when true, NaN inputs are treated as zero (nansum behavior).
-// The compiler eliminates the dead branch when false.
+// MODE: LOAD_IDENTITY (sum), LOAD_NAN_TO_ZERO (nansum),
+// LOAD_NONZERO (count_nonzero — contributes 1 per nonzero element).
+// The compiler eliminates dead branches per instantiation.
 template <
     typename TI,
     typename TO,
     uint NCHAINS = SUM_NCHAINS,
-    bool NAN_TO_ZERO = false>
+    LoadMode MODE = LOAD_IDENTITY>
 kernel void sum_reduction(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -260,25 +288,25 @@ kernel void sum_reduction(
     // Fast path: direct indexing with base + k * reduction_stride
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
-        acc[j] += load_val<NAN_TO_ZERO>(
-            input[input_base + (base + j) * reduction_stride]);
+        acc[j] +=
+            load_val<MODE>(input[input_base + (base + j) * reduction_stride]);
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
       acc[idx % NCHAINS] +=
-          load_val<NAN_TO_ZERO>(input[input_base + idx * reduction_stride]);
+          load_val<MODE>(input[input_base + idx * reduction_stride]);
     }
   } else {
     // Generic path: per-element strided offset for multi-dim reductions
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
-        acc[j] += load_val<NAN_TO_ZERO>(
-            input[get_input_offset(base + j, tgid, params)]);
+        acc[j] +=
+            load_val<MODE>(input[get_input_offset(base + j, tgid, params)]);
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
       acc[idx % NCHAINS] +=
-          load_val<NAN_TO_ZERO>(input[get_input_offset(idx, tgid, params)]);
+          load_val<MODE>(input[get_input_offset(idx, tgid, params)]);
     }
   }
 
@@ -340,7 +368,7 @@ template <
     uint TG_X = 32,
     uint TG_Y = 32,
     uint NCHAINS = SUM_NCHAINS,
-    bool NAN_TO_ZERO = false>
+    LoadMode MODE = LOAD_IDENTITY>
 kernel void sum_reduction_outer(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -369,11 +397,11 @@ kernel void sum_reduction_outer(
   uint row = row_start;
   for (; row + NCHAINS <= row_end; row += NCHAINS) {
     for (uint j = 0; j < NCHAINS; j++) {
-      acc[j] += load_val<NAN_TO_ZERO>(input[(row + j) * N + col]);
+      acc[j] += load_val<MODE>(input[(row + j) * N + col]);
     }
   }
   for (; row < row_end; row++) {
-    acc[row % NCHAINS] += load_val<NAN_TO_ZERO>(input[row * N + col]);
+    acc[row % NCHAINS] += load_val<MODE>(input[row * N + col]);
   }
 
   TA sum = acc[0];
@@ -396,19 +424,21 @@ kernel void sum_reduction_outer(
   }
 }
 
-#define REGISTER_SUM_OUTER_IMPL(TI, TO, PREFIX, NTZ)                 \
-  template [[host_name(PREFIX "reduction_outer_" #TI "_" #TO)]]      \
-  kernel void sum_reduction_outer<TI, TO, 32, 32, SUM_NCHAINS, NTZ>( \
-      constant TI * input [[buffer(0)]],                             \
-      device TO * output [[buffer(1)]],                              \
-      constant uint3 & sizes [[buffer(2)]],                          \
-      uint2 tid_tg [[thread_position_in_threadgroup]],               \
+#define REGISTER_SUM_OUTER_IMPL(TI, TO, PREFIX, MODE)                 \
+  template [[host_name(PREFIX "reduction_outer_" #TI "_" #TO)]]       \
+  kernel void sum_reduction_outer<TI, TO, 32, 32, SUM_NCHAINS, MODE>( \
+      constant TI * input [[buffer(0)]],                              \
+      device TO * output [[buffer(1)]],                               \
+      constant uint3 & sizes [[buffer(2)]],                           \
+      uint2 tid_tg [[thread_position_in_threadgroup]],                \
       uint2 tg_pos [[threadgroup_position_in_grid]]);
 
 #define REGISTER_SUM_OUTER(TI, TO) \
-  REGISTER_SUM_OUTER_IMPL(TI, TO, "sum_", false)
+  REGISTER_SUM_OUTER_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
 #define REGISTER_NANSUM_OUTER(TI, TO) \
-  REGISTER_SUM_OUTER_IMPL(TI, TO, "nansum_", true)
+  REGISTER_SUM_OUTER_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO)
+#define REGISTER_COUNT_NONZERO_OUTER(TI) \
+  REGISTER_SUM_OUTER_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO)
 
 REGISTER_SUM_OUTER(float, float);
 REGISTER_SUM_OUTER(half, half);
@@ -437,7 +467,7 @@ template <
     typename TI,
     typename TO,
     uint NCHAINS = SUM_NCHAINS,
-    bool NAN_TO_ZERO = false>
+    LoadMode MODE = LOAD_IDENTITY>
 kernel void sum_reduction_inner(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -470,12 +500,12 @@ kernel void sum_reduction_inner(
   uint base = simd_lane_id * NCHAINS;
   for (; base < aligned_N; base += stride) {
     for (uint j = 0; j < NCHAINS; j++) {
-      acc[j] += load_val<NAN_TO_ZERO>(row_ptr[base + j]);
+      acc[j] += load_val<MODE>(row_ptr[base + j]);
     }
   }
   // Tail: remaining elements after last full block, one per lane
   for (uint i = aligned_N + simd_lane_id; i < N; i += 32) {
-    acc[0] += load_val<NAN_TO_ZERO>(row_ptr[i]);
+    acc[0] += load_val<MODE>(row_ptr[i]);
   }
 
   TA sum = acc[0];
@@ -489,9 +519,9 @@ kernel void sum_reduction_inner(
   }
 }
 
-#define REGISTER_SUM_INNER_IMPL(TI, TO, PREFIX, NTZ)            \
+#define REGISTER_SUM_INNER_IMPL(TI, TO, PREFIX, MODE)           \
   template [[host_name(PREFIX "reduction_inner_" #TI "_" #TO)]] \
-  kernel void sum_reduction_inner<TI, TO, SUM_NCHAINS, NTZ>(    \
+  kernel void sum_reduction_inner<TI, TO, SUM_NCHAINS, MODE>(   \
       constant TI * input [[buffer(0)]],                        \
       device TO * output [[buffer(1)]],                         \
       constant uint2 & sizes [[buffer(2)]],                     \
@@ -502,9 +532,11 @@ kernel void sum_reduction_inner(
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
 
 #define REGISTER_SUM_INNER(TI, TO) \
-  REGISTER_SUM_INNER_IMPL(TI, TO, "sum_", false)
+  REGISTER_SUM_INNER_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
 #define REGISTER_NANSUM_INNER(TI, TO) \
-  REGISTER_SUM_INNER_IMPL(TI, TO, "nansum_", true)
+  REGISTER_SUM_INNER_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO)
+#define REGISTER_COUNT_NONZERO_INNER(TI) \
+  REGISTER_SUM_INNER_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO)
 
 REGISTER_SUM_INNER(float, float);
 REGISTER_SUM_INNER(half, half);
@@ -525,9 +557,9 @@ REGISTER_SUM_INNER(bool, int);
 REGISTER_SUM_INNER(float2, float2);
 REGISTER_SUM_INNER(half2, half2);
 
-#define REGISTER_SUM_IMPL(TI, TO, PREFIX, NTZ)              \
+#define REGISTER_SUM_IMPL(TI, TO, PREFIX, MODE)             \
   template [[host_name(PREFIX "reduction_" #TI "_" #TO)]]   \
-  kernel void sum_reduction<TI, TO, SUM_NCHAINS, NTZ>(      \
+  kernel void sum_reduction<TI, TO, SUM_NCHAINS, MODE>(     \
       constant TI * input [[buffer(0)]],                    \
       device TO * output [[buffer(1)]],                     \
       constant NormParams<> & params [[buffer(2)]],         \
@@ -538,8 +570,11 @@ REGISTER_SUM_INNER(half2, half2);
       uint simdgroup_id [[simdgroup_index_in_threadgroup]], \
       uint simdgroup_size [[threads_per_simdgroup]]);
 
-#define REGISTER_SUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "sum_", false)
-#define REGISTER_NANSUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "nansum_", true)
+#define REGISTER_SUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
+#define REGISTER_NANSUM(TI, TO) \
+  REGISTER_SUM_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO)
+#define REGISTER_COUNT_NONZERO(TI) \
+  REGISTER_SUM_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO)
 
 REGISTER_SUM(float, float);
 REGISTER_SUM(float, half);
@@ -580,3 +615,41 @@ REGISTER_NANSUM_INNER(half, half);
 REGISTER_NANSUM_INNER(half, float);
 REGISTER_NANSUM_INNER(bfloat, bfloat);
 REGISTER_NANSUM_INNER(bfloat, float);
+
+// count_nonzero: output is always long; reuses sum-reduction machinery
+// with LOAD_NONZERO mode (1 per nonzero element, 0 otherwise).
+REGISTER_COUNT_NONZERO(float);
+REGISTER_COUNT_NONZERO(half);
+REGISTER_COUNT_NONZERO(bfloat);
+REGISTER_COUNT_NONZERO(long);
+REGISTER_COUNT_NONZERO(int);
+REGISTER_COUNT_NONZERO(short);
+REGISTER_COUNT_NONZERO(char);
+REGISTER_COUNT_NONZERO(uchar);
+REGISTER_COUNT_NONZERO(bool);
+REGISTER_COUNT_NONZERO(float2);
+REGISTER_COUNT_NONZERO(half2);
+
+REGISTER_COUNT_NONZERO_OUTER(float);
+REGISTER_COUNT_NONZERO_OUTER(half);
+REGISTER_COUNT_NONZERO_OUTER(bfloat);
+REGISTER_COUNT_NONZERO_OUTER(long);
+REGISTER_COUNT_NONZERO_OUTER(int);
+REGISTER_COUNT_NONZERO_OUTER(short);
+REGISTER_COUNT_NONZERO_OUTER(char);
+REGISTER_COUNT_NONZERO_OUTER(uchar);
+REGISTER_COUNT_NONZERO_OUTER(bool);
+REGISTER_COUNT_NONZERO_OUTER(float2);
+REGISTER_COUNT_NONZERO_OUTER(half2);
+
+REGISTER_COUNT_NONZERO_INNER(float);
+REGISTER_COUNT_NONZERO_INNER(half);
+REGISTER_COUNT_NONZERO_INNER(bfloat);
+REGISTER_COUNT_NONZERO_INNER(long);
+REGISTER_COUNT_NONZERO_INNER(int);
+REGISTER_COUNT_NONZERO_INNER(short);
+REGISTER_COUNT_NONZERO_INNER(char);
+REGISTER_COUNT_NONZERO_INNER(uchar);
+REGISTER_COUNT_NONZERO_INNER(bool);
+REGISTER_COUNT_NONZERO_INNER(float2);
+REGISTER_COUNT_NONZERO_INNER(half2);
