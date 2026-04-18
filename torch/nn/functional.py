@@ -3732,7 +3732,7 @@ def linear_cross_entropy(
             reduction=reduction,
             label_smoothing=label_smoothing,
         )
-    if input.dim() not in {1, 2}:
+    if input.dim() < 1 or input.dim() > 2:
         raise RuntimeError(
             f"expected input with dimensionality 1 or 2, got {input.dim()}"
         )
