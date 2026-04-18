@@ -388,7 +388,6 @@ dtensor_numeric_only_fails = {
 # Ops in dtensor_fails that have no sharding strategy (NotImplementedError).
 # These will error during sharding propagation and affect unbacked tests too.
 dtensor_fails_no_strategy = {
-    xfail("_batch_norm_with_update"),
     xfail("_chunk_cat"),
     xfail("_unsafe_masked_index"),
     xfail("_unsafe_masked_index_put_accumulate"),
@@ -401,7 +400,7 @@ dtensor_fails_no_strategy = {
     xfail("block_diag"),
     xfail("cdist"),
     xfail("complex"),
-    xfail("diagonal_scatter"),
+    xfail("exponential"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
     xfail("geometric"),
@@ -416,7 +415,6 @@ dtensor_fails_no_strategy = {
     xfail("multinomial"),
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
-    xfail("nn.functional.group_norm"),
     xfail("nn.functional.multi_margin_loss"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
@@ -435,7 +433,6 @@ dtensor_fails_no_strategy = {
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("select_scatter"),
     xfail("squeeze_copy"),
     xfail("stft"),
     xfail("take"),
@@ -871,6 +868,7 @@ ops_unbacked_dtensor_dde = {
     xfail("rot90"),
     xfail("scatter"),
     xfail("scatter_add"),
+    xfail("select_scatter"),
     xfail("sort"),
     xfail("squeeze_copy"),
     xfail("std_mean"),
