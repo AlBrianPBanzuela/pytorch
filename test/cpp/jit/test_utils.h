@@ -11,15 +11,15 @@
 // Tries the source-relative path first (for development builds), then
 // falls back to the executable-relative path (for install trees where
 // __FILE__ may contain a stale build-time path).
-inline std::filesystem::path resolveTestDataFile(
+inline std::string resolveTestDataFile(
     const char* sourceFile,
     const std::string& relativePath) {
   auto candidate =
       std::filesystem::path(sourceFile).parent_path() / relativePath;
   if (std::filesystem::exists(candidate))
-    return candidate;
+    return candidate.string();
   auto exeDir = std::filesystem::read_symlink("/proc/self/exe").parent_path();
-  return exeDir / relativePath;
+  return (exeDir / relativePath).string();
 }
 
 namespace {
