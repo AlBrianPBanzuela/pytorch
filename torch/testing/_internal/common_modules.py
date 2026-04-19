@@ -1842,7 +1842,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
             # generate samples for LinearCrossEntropyLoss and its forward:
             for reduction, ii, ls, w, of in product(
                     ["sum", "mean", "none"],
-                    [-100, 0, num_classes - 1, num_classes + 5],
+                    [None, -100, 0, num_classes - 1, num_classes + 5],
                     [0.0, 0.1],
                     weights,
                     [(), (3, 2)]):
@@ -1864,7 +1864,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                 for target_dtype in [torch.int64, dtype]:
                     if target_dtype.is_floating_point:
                         target_shape = (*batch_dims, num_classes, *of)
-                        if ii != -100:
+                        if ii is not None:
                             # ignore_index is not supported for floating point target
                             continue
                         if options is not None:
@@ -1877,7 +1877,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     if (
                             target.device.type != "meta"
                             and not target_dtype.is_floating_point and reduction == "mean"
-                            and ii >= 0 and ii < num_classes and torch.all(target == ii)
+                            and ii is not None and ii >= 0 and ii < num_classes and torch.all(target == ii)
                     ):
                         # ensures valid normalization:
                         target[0 if target.shape else ()] = random.sample(sorted(set(range(num_classes)) - {ii}), 1)[0]
@@ -1888,6 +1888,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                             not target_dtype.is_floating_point
                             and target_shape
                             and num_batches > 1
+                            and ii is not None
                     ):
                         # target may contain out-of-range ii values
                         input = make_input(batch_dims, in_features)
@@ -1901,7 +1902,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                         yield module_args, module_kwargs, (input, target)
 
                     if (
-                            not target_dtype.is_floating_point and reduction != "mean"
+                            not target_dtype.is_floating_point and reduction != "mean" and ii is not None
                     ):
                         # target is completely filled with ii
                         input = make_input(batch_dims, in_features)

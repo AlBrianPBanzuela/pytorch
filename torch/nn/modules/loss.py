@@ -1525,7 +1525,7 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
     ]
     num_classes: int
     out_features: tuple[int, ...]
-    ignore_index: int
+    ignore_index: int | None
     label_smoothing: float
     options: LinearCrossEntropyOptions | None
 
@@ -1539,7 +1539,7 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
         dtype=None,
         reduction: str = "mean",
         weight: Tensor | None = None,
-        ignore_index: int = -100,
+        ignore_index: int | None = None,
         label_smoothing: float = 0.0,
         options: LinearCrossEntropyOptions | None = None,
     ) -> None:
