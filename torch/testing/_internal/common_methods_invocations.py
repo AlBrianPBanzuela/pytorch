@@ -3183,7 +3183,14 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
 
     sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
 
-    for size, min, max in product(sizes, [0, -10], [0, 10]):
+    minima = [0]
+    maxima = [10]
+
+    if dtype.is_signed:
+        minima.append(-10)
+        maxima.append(0)
+
+    for size, min, max in product(sizes, minima, maxima):
         # construct sample input omitting bins arg
         yield SampleInput(make_arg(size), min=min, max=max)
 
@@ -20646,6 +20653,9 @@ op_db: list[OpInfo] = [
     OpInfo('histc',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64),
+           dtypesIfMPS=floating_types_and(
+               torch.bfloat16, torch.float16, torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64
+           ),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
@@ -22161,7 +22171,6 @@ op_db: list[OpInfo] = [
         supports_gradgrad=True,
         skips=(
             # Exception: The operator 'aten::grid_sampler_2d_backward' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
         ),
@@ -22177,10 +22186,9 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
-            # Exception: The operator 'aten::grid_sampler_2d_backward' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=2e-6),
+                                            torch.float16: tol(atol=5e-3, rtol=4e-3)}),
+                         "TestConsistency", "test_output_grad_match", device_type="mps"),
         ),),
     # TODO: Remove grid_sampler_3d tests once `nn.functional.grid_sample` has
     # MPS support for all cases.
@@ -22705,6 +22713,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
             # Error: The operator 'aten::hash_tensor.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
+            # NotImplementedError: aten::hash_tensor.out
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default', device_type='mps'),
         )
     ),
     OpInfo(
