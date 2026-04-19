@@ -33,9 +33,9 @@ bool is_windows_drive_root(const std::string& path) {
 
 std::string strip_trailing_separator(const std::string& path) {
   std::string stripped_path = path;
-  while (
-      stripped_path.size() > 1 && c10::ends_with(stripped_path, k_separator) &&
-      !is_windows_drive_root(stripped_path)) {
+  while (stripped_path.size() > 1 &&
+         c10::ends_with(stripped_path, k_separator) &&
+         !is_windows_drive_root(stripped_path)) {
     stripped_path.pop_back();
   }
   return stripped_path;
@@ -111,7 +111,8 @@ std::string create_temp_dir() {
   return path;
 }
 
-std::string detect_file_prefix(const std::vector<std::string>& found_filenames) {
+std::string detect_file_prefix(
+    const std::vector<std::string>& found_filenames) {
   if (found_filenames.size() < 2) {
     return "";
   }
