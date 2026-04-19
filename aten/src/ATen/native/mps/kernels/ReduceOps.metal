@@ -489,7 +489,6 @@ kernel void sum_reduction_inner(
     device TO* output [[buffer(1)]],
     constant uint2& sizes [[buffer(2)]], // [M, N]
     constant float& divisor [[buffer(3)]], // >0 divides accumulator before cast
-    uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
@@ -546,7 +545,6 @@ kernel void sum_reduction_inner(
       device TO * output [[buffer(1)]],                         \
       constant uint2 & sizes [[buffer(2)]],                     \
       constant float& divisor [[buffer(3)]],                    \
-      uint tid [[thread_position_in_threadgroup]],              \
       uint tptg [[threads_per_threadgroup]],                    \
       uint tgid [[threadgroup_position_in_grid]],               \
       uint simd_lane_id [[thread_index_in_simdgroup]],          \

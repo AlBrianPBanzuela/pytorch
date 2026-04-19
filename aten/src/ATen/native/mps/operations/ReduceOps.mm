@@ -892,9 +892,8 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
   // For large full reductions (output is scalar), use multi-TG with a
   // two-pass approach: first pass splits work across num_groups TGs writing
   // partial sums, second pass reduces the partials to the final scalar.
-  if (output.numel() == 1 && reduction_size > MAX_THREADGROUP_SIZE) {
-    auto num_groups = std::min(static_cast<uint32_t>(512),
-                               c10::metal::ceil_div(reduction_size, MAX_THREADGROUP_SIZE * NCHAINS));
+  if (output.numel() == 1 && reduction_size > MAX_THREADGROUP_SIZE * NCHAINS) {
+    auto num_groups = std::min(512u, c10::metal::ceil_div(reduction_size, MAX_THREADGROUP_SIZE * NCHAINS));
 
     // elems_per_group * num_groups must equal reduction_size exactly,
     // otherwise pass 1's last TG reads past the input's logical end.
@@ -984,7 +983,7 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
     bool is_outer_reduction = (num_reduced == 1 && reduced_dim < input.dim() - 1 && input.is_contiguous());
     bool is_inner_reduction = (num_reduced == 1 && reduced_dim == input.dim() - 1 && input.is_contiguous());
 
-    if (is_outer_reduction && reduced_dim == 0) {
+    if (is_outer_reduction && reduced_dim == 0 && output.is_contiguous()) {
       uint32_t M = input.size(0);
       uint32_t N = input.numel() / M;
 
@@ -1011,7 +1010,7 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
       return;
     }
 
-    if (is_inner_reduction) {
+    if (is_inner_reduction && output.is_contiguous()) {
       // M = product of all non-reduced dims, N = size of last dim
       uint32_t N = input.size(input.dim() - 1);
       uint32_t M = input.numel() / N;
