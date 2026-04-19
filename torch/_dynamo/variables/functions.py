@@ -3182,6 +3182,19 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 tma_descriptor_metadata[k] = v.to_metadata()
                 combined_args[k] = v.get_tensor()
 
+        # Unwrap tl.constexpr wrapper objects to their underlying values
+        try:
+            from triton.language.core import constexpr as tl_constexpr
+
+            for k, v in combined_args.items():
+                if (
+                    isinstance(v, variables.UserDefinedObjectVariable)
+                    and isinstance(v.value, tl_constexpr)
+                ):
+                    combined_args[k] = variables.ConstantVariable.create(v.value.value)
+        except ImportError:
+            pass
+
         combined_args_vt = {
             VariableTracker.build(tx, k): v for k, v in combined_args.items()
         }
