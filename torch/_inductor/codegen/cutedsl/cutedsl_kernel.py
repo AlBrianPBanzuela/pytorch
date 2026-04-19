@@ -255,6 +255,10 @@ class CuteDSLKernelWrapper:
         export_fn = getattr(self.module, self.export_jit_name)
         stream_obj = cuda.CUstream(0)
         compile_args = [self._compile_arg_from_runtime_arg(arg) for arg in args]
+        # TODO: CuTeDSL native cpp_wrapper support is still only mature for
+        # directly exportable @cute.jit entrypoints. Higher-level Python
+        # wrappers, including the current FlashAttention interface, still need
+        # the Python extern path until they expose a lower-level export target.
         try:
             compiled = cute.compile(export_fn, *compile_args, stream=stream_obj)
         except Exception as exc:
