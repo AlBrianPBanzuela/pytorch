@@ -615,7 +615,12 @@ class AsyncCompile:
                     f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
                 )
 
-            return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+            return CuteDSLKernelWrapper(
+                getattr(mod, main_func_name),
+                kernel_path=path,
+                module=mod,
+                export_jit_name=getattr(mod, "__inductor_export_jit_name__", None),
+            )
 
         if get_compile_threads() <= 1:
             return task()

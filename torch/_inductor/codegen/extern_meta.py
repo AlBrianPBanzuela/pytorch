@@ -15,6 +15,7 @@ class ExternKernelBackend(enum.Enum):
 class ExternKernelLaunch(enum.Enum):
     PYTHON = "python"
     CUBIN = "cubin"
+    C_ABI = "c_abi"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -22,3 +23,4 @@ class ExternMeta:
     backend: ExternKernelBackend
     arg_names: list[str]
     launch: ExternKernelLaunch = ExternKernelLaunch.PYTHON
+    export_jit_name: str | None = None

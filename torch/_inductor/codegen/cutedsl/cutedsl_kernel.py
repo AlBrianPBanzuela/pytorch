@@ -2,6 +2,10 @@
 import contextlib
 import dataclasses
 import logging
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import textwrap
 from collections.abc import Callable
 from typing import Any
@@ -45,9 +49,18 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 class CuteDSLKernelWrapper:
     """Wrapper to provide .run() interface for CuteDSL kernels"""
 
-    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
+    def __init__(
+        self,
+        kernel_fn: Callable[..., Any],
+        kernel_path: str | None = None,
+        module: Any | None = None,
+        export_jit_name: str | None = None,
+    ):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
+        self.module = module
+        self.export_jit_name = export_jit_name
+        self._native_cabi_artifact: dict[str, str] | None = None
         kernel_code_log.info("CuteDSL kernel path: %s", kernel_path)
 
     def run(self, *args, stream=None, **kwargs):
@@ -63,6 +76,193 @@ class CuteDSLKernelWrapper:
             Result of the kernel execution
         """
         return self.kernel_fn(*args, stream=stream, **kwargs)
+
+    @staticmethod
+    def _is_cutedsl_tensor_arg(arg: Any) -> bool:
+        return hasattr(arg, "dynamic_shapes_mask") and hasattr(
+            arg, "dynamic_strides_mask"
+        )
+
+    @staticmethod
+    def _compile_arg_from_runtime_arg(arg: Any) -> Any:
+        if isinstance(arg, torch.Tensor):
+            from cutlass.cute.runtime import from_dlpack, make_fake_tensor
+
+            runtime_tensor = from_dlpack(arg)
+            return make_fake_tensor(
+                runtime_tensor.element_type,
+                runtime_tensor.shape,
+                runtime_tensor.stride,
+                assumed_align=runtime_tensor._assumed_align,
+            )
+        return arg
+
+    def _emit_native_cabi_shim(
+        self,
+        export_dir: Path,
+        prefix: str,
+        arg_names: list[str],
+        rectified_args: list[Any],
+    ) -> dict[str, str]:
+        wrapper_name = f"cute_dsl_{prefix}_wrapper"
+        module_type = f"{prefix}_Kernel_Module_t"
+        shim_symbol = f"torchinductor_{prefix}_invoke"
+        params: list[str] = []
+        setup_lines: list[str] = []
+        call_args: list[str] = []
+
+        for name, arg in zip(arg_names, rectified_args):
+            if name == "stream":
+                continue
+
+            if self._is_cutedsl_tensor_arg(arg):
+                params.extend(
+                    [
+                        f"void* {name}_data",
+                        f"const int64_t* {name}_sizes",
+                        f"const int64_t* {name}_strides",
+                    ]
+                )
+                setup_lines.append(f"{prefix}_Tensor_{name}_t {name}{{}};")
+                setup_lines.append(f"{name}.data = {name}_data;")
+
+                dynamic_shape_index = 0
+                for i, dynamic in enumerate(arg.dynamic_shapes_mask):
+                    if dynamic:
+                        setup_lines.append(
+                            f"{name}.dynamic_shapes[{dynamic_shape_index}] = "
+                            f"static_cast<int32_t>({name}_sizes[{i}]);"
+                        )
+                        dynamic_shape_index += 1
+
+                dynamic_stride_index = 0
+                stride_type = (
+                    "int32_t" if getattr(arg, "_use_32bit_stride", False) else "int64_t"
+                )
+                for i, dynamic in enumerate(arg.dynamic_strides_mask):
+                    if dynamic:
+                        setup_lines.append(
+                            f"{name}.dynamic_strides[{dynamic_stride_index}] = "
+                            f"static_cast<{stride_type}>({name}_strides[{i}]);"
+                        )
+                        dynamic_stride_index += 1
+
+                call_args.append(f"&{name}")
+                continue
+
+            if isinstance(arg, bool):
+                params.append(f"bool {name}")
+                call_args.append(name)
+                continue
+            if isinstance(arg, int):
+                params.append(f"int64_t {name}")
+                call_args.append(name)
+                continue
+            if isinstance(arg, float):
+                params.append(f"float {name}")
+                call_args.append(name)
+                continue
+
+            raise NotImplementedError(
+                f"Unsupported CuTeDSL C ABI argument {name}: {type(arg)}"
+            )
+
+        params.append("cudaStream_t stream")
+        call_args.append("stream")
+
+        shim_source = textwrap.dedent(
+            f"""
+            #include <cstdint>
+            #include <mutex>
+
+            #include "{prefix}.h"
+
+            extern "C" void {shim_symbol}({", ".join(params)}) {{
+                static {module_type} module;
+                static std::once_flag module_load_once;
+                std::call_once(module_load_once, []() {{
+                    {prefix}_Kernel_Module_Load(&module);
+                }});
+                {" ".join(setup_lines)}
+                {wrapper_name}(&module, {", ".join(call_args)});
+            }}
+            """
+        )
+
+        shim_cpp_path = export_dir / f"{prefix}_shim.cpp"
+        shim_cpp_path.write_text(shim_source)
+        shim_so_path = export_dir / f"lib{prefix}_shim.so"
+
+        cxx = os.environ.get("CXX") or os.environ.get("CC") or "g++"
+        from torch.utils.cpp_extension import include_paths
+
+        compile_cmd = [
+            cxx,
+            "-shared",
+            "-fPIC",
+            "-std=c++17",
+            "-I",
+            str(export_dir),
+        ]
+        for include_dir in include_paths("cuda"):
+            compile_cmd.extend(["-I", include_dir])
+        compile_cmd.extend(
+            [
+                "-o",
+                str(shim_so_path),
+                str(shim_cpp_path),
+                str(export_dir / f"{prefix}.o"),
+            ]
+        )
+        subprocess.run(
+            compile_cmd,
+            check=True,
+        )
+        return {
+            "shared_object_path": str(shim_so_path),
+            "symbol_name": shim_symbol,
+        }
+
+    def prepare_cabi_kernel(
+        self,
+        kernel_name: str,
+        args: list[Any],
+        stream: int,
+    ) -> dict[str, str]:
+        if self._native_cabi_artifact is not None:
+            return self._native_cabi_artifact
+
+        if self.module is None or self.export_jit_name is None:
+            raise RuntimeError(
+                "CuTeDSL kernel is not configured for exported C ABI launch"
+            )
+
+        import cutlass.cute as cute
+        import cuda.bindings.driver as cuda
+
+        export_fn = getattr(self.module, self.export_jit_name)
+        stream_obj = cuda.CUstream(0)
+        compile_args = [self._compile_arg_from_runtime_arg(arg) for arg in args]
+        compiled = cute.compile(export_fn, *compile_args, stream=stream_obj)
+        rectified_args = compiled.args_spec.get_rectified_args(
+            compile_args, {"stream": stream_obj}
+        )
+        arg_names = [
+            *compiled.args_spec.args_spec.args,
+            *compiled.args_spec.args_spec.kwonlyargs,
+        ]
+
+        export_dir = Path(tempfile.mkdtemp(prefix=f"{kernel_name}_cabi_"))
+        prefix = f"{kernel_name}_cabi"
+        compiled.export_to_c(
+            file_path=str(export_dir),
+            file_name=prefix,
+            function_prefix=prefix,
+        )
+        self._native_cabi_artifact = self._emit_native_cabi_shim(
+            export_dir, prefix, arg_names, rectified_args
+        )
+        return self._native_cabi_artifact
 
 
 @dataclasses.dataclass
@@ -116,6 +316,7 @@ class CuteDSLTemplateKernel(Kernel):
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
         self.named_input_nodes: dict[str, Buffer] = {}
+        self.export_jit_name: str | None = None
 
         # Create named input nodes mapping
         for i, input_node in enumerate(input_nodes):
@@ -168,6 +369,7 @@ class CuteDSLTemplateKernel(Kernel):
             "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
             "set_cute_hash": self.set_cute_hash,
+            "set_export_jit_name": self.set_export_jit_name,
         }
 
         # Render the template with the environment and provided kwargs
@@ -184,6 +386,10 @@ class CuteDSLTemplateKernel(Kernel):
         full_code = imports + rendered_code
 
         return PartialRender(full_code, self.render_hooks)
+
+    def set_export_jit_name(self, name: str) -> str:
+        self.export_jit_name = name
+        return f'__inductor_export_jit_name__ = "{name}"'
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -395,12 +601,19 @@ class CuteDSLTemplateKernel(Kernel):
 
         from torch._inductor.codegen.extern_meta import (
             ExternKernelBackend,
+            ExternKernelLaunch,
             ExternMeta,
         )
 
         extern_meta = ExternMeta(
             backend=ExternKernelBackend.CUTEDSL,
             arg_names=arg_names,
+            launch=(
+                ExternKernelLaunch.C_ABI
+                if self.export_jit_name is not None
+                else ExternKernelLaunch.PYTHON
+            ),
+            export_jit_name=self.export_jit_name,
         )
         wrapper.generate_kernel_call(
             name,

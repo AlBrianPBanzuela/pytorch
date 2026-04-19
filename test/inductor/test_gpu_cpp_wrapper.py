@@ -361,8 +361,8 @@ class TestGpuWrapper(InductorTestCase):
         self.assertNotIn('R"TRITON(', code)
 
     def test_extern_kernel_codegen_uses_extern_runtime(self):
-        """Test that extern (non-Triton) kernels in cpp_wrapper emit the shared
-        extern kernel runtime structures instead of the Triton lazy compile path."""
+        """Test that non-exportable extern kernels in cpp_wrapper stay on the
+        shared Python extern runtime instead of the Triton lazy compile path."""
         if not RUN_GPU:
             self.skipTest("GPU not available")
 
@@ -371,37 +371,142 @@ class TestGpuWrapper(InductorTestCase):
         except ImportError:
             self.skipTest("cutlass (CuTeDSL) not available")
 
+        from unittest.mock import patch
+
         from torch._inductor.codegen.cutedsl.cutedsl_template import (
             CuteDSLTemplate,
         )
+        from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
 
-        if not CuteDSLTemplate.all_templates:
-            self.skipTest("No CuTeDSL templates registered")
+        try:
+            from .test_cutedsl_template import CUTEDSL_ADD_TEMPLATE
+        except ImportError:
+            from test_cutedsl_template import CUTEDSL_ADD_TEMPLATE
 
-        def fn(a, b):
-            return torch.mm(a, b)
+        template = CuteDSLTemplate(
+            name=f"test_cpp_wrapper_python_extern_add_{id(self)}",
+            source=CUTEDSL_ADD_TEMPLATE,
+        )
 
-        a = torch.randn(64, 64, device=self.device)
-        b = torch.randn(64, 64, device=self.device)
-        with config.patch({
-            "cpp_wrapper": True,
-            "max_autotune_gemm_backends": "CUTEDSL",
-            "max_autotune": True,
-        }):
-            compiled = torch.compile(fn)
-            _, code = test_torchinductor.run_and_get_cpp_code(compiled, a, b)
+        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
+            choices = []
+            error = template.maybe_append_choice(
+                choices,
+                input_nodes=[a, b],
+                layout=a.get_layout(),
+                THREADS_PER_BLOCK=256,
+            )
 
-        if "cutedsl_" not in code:
-            self.skipTest("CuTeDSL template was not selected by autotuning")
+            if error or not choices:
+                default_lowering = lowerings[torch.ops.aten.add.Tensor]
+                return default_lowering(a, b)
 
+            return choices[0].output_node()
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(128, 16, device=self.device, dtype=torch.float32)
+        y = torch.randn(128, 16, device=self.device, dtype=torch.float32)
+        expected = x + y
+
+        with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
+            compiled = torch.compile(
+                fn,
+                backend="inductor",
+                options={"cpp_wrapper": True},
+            )
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x, y)
+
+        self.assertTrue(torch.allclose(actual, expected, atol=1e-5))
         self.assertIn("static ExternModuleState _extern_kernel_module_state;", code)
         self.assertIn("ExternKernelSpec", code)
         self.assertIn("runExternKernel(", code)
         self.assertIn("startExternKernelCompilesForModule(", code)
-        self.assertNotIn(
-            "triton_meta is required",
-            code,
+        self.assertNotIn("ExternCApiKernelState", code)
+        self.assertNotIn("ensureExternCApiKernelReady(", code)
+
+    def test_exportable_extern_kernel_codegen_uses_native_cabi_runtime(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        try:
+            import cutlass.cute  # noqa: F401
+        except ImportError:
+            self.skipTest("cutlass (CuTeDSL) not available")
+
+        from unittest.mock import patch
+
+        from torch._inductor.codegen.cutedsl.cutedsl_template import (
+            CuteDSLTemplate,
         )
+        from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
+
+        try:
+            from .test_cutedsl_template import CUTEDSL_ADD_TEMPLATE
+        except ImportError:
+            from test_cutedsl_template import CUTEDSL_ADD_TEMPLATE
+
+        exportable_source = CUTEDSL_ADD_TEMPLATE.replace(
+            "@cute.jit\n",
+            '{{ set_export_jit_name(kernel_name ~ "_jit") }}\n\n@cute.jit\n',
+            1,
+        )
+        exportable_source = exportable_source.replace(
+            (
+                "def {{kernel_name}}_jit("
+                "mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, stream):"
+            ),
+            (
+                "def {{kernel_name}}_jit("
+                "mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, "
+                "stream: cuda.CUstream):"
+            ),
+            1,
+        )
+        template = CuteDSLTemplate(
+            name=f"test_cpp_wrapper_exportable_add_{id(self)}",
+            source=exportable_source,
+        )
+
+        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
+            choices = []
+            error = template.maybe_append_choice(
+                choices,
+                input_nodes=[a, b],
+                layout=a.get_layout(),
+                THREADS_PER_BLOCK=256,
+            )
+
+            if error or not choices:
+                default_lowering = lowerings[torch.ops.aten.add.Tensor]
+                return default_lowering(a, b)
+
+            return choices[0].output_node()
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(128, 16, device=self.device, dtype=torch.float32)
+        y = torch.randn(128, 16, device=self.device, dtype=torch.float32)
+        expected = x + y
+
+        with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
+            compiled = torch.compile(
+                fn,
+                backend="inductor",
+                options={"cpp_wrapper": True},
+            )
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x, y)
+
+        self.assertTrue(torch.allclose(actual, expected, atol=1e-5))
+        self.assertIn("static ExternModuleState _extern_kernel_module_state;", code)
+        self.assertIn("ExternCApiKernelState", code)
+        self.assertIn("ensureExternCApiKernelReady(", code)
+        self.assertIn("startExternKernelCompilesForModule(", code)
+        self.assertNotIn("runExternKernel(", code)
 
 instantiate_parametrized_tests(TestGpuWrapper)
 

@@ -233,6 +233,54 @@ def {{kernel_name}}_kernel():
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_cutedsl_add_e2e_cpp_wrapper(self):
+        from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
+        from torch._inductor.utils import run_and_get_cpp_code
+
+        template = CuteDSLTemplate(
+            name=f"test_add_e2e_cpp_wrapper_{id(self)}",
+            source=CUTEDSL_ADD_TEMPLATE,
+        )
+
+        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
+            choices = []
+            error = template.maybe_append_choice(
+                choices,
+                input_nodes=[a, b],
+                layout=a.get_layout(),
+                THREADS_PER_BLOCK=256,
+            )
+
+            if error or not choices:
+                default_lowering = lowerings[torch.ops.aten.add.Tensor]
+                return default_lowering(a, b)
+
+            return choices[0].output_node()
+
+        with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
+
+            def test_add(x, y):
+                return x + y
+
+            device = "cuda"
+            x = torch.randn(128, 4, device=device, dtype=torch.float32)
+            y = torch.randn(128, 4, device=device, dtype=torch.float32)
+
+            compiled_fn = torch.compile(
+                test_add,
+                backend="inductor",
+                options={"cpp_wrapper": True},
+            )
+            result, code = run_and_get_cpp_code(compiled_fn, x, y)
+
+            self.assertIn("static ExternModuleState _extern_kernel_module_state;", code)
+            self.assertIn("runExternKernel(", code)
+
+            expected = x + y
+            self.assertTrue(torch.allclose(result, expected, atol=1e-5))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_cutedsl_add_e2e_autotune(self):
         """E2E test with multiple CuteDSL template variants for autotuning."""
         from torch._inductor.ir import TensorBox

@@ -861,6 +861,138 @@ class DeferredExternCallWrapper:
         prefix.writeline("}")
 
 
+@dataclasses.dataclass
+class DeferredExternCApiCallWrapper:
+    """Deferred wrapper for exportable extern CUDA kernels that prepare a
+    CuTeDSL-exported native shim once and then launch it without a Python
+    callback on the steady-state path."""
+
+    wrapper_name: str
+    kernel_name: str
+    kernel_name_to_body: dict[str, str]
+    arg_types: list[Any]
+    extern_meta: ExternMeta
+
+    def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
+        if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
+            return f"const {name}_type_& {name}"
+        elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+            return f"int64_t {name}"
+        elif arg_type is float:
+            return f"float {name}"
+        elif arg_type is bool:
+            return f"bool {name}"
+        else:
+            raise ValueError(f"Unexpected arg type {arg_type}")
+
+    def _get_shim_param_types(self, name: str, arg_type: Any) -> list[str]:
+        if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
+            return ["void*", "const int64_t*", "const int64_t*"]
+        elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+            return ["int64_t"]
+        elif arg_type is float:
+            return ["float"]
+        elif arg_type is bool:
+            return ["bool"]
+        else:
+            raise ValueError(f"Unexpected arg type {arg_type}")
+
+    def _get_shim_call_args(self, name: str, arg_type: Any) -> list[str]:
+        if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
+            return [f"{name}.data_ptr()", f"{name}.sizes()", f"{name}.strides()"]
+        return [name]
+
+    def generate(self, wrapper: CppWrapperGpu):
+        prefix = wrapper.prefix
+        kernel_name = self.kernel_name
+        arg_names = self.extern_meta.arg_names
+
+        wrapper._lazy_extern_kernel_names.append(kernel_name)
+        if not wrapper._lazy_extern_module_state_emitted:
+            prefix.writeline(
+                "static ExternModuleState _extern_kernel_module_state;"
+            )
+            wrapper._lazy_extern_module_state_emitted = True
+
+        kernel_source_str = self.kernel_name_to_body.get(kernel_name, "")
+        kernel_source_path = write_text(kernel_source_str)
+        prefix.writeline(
+            f"static const char* {kernel_name}_source_path = "
+            f"{cpp_string_literal(kernel_source_path)};"
+        )
+        prefix.writeline(
+            f"static const ExternKernelSpec {kernel_name}_spec = "
+            f'{{"{kernel_name}", {kernel_name}_source_path}};'
+        )
+        prefix.writeline(
+            f"static ExternCApiKernelState {kernel_name}_cabi_state;"
+        )
+
+        template_types = [
+            f"typename {name}_type_"
+            for name, arg_type in zip(arg_names, self.arg_types)
+            if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
+        ]
+        if template_types:
+            prefix.writeline(f"template <{', '.join(template_types)}>")
+
+        param_lines = [
+            self._get_cpp_param_type(name, arg_type)
+            for name, arg_type in zip(arg_names, self.arg_types)
+        ]
+        param_lines.append("int32_t device_idx_")
+        param_lines.append(
+            maybe_hipify_code_wrapper(
+                f"{wrapper.device_codegen.cpp_stream_type()} stream_"
+            )
+        )
+
+        prefix.writeline(
+            f"static __attribute__((noinline)) void {self.wrapper_name}("
+        )
+        with prefix.indent():
+            for i, param in enumerate(param_lines):
+                comma = "," if i < len(param_lines) - 1 else ""
+                prefix.writeline(f"{param}{comma}")
+        prefix.writeline("){")
+
+        with prefix.indent():
+            prefix.writeline("(void)device_idx_;")
+            prepare_args = [
+                "&_extern_kernel_module_state",
+                f'"{kernel_name}"',
+                f"&{kernel_name}_cabi_state",
+                "stream_",
+            ]
+            prepare_args.extend(arg_names)
+            prefix.writeline(
+                f"ensureExternCApiKernelReady({', '.join(prepare_args)});"
+            )
+
+            shim_param_types = [
+                shim_type
+                for name, arg_type in zip(arg_names, self.arg_types)
+                for shim_type in self._get_shim_param_types(name, arg_type)
+            ]
+            shim_param_types.append(
+                maybe_hipify_code_wrapper(f"{wrapper.device_codegen.cpp_stream_type()}")
+            )
+            prefix.writeline(
+                f"using FnType = void (*)({', '.join(shim_param_types)});"
+            )
+            prefix.writeline(
+                f"auto fn = reinterpret_cast<FnType>({kernel_name}_cabi_state.function);"
+            )
+            shim_call_args = [
+                call_arg
+                for name, arg_type in zip(arg_names, self.arg_types)
+                for call_arg in self._get_shim_call_args(name, arg_type)
+            ]
+            shim_call_args.append("stream_")
+            prefix.writeline(f"fn({', '.join(shim_call_args)});")
+        prefix.writeline("}")
+
+
 class CppWrapperGpu(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
@@ -877,6 +1009,9 @@ class CppWrapperGpu(CppWrapperCpu):
         self._lazy_kernel_names: list[str] = []
         self._lazy_module_state_emitted = False
         self._extern_call_wrappers: dict[str, DeferredExternCallWrapper] = {}
+        self._extern_cabi_call_wrappers: dict[
+            str, DeferredExternCApiCallWrapper
+        ] = {}
         self._lazy_extern_kernel_names: list[str] = []
         self._lazy_extern_module_state_emitted = False
 
@@ -1027,6 +1162,9 @@ static struct TritonKernelCompileInit {{
         # Generate extern kernel callers (e.g. CuTeDSL)
         self.prefix = IndentedBuffer()
         for kernel in self._extern_call_wrappers.values():
+            self.prefix.writeline("\n")
+            kernel.generate(self)
+        for kernel in self._extern_cabi_call_wrappers.values():
             self.prefix.writeline("\n")
             kernel.generate(self)
 
@@ -1340,6 +1478,28 @@ static struct ExternKernelCompileInit {{
                     self._kernel_name_to_body,
                     arg_types,
                     extern_meta=extern_meta,
+                )
+
+            device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)
+            call_args.append(device_idx)
+            call_args.append(stream)
+            self.writeline(f"{wrapper_name}({', '.join(call_args)});")
+            return
+
+        if (
+            isinstance(extern_meta, ExternMeta)
+            and extern_meta.launch == ExternKernelLaunch.C_ABI
+        ):
+            wrapper_name = f"call_{kernel_name}"
+            if wrapper_name not in self._extern_cabi_call_wrappers:
+                self._extern_cabi_call_wrappers[wrapper_name] = (
+                    DeferredExternCApiCallWrapper(
+                        wrapper_name,
+                        kernel_name,
+                        self._kernel_name_to_body,
+                        arg_types,
+                        extern_meta=extern_meta,
+                    )
                 )
 
             device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)

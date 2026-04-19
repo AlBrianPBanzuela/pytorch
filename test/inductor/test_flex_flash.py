@@ -14,7 +14,11 @@ from torch._inductor.kernel.flex.flex_flash_attention import (
     HierarchicalIndex,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.utils import (
+    run_and_get_code,
+    run_and_get_cpp_code,
+    run_fw_bw_and_get_code,
+)
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
     AuxRequest,
@@ -1259,6 +1263,41 @@ class TestFlexFlash(InductorTestCase):
             code_str,
             "Generated code should set __cute_hash__ on score_mod for fast hashing",
         )
+
+    @xfailIfSM120OrLater
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_cpp_wrapper_uses_extern_runtime(self, device, dtype):
+        q, k, v = create_test_tensors(
+            batch_size=2,
+            num_heads=4,
+            seq_len=128,
+            dim=64,
+            dtype=dtype,
+            device=device,
+        )
+        expected = flex_attention(
+            q,
+            k,
+            v,
+            score_mod=_causal,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        compiled_fn = torch.compile(
+            flex_attention,
+            options={"cpp_wrapper": True},
+        )
+        actual, code = run_and_get_cpp_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=_causal,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+
+        self.assertEqual(actual, expected)
+        self.assertIn("static ExternModuleState _extern_kernel_module_state;", code)
+        self.assertIn("runExternKernel(", code)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
