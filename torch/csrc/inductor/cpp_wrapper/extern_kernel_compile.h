@@ -32,8 +32,8 @@ static PyObject* extern_prepare_cabi_kernel = nullptr;
 
 static inline void loadExternCompileFuncs() {
   if (extern_kernel_compile_module == nullptr) {
-    extern_kernel_compile_module = PyImport_ImportModule(
-        "torch._inductor.runtime.extern_kernel_compile");
+    extern_kernel_compile_module =
+        PyImport_ImportModule("torch._inductor.runtime.extern_kernel_compile");
     AOTI_TORCH_CHECK(
         extern_kernel_compile_module,
         "Failed to import torch._inductor.runtime.extern_kernel_compile");
@@ -48,8 +48,8 @@ static inline void loadExternCompileFuncs() {
         PyObject_GetAttrString(extern_kernel_compile_module, "run_kernel");
     AOTI_TORCH_CHECK(extern_run_kernel, "Failed to get run_kernel function");
 
-    extern_prepare_cabi_kernel =
-        PyObject_GetAttrString(extern_kernel_compile_module, "prepare_cabi_kernel");
+    extern_prepare_cabi_kernel = PyObject_GetAttrString(
+        extern_kernel_compile_module, "prepare_cabi_kernel");
     AOTI_TORCH_CHECK(
         extern_prepare_cabi_kernel,
         "Failed to get prepare_cabi_kernel function");
@@ -77,8 +77,7 @@ static inline void startExternKernelCompile(
   RAIIPyObject py_name = PyUnicode_FromString(kernel_name.c_str());
   RAIIPyObject py_source_path =
       PyUnicode_FromString(kernel_source_path.c_str());
-  AOTI_TORCH_CHECK(
-      py_name && py_source_path, "Failed to create Python args");
+  AOTI_TORCH_CHECK(py_name && py_source_path, "Failed to create Python args");
 
   RAIIPyObject call_args =
       PyTuple_Pack(3, pending_kernels, py_name.get(), py_source_path.get());
@@ -94,8 +93,7 @@ static inline void startExternKernelCompilesForModule(
     const ExternKernelSpec* const* kernel_specs,
     size_t num_kernel_specs) {
   loadExternCompileFuncs();
-  PyObject* pending_kernels =
-      getPendingKernelsForExternModule(module_state);
+  PyObject* pending_kernels = getPendingKernelsForExternModule(module_state);
   for (size_t i = 0; i < num_kernel_specs; ++i) {
     const ExternKernelSpec* spec = kernel_specs[i];
     AOTI_TORCH_CHECK(spec, "Invalid extern kernel spec");
@@ -139,11 +137,7 @@ static inline void ensureExternCApiKernelReady(
   (void)dummy;
 
   RAIIPyObject call_args = PyTuple_Pack(
-      4,
-      pending_kernels,
-      py_name.get(),
-      py_stream.get(),
-      py_args_list.get());
+      4, pending_kernels, py_name.get(), py_stream.get(), py_args_list.get());
   AOTI_TORCH_CHECK(call_args, "Failed to create call args");
 
   RAIIPyObject result =
@@ -162,9 +156,8 @@ static inline void ensureExternCApiKernelReady(
   std::string shared_object_path = PyUnicode_AsUTF8(py_shared_object_path);
   std::string symbol_name = PyUnicode_AsUTF8(py_symbol_name);
 
-  state->library_handle = dlopen(
-      shared_object_path.c_str(),
-      RTLD_NOW | RTLD_LOCAL);
+  state->library_handle =
+      dlopen(shared_object_path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (state->library_handle == nullptr) {
     std::string error_message = "Failed to dlopen extern C ABI kernel " +
         shared_object_path + ": " + dlerror();
@@ -193,8 +186,7 @@ static inline void runExternKernel(
   loadLazyCompileFuncs();
   loadExternCompileFuncs();
 
-  PyObject* pending_kernels =
-      getPendingKernelsForExternModule(module_state);
+  PyObject* pending_kernels = getPendingKernelsForExternModule(module_state);
 
   RAIIPyObject py_name = PyUnicode_FromString(kernel_name);
   AOTI_TORCH_CHECK(py_name, "Failed to create kernel name string");
@@ -215,11 +207,7 @@ static inline void runExternKernel(
   (void)dummy;
 
   RAIIPyObject call_args = PyTuple_Pack(
-      4,
-      pending_kernels,
-      py_name.get(),
-      py_stream.get(),
-      py_args_list.get());
+      4, pending_kernels, py_name.get(), py_stream.get(), py_args_list.get());
   AOTI_TORCH_CHECK(call_args, "Failed to create call args");
 
   RAIIPyObject result = PyObject_CallObject(extern_run_kernel, call_args);

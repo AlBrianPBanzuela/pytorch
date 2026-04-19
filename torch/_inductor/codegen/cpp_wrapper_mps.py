@@ -46,6 +46,7 @@ class CppWrapperMps(CppWrapperGpu):
         graph_name: str = "",
         original_fxnode_name: str | None = None,
         current_stream_idx: int | None = None,
+        extern_meta: Any | None = None,
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
@@ -76,6 +77,10 @@ class CppWrapperMps(CppWrapperGpu):
                 raw_args=raw_args,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
+                graph_name=graph_name,
+                original_fxnode_name=original_fxnode_name,
+                current_stream_idx=current_stream_idx,
+                extern_meta=extern_meta,
             )
 
         assert device.type == "mps"

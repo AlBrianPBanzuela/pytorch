@@ -31,11 +31,13 @@ class CuteDSLTemplate(KernelTemplate):
         source: str,
         subgraph_fn: Any | None = None,
         mask_fn: Any | None = None,
+        export_jit_name: str | None = None,
     ) -> None:
         super().__init__(name)
         self.source = source
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
+        self.export_jit_name = export_jit_name
         self.template = CuteDSLTemplate._template_from_string(source)
         assert name not in self.all_templates, f"duplicate template name, {name}"
         CuteDSLTemplate.all_templates[name] = self
@@ -87,6 +89,7 @@ class CuteDSLTemplate(KernelTemplate):
                 output_node=self.output_node,
                 subgraphs=subgraphs,
             )
+            kernel.export_jit_name = self._resolve_export_jit_name(kernel_name)
             code = kernel.render(self.template, **kwargs)
 
             log.debug("Generated CuteDSL Code:\n%s", code)
@@ -113,6 +116,9 @@ class CuteDSLTemplate(KernelTemplate):
                     output_node=out_node,
                     subgraphs=subgraphs,
                 )
+                render_kernel.export_jit_name = self._resolve_export_jit_name(
+                    str(Placeholder.KERNEL_NAME)
+                )
 
                 def render():
                     return render_kernel.render(self.template, **kwargs)
@@ -129,6 +135,11 @@ class CuteDSLTemplate(KernelTemplate):
                 mutated_inputs=mutated_inputs,
                 template_kwargs=template_kwargs,
             )
+
+    def _resolve_export_jit_name(self, kernel_name: str) -> str | None:
+        if self.export_jit_name is None:
+            return None
+        return self.export_jit_name.format(kernel_name=kernel_name)
 
 
 class CuteDSLTemplateCaller(ChoiceCaller):

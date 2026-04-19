@@ -146,6 +146,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         graph_name="",
         original_fxnode_name=None,
         current_stream_idx=None,
+        extern_meta=None,
     ):
         """
         Generates kernel call code.

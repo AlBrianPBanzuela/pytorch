@@ -805,9 +805,7 @@ class DeferredExternCallWrapper:
 
         wrapper._lazy_extern_kernel_names.append(kernel_name)
         if not wrapper._lazy_extern_module_state_emitted:
-            prefix.writeline(
-                "static ExternModuleState _extern_kernel_module_state;"
-            )
+            prefix.writeline("static ExternModuleState _extern_kernel_module_state;")
             wrapper._lazy_extern_module_state_emitted = True
 
         kernel_source_str = self.kernel_name_to_body.get(kernel_name, "")
@@ -840,9 +838,7 @@ class DeferredExternCallWrapper:
             )
         )
 
-        prefix.writeline(
-            f"static __attribute__((noinline)) void {self.wrapper_name}("
-        )
+        prefix.writeline(f"static __attribute__((noinline)) void {self.wrapper_name}(")
         with prefix.indent():
             for i, param in enumerate(param_lines):
                 comma = "," if i < len(param_lines) - 1 else ""
@@ -854,9 +850,8 @@ class DeferredExternCallWrapper:
                 "&_extern_kernel_module_state",
                 f'"{kernel_name}"',
                 "stream_",
+                *arg_names,
             ]
-            for name in arg_names:
-                run_args.append(name)
             prefix.writeline(f"runExternKernel({', '.join(run_args)});")
         prefix.writeline("}")
 
@@ -903,15 +898,14 @@ class DeferredExternCApiCallWrapper:
         return [name]
 
     def generate(self, wrapper: CppWrapperGpu):
+        """Emit the deferred native C ABI wrapper for an exported extern kernel."""
         prefix = wrapper.prefix
         kernel_name = self.kernel_name
         arg_names = self.extern_meta.arg_names
 
         wrapper._lazy_extern_kernel_names.append(kernel_name)
         if not wrapper._lazy_extern_module_state_emitted:
-            prefix.writeline(
-                "static ExternModuleState _extern_kernel_module_state;"
-            )
+            prefix.writeline("static ExternModuleState _extern_kernel_module_state;")
             wrapper._lazy_extern_module_state_emitted = True
 
         kernel_source_str = self.kernel_name_to_body.get(kernel_name, "")
@@ -924,9 +918,7 @@ class DeferredExternCApiCallWrapper:
             f"static const ExternKernelSpec {kernel_name}_spec = "
             f'{{"{kernel_name}", {kernel_name}_source_path}};'
         )
-        prefix.writeline(
-            f"static ExternCApiKernelState {kernel_name}_cabi_state;"
-        )
+        prefix.writeline(f"static ExternCApiKernelState {kernel_name}_cabi_state;")
 
         template_types = [
             f"typename {name}_type_"
@@ -947,9 +939,7 @@ class DeferredExternCApiCallWrapper:
             )
         )
 
-        prefix.writeline(
-            f"static __attribute__((noinline)) void {self.wrapper_name}("
-        )
+        prefix.writeline(f"static __attribute__((noinline)) void {self.wrapper_name}(")
         with prefix.indent():
             for i, param in enumerate(param_lines):
                 comma = "," if i < len(param_lines) - 1 else ""
@@ -965,9 +955,7 @@ class DeferredExternCApiCallWrapper:
                 "stream_",
             ]
             prepare_args.extend(arg_names)
-            prefix.writeline(
-                f"ensureExternCApiKernelReady({', '.join(prepare_args)});"
-            )
+            prefix.writeline(f"ensureExternCApiKernelReady({', '.join(prepare_args)});")
 
             shim_param_types = [
                 shim_type
@@ -977,9 +965,7 @@ class DeferredExternCApiCallWrapper:
             shim_param_types.append(
                 maybe_hipify_code_wrapper(f"{wrapper.device_codegen.cpp_stream_type()}")
             )
-            prefix.writeline(
-                f"using FnType = void (*)({', '.join(shim_param_types)});"
-            )
+            prefix.writeline(f"using FnType = void (*)({', '.join(shim_param_types)});")
             prefix.writeline(
                 f"auto fn = reinterpret_cast<FnType>({kernel_name}_cabi_state.function);"
             )
@@ -1009,9 +995,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self._lazy_kernel_names: list[str] = []
         self._lazy_module_state_emitted = False
         self._extern_call_wrappers: dict[str, DeferredExternCallWrapper] = {}
-        self._extern_cabi_call_wrappers: dict[
-            str, DeferredExternCApiCallWrapper
-        ] = {}
+        self._extern_cabi_call_wrappers: dict[str, DeferredExternCApiCallWrapper] = {}
         self._lazy_extern_kernel_names: list[str] = []
         self._lazy_extern_module_state_emitted = False
 
@@ -1471,12 +1455,14 @@ static struct ExternKernelCompileInit {{
             and extern_meta.launch == ExternKernelLaunch.PYTHON
         ):
             wrapper_name = f"call_{kernel_name}"
+            assert arg_types is not None
+            extern_arg_types = list(arg_types)
             if wrapper_name not in self._extern_call_wrappers:
                 self._extern_call_wrappers[wrapper_name] = DeferredExternCallWrapper(
                     wrapper_name,
                     kernel_name,
                     self._kernel_name_to_body,
-                    arg_types,
+                    extern_arg_types,
                     extern_meta=extern_meta,
                 )
 
@@ -1491,13 +1477,15 @@ static struct ExternKernelCompileInit {{
             and extern_meta.launch == ExternKernelLaunch.C_ABI
         ):
             wrapper_name = f"call_{kernel_name}"
+            assert arg_types is not None
+            extern_arg_types = list(arg_types)
             if wrapper_name not in self._extern_cabi_call_wrappers:
                 self._extern_cabi_call_wrappers[wrapper_name] = (
                     DeferredExternCApiCallWrapper(
                         wrapper_name,
                         kernel_name,
                         self._kernel_name_to_body,
-                        arg_types,
+                        extern_arg_types,
                         extern_meta=extern_meta,
                     )
                 )

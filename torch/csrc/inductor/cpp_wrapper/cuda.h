@@ -1,6 +1,8 @@
 #pragma once
 #include <torch/csrc/inductor/cpp_wrapper/common.h>
 #include <torch/csrc/inductor/cpp_wrapper/device_internal/cuda.h>
+#include <torch/csrc/inductor/cpp_wrapper/extern_kernel_compile.h>
+#include <torch/csrc/inductor/cpp_wrapper/lazy_triton_compile.h>
 #include <torch/headeronly/util/Exception.h>
 
 template <typename T>
@@ -127,8 +129,8 @@ template <typename T>
 #endif
 }
 
-#include <torch/csrc/inductor/cpp_wrapper/lazy_triton_compile.h>
 #include <torch/csrc/inductor/cpp_wrapper/extern_kernel_compile.h>
+#include <torch/csrc/inductor/cpp_wrapper/lazy_triton_compile.h>
 
 #ifdef TORCH_INDUCTOR_PRECOMPILE_HEADERS
 #include <ATen/cuda/EmptyTensor.h>

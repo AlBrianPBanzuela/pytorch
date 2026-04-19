@@ -373,9 +373,7 @@ class TestGpuWrapper(InductorTestCase):
 
         from unittest.mock import patch
 
-        from torch._inductor.codegen.cutedsl.cutedsl_template import (
-            CuteDSLTemplate,
-        )
+        from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
         from torch._inductor.ir import TensorBox
         from torch._inductor.lowering import lowerings
 
@@ -438,9 +436,7 @@ class TestGpuWrapper(InductorTestCase):
 
         from unittest.mock import patch
 
-        from torch._inductor.codegen.cutedsl.cutedsl_template import (
-            CuteDSLTemplate,
-        )
+        from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
         from torch._inductor.ir import TensorBox
         from torch._inductor.lowering import lowerings
 
@@ -449,26 +445,10 @@ class TestGpuWrapper(InductorTestCase):
         except ImportError:
             from test_cutedsl_template import CUTEDSL_ADD_TEMPLATE
 
-        exportable_source = CUTEDSL_ADD_TEMPLATE.replace(
-            "@cute.jit\n",
-            '{{ set_export_jit_name(kernel_name ~ "_jit") }}\n\n@cute.jit\n',
-            1,
-        )
-        exportable_source = exportable_source.replace(
-            (
-                "def {{kernel_name}}_jit("
-                "mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, stream):"
-            ),
-            (
-                "def {{kernel_name}}_jit("
-                "mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, "
-                "stream: cuda.CUstream):"
-            ),
-            1,
-        )
         template = CuteDSLTemplate(
             name=f"test_cpp_wrapper_exportable_add_{id(self)}",
-            source=exportable_source,
+            source=CUTEDSL_ADD_TEMPLATE,
+            export_jit_name="{kernel_name}_jit",
         )
 
         def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
@@ -507,6 +487,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("ensureExternCApiKernelReady(", code)
         self.assertIn("startExternKernelCompilesForModule(", code)
         self.assertNotIn("runExternKernel(", code)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 

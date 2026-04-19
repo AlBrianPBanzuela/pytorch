@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+
 log = logging.getLogger(__name__)
 
 
@@ -48,9 +49,9 @@ class _SynchronousExternCompile:
 
 
 def _preload_cutedsl_modules() -> None:
+    import cuda.bindings.driver  # noqa: F401  # pyrefly: ignore [missing-import]
     import cutlass  # noqa: F401
     import cutlass.cute  # noqa: F401
-    import cuda.bindings.driver  # noqa: F401
     from cutlass._mlir.dialects import math as _mlir_math  # noqa: F401
 
     from torch._inductor.codegen.cutedsl import _cutedsl_utils  # noqa: F401

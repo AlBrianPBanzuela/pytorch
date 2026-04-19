@@ -3,11 +3,11 @@ import contextlib
 import dataclasses
 import logging
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import textwrap
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import sympy
@@ -237,13 +237,34 @@ class CuteDSLKernelWrapper:
                 "CuTeDSL kernel is not configured for exported C ABI launch"
             )
 
+        import cuda.bindings.driver as cuda  # pyrefly: ignore [missing-import]
         import cutlass.cute as cute
-        import cuda.bindings.driver as cuda
+
+        if not hasattr(self.module, self.export_jit_name):
+            available = [
+                name
+                for name in dir(self.module)
+                if callable(getattr(self.module, name))
+            ]
+            raise RuntimeError(
+                "Could not find exported CuTeDSL entrypoint "
+                f"'{self.export_jit_name}' for kernel '{kernel_name}'. "
+                f"Available callables: {available}"
+            )
 
         export_fn = getattr(self.module, self.export_jit_name)
         stream_obj = cuda.CUstream(0)
         compile_args = [self._compile_arg_from_runtime_arg(arg) for arg in args]
-        compiled = cute.compile(export_fn, *compile_args, stream=stream_obj)
+        try:
+            compiled = cute.compile(export_fn, *compile_args, stream=stream_obj)
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to prepare exported CuTeDSL C ABI kernel "
+                f"'{kernel_name}' via '{self.export_jit_name}'. The export target "
+                "must be a directly exportable @cute.jit entrypoint with CuTeDSL-"
+                "compatible arguments; higher-level Python wrappers are not "
+                "currently supported."
+            ) from exc
         rectified_args = compiled.args_spec.get_rectified_args(
             compile_args, {"stream": stream_obj}
         )
@@ -254,11 +275,17 @@ class CuteDSLKernelWrapper:
 
         export_dir = Path(tempfile.mkdtemp(prefix=f"{kernel_name}_cabi_"))
         prefix = f"{kernel_name}_cabi"
-        compiled.export_to_c(
-            file_path=str(export_dir),
-            file_name=prefix,
-            function_prefix=prefix,
-        )
+        try:
+            compiled.export_to_c(
+                file_path=str(export_dir),
+                file_name=prefix,
+                function_prefix=prefix,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to export CuTeDSL C ABI artifacts for "
+                f"'{kernel_name}' via '{self.export_jit_name}'."
+            ) from exc
         self._native_cabi_artifact = self._emit_native_cabi_shim(
             export_dir, prefix, arg_names, rectified_args
         )
@@ -384,6 +411,15 @@ class CuteDSLTemplateKernel(Kernel):
         # Always prepend the common imports
         imports = self.gen_imports()
         full_code = imports + rendered_code
+        if (
+            self.export_jit_name is not None
+            and "__inductor_export_jit_name__" not in rendered_code
+        ):
+            full_code = (
+                imports
+                + f'__inductor_export_jit_name__ = "{self.export_jit_name}"\n\n'
+                + rendered_code
+            )
 
         return PartialRender(full_code, self.render_hooks)
 
