@@ -2638,7 +2638,7 @@ class UntypedStorageVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "size":
+        if name in ("size", "nbytes"):
             if args or kwargs:
                 raise_args_mismatch(
                     tx,

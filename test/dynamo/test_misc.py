@@ -12328,6 +12328,14 @@ def ___make_guard_fn():
         self.assertEqual(x.untyped_storage().size(), 0)
         self.assertIs(s, x.untyped_storage())
 
+    def test_storage_nbytes(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.untyped_storage().nbytes()
+
+        x = torch.randn(10)
+        self.assertEqual(fn(x), x.untyped_storage().nbytes())
+
     def test_flat_name_to_original_fqn(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:
