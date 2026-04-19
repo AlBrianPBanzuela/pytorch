@@ -569,7 +569,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = compiled_fn(x, 1)
         self.assertEqual(ref, res)
 
-
     def test_pybind11_enum_as_dict_key(self):
         """Test pybind11 enum (RedOpType) works as dict key without graph break."""
         import torch.distributed as dist

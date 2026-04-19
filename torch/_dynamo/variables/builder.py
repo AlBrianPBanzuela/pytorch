@@ -160,6 +160,7 @@ from ..utils import (
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
+    is_pybind11_enum_member,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -171,7 +172,6 @@ from ..utils import (
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
-    is_pybind11_enum_member,
     tuple_iterator_getitem,
     tuple_iterator_len,
     unwrap_with_attr_name_if_wrapper,
@@ -4268,7 +4268,11 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_value_type(type(value)) and not isinstance(value, enum.Enum) and not is_pybind11_enum_member(value):
+        elif (
+            is_opaque_value_type(type(value))
+            and not isinstance(value, enum.Enum)
+            and not is_pybind11_enum_member(value)
+        ):
             return TorchScriptObjectVariable.create(value, value)
         elif is_opaque_reference_type(type(value)):
             # This is for handling opaque objects in custom ops
