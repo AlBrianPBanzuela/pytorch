@@ -6896,9 +6896,6 @@ def error_inputs_linear_cross_entropy(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg(2, 3), make_arg(2, 3), make_arg(2, 2), ignore_index=0),
                      error_regex="ignore_index cannot be specified when target contains probabilities")
 
-    yield ErrorInput(SampleInput(make_arg(2, 3), make_arg(2, 3), make_arg(4, 2)),
-                     error_regex="expected target with shape [(]2, 2[)], got [(]4, 2[)]")
-
     yield ErrorInput(SampleInput(make_arg(3), make_arg(2, 4, 3), make_arg(2, 4)),
                      error_regex=("K-dimensional loss defined by linear_weight shape [(]2, 4, 3[)]"
                                   " requires batched input, [(]N, 3[)], got unbatched input with shape [(]3,[)]"))

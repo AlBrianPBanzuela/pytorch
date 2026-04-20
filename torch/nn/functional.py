@@ -3685,7 +3685,11 @@ def linear_cross_entropy(
             ignored and does not contribute to the input
             gradient. Note that :attr:`ignore_index` is only
             applicable when the target contains class indices.
-            Default: -100.
+            Default: `None`. When target contains class indices, the
+            default value is mapped to `-100`. Note: the default
+            :attr:`ignore_index` in
+            :class:`~torch.nn.functional.cross_entropy` is `-100` for both
+            target types.
         label_smoothing (float, optional): A float in [0.0, 1.0].
             Specifies the amount of smoothing when computing the
             loss, where 0.0 means no smoothing. The targets become a
@@ -3760,22 +3764,15 @@ def linear_cross_entropy(
             f" input with shape {tuple(input.shape)}"
         )
     logits_shape = (*num_batches, num_classes, *out_features)
-    if target.dtype.is_floating_point:
-        # target contains probabilities
-        expected_target_shape = (*num_batches, num_classes, *out_features)
-        if ignore_index is not None:
-            raise RuntimeError(
-                "ignore_index cannot be specified when target contains probabilities"
-            )
-    else:
-        # target contains class indices
-        expected_target_shape = (*num_batches, *out_features)
-    ignore_index = ignore_index if ignore_index is not None else -100
-
-    if target.shape != expected_target_shape:
+    # Ensure compatibility with cross_entropy_loss_symint that uses
+    # target and logits shape equality to detect if target contains
+    # probabilities:
+    target_contains_probabilities = target.shape == logits_shape
+    if target_contains_probabilities and ignore_index is not None:
         raise RuntimeError(
-            f"expected target with shape {expected_target_shape}, got {tuple(target.shape)}"
+            "ignore_index cannot be specified when target contains probabilities"
         )
+    ignore_index = ignore_index if ignore_index is not None else -100
 
     if out_features:
         # reshape linear_weight to 2D required by linear
