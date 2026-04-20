@@ -13,6 +13,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -112,6 +113,38 @@ class DeterministicTest(TestCase):
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
+
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
+    def test_persistent_reduction_batch_invariance(self):
+        H = 768
+        FULL = 1024
+
+        with DeterministicGuard(True, warn_only=True):
+
+            def fn(x, w, b):
+                return torch.nn.functional.layer_norm(x, (H,), weight=w, bias=b)
+
+            torch.manual_seed(0)
+            w = torch.randn(H, device=GPU_TYPE, dtype=torch.bfloat16)
+            b = torch.randn(H, device=GPU_TYPE, dtype=torch.bfloat16)
+            x_full = torch.randn(FULL, H, device=GPU_TYPE, dtype=torch.bfloat16)
+
+            compiled = torch.compile(fn)
+            torch._dynamo.reset()
+            out_full = compiled(x_full, w, b)
+            self.assertEqual(out_full, fn(x_full, w, b))
+
+            # Halving sweep, matching what the benchmark harness does.
+            size = FULL // 2
+            while size >= 1:
+                torch._dynamo.reset()
+                out = compiled(x_full[:size].contiguous(), w, b)
+                ref = out_full[:size].contiguous()
+                self.assertTrue(
+                    torch.equal(ref, out),
+                    f"persistent reduction diverged at size={size} (FULL={FULL})",
+                )
+                size //= 2
 
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):
