@@ -1659,7 +1659,7 @@ class ComboKernelMetadataTests(TestCase):
 
         inps = [torch.rand(1024, device=GPU_TYPE, requires_grad=True) for _ in range(2)]
         code = self._combo_code(fn, inps)
-        self.assertIn("'optimize_mem': False", " ".join(code))
+        self.assertIn("'optimize_mem': False", code)
 
 
 if __name__ == "__main__":
