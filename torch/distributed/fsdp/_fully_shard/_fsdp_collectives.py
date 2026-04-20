@@ -555,8 +555,6 @@ def foreach_reduce(
     torch.Event,
     torch.Event,
     torch.Tensor | None,
-    torch.Event | None,
-    torch.Tensor | None,
 ]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
@@ -619,8 +617,6 @@ def foreach_reduce(
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
-    all_reduce_input = None
-    all_reduce_event = None
 
     with device_handle.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_comm.allocate(
@@ -659,8 +655,6 @@ def foreach_reduce(
                     reduce_scatter_input,
                     reduce_scatter_event,
                     post_reduce_stream.record_event(),
-                    all_reduce_input,
-                    all_reduce_event,
                     partial_reduce_output,
                 )
             if partial_reduce_output is not None:
@@ -679,8 +673,6 @@ def foreach_reduce(
                         group=all_reduce_group,
                         op=all_reduce_op,
                     )
-                all_reduce_input = reduce_output
-                all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
 
     if all_reduce_hook is not None:
@@ -695,6 +687,15 @@ def foreach_reduce(
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
+        # Rebind reduce_output to a new tensor when reduce_dtype != orig_dtype.
+        # The old tensor (e.g. bf16 AR buffer in HSDP+bf16-reduce+fp32-params)
+        # drops its last ref here. Because we're inside the
+        # `with device_handle.stream(post_reduce_stream)` context, the caching
+        # allocator's free-event lands on post_reduce_stream (= AR stream in
+        # HSDP+AR). Stream FIFO orders the free-event after the just-enqueued
+        # cast kernel, so the buffer is safely reclaimable only after the cast
+        # completes reading it. No explicit wait_event needed; this is the
+        # minimum-lifetime release point for the AR buffer.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -752,8 +753,6 @@ def foreach_reduce(
         reduce_scatter_input,
         reduce_scatter_event,
         post_reduce_event,
-        all_reduce_input,
-        all_reduce_event,
         None,
     )
 
