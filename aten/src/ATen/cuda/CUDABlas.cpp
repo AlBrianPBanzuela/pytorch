@@ -1708,7 +1708,7 @@ bool gemm_and_bias(
 
   const auto get_Cdesc_params = [&]() -> std::tuple<CuBlasLtMatrixLayout, const void*> {
     if (use_bias_descriptor) {
-#ifdef USE_ROCM
+#ifndef USE_ROCM
       uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
       preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
 #endif
