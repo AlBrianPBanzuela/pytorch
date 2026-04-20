@@ -28,6 +28,7 @@ import atexit
 import contextlib
 import functools
 import inspect
+import itertools
 import logging
 import os
 import sys
@@ -56,6 +57,7 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
+    get_eval_frame_isolate_recompiles_id,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
@@ -135,6 +137,8 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_next_isolate_recompiles_id = itertools.count()
 
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -401,6 +405,15 @@ def _get_cache_entries_for_region(
     return torch._C._dynamo.eval_frame._get_cache_entries_for_region(
         code, isolate_recompiles_id
     )
+
+
+def _get_total_cache_entry_count(
+    code: types.CodeType | Callable[..., Any],
+) -> int:
+    """Total cache entries across all isolate_recompiles regions for a code object."""
+    if callable(code):
+        code = code.__code__
+    return torch._C._dynamo.eval_frame._get_total_cache_entry_count(code)
 
 
 class OptimizedModule(torch.nn.Module):
@@ -1127,6 +1140,7 @@ class _TorchDynamoContext:
         # of decorators.
         compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
         compile_wrapper._torchdynamo_wrapper_id = id(compile_wrapper)  # type: ignore[attr-defined]
+        compile_wrapper._isolate_recompiles_id = self._isolate_recompiles_id  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -1643,6 +1657,10 @@ def _optimize(
 
         package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
+    isolate_recompiles_id: int | None = None
+    if isolate_recompiles:
+        isolate_recompiles_id = next(_next_isolate_recompiles_id)
+
     return _optimize_catch_errors(
         convert_frame.convert_frame(
             backend,
@@ -1650,6 +1668,7 @@ def _optimize(
             package=package,
             recompile_limit=recompile_limit,
             isolate_recompiles=isolate_recompiles,
+            isolate_recompiles_id=isolate_recompiles_id,
         ),
         hooks,
         backend_ctx_ctor,
@@ -2528,6 +2547,10 @@ def _optimize_assert(
 
         package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
+    isolate_recompiles_id: int | None = None
+    if isolate_recompiles:
+        isolate_recompiles_id = next(_next_isolate_recompiles_id)
+
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
             backend,
@@ -2536,6 +2559,7 @@ def _optimize_assert(
             package=package,
             recompile_limit=recompile_limit,
             isolate_recompiles=isolate_recompiles,
+            isolate_recompiles_id=isolate_recompiles_id,
         ),
         hooks,
         backend_ctx_ctor,

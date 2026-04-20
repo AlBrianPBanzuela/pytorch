@@ -70,13 +70,16 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   size_t total_cache_entry_count{0};
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
-  // Actions to apply to all frames with this code object
+  // Actions to apply to all frames with this code object (non-isolated)
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // Per-region strategies for isolated compiles. When an isolated region
+  // hits its recompile limit, only that region goes RUN_ONLY.
+  std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
   bool has_any_cache_entries() const;
-  void move_to_front(CacheEntry* cache_entry);
+  void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
   void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
 } ExtraState;
@@ -118,6 +121,18 @@ FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
 // - extra_state: Borrowed
 void extra_state_set_exec_strategy(
     ExtraState* extra_state,
+    FrameExecStrategy strategy);
+
+// Get the exec strategy for a specific isolate_recompiles region.
+// Falls back to the global strategy if no per-region strategy is set.
+FrameExecStrategy extra_state_get_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
+
+// Set the exec strategy for a specific isolate_recompiles region.
+void extra_state_set_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id,
     FrameExecStrategy strategy);
 
 // Ownership contract
@@ -213,6 +228,7 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 py::list _get_cache_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id);
+size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
 void _load_precompile_entry(
     const py::handle& code_obj,

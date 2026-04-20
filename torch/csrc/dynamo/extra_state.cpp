@@ -35,11 +35,12 @@ bool ExtraState::has_any_cache_entries() const {
   return this->total_cache_entry_count > 0;
 }
 
-void ExtraState::move_to_front(CacheEntry* cache_entry) {
+void ExtraState::move_to_front(
+    CacheEntry* cache_entry,
+    std::list<CacheEntry>& entries) {
   CHECK(cache_entry->_owner == this);
   CHECK(cache_entry == &*cache_entry->_owner_loc);
-  auto& list = this->cache_entry_map[cache_entry->_isolate_recompiles_id];
-  list.splice(list.begin(), list, cache_entry->_owner_loc);
+  entries.splice(entries.begin(), entries, cache_entry->_owner_loc);
 }
 
 void ExtraState::move_to_back(CacheEntry* cache_entry) {
@@ -104,6 +105,31 @@ void extra_state_set_exec_strategy(
     ExtraState* extra_state,
     FrameExecStrategy strategy) {
   extra_state->strategy = strategy;
+}
+
+FrameExecStrategy extra_state_get_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id) {
+  if (isolate_recompiles_id < 0) {
+    return extra_state->strategy;
+  }
+  auto it = extra_state->region_strategy_map.find(isolate_recompiles_id);
+  if (it != extra_state->region_strategy_map.end()) {
+    return it->second;
+  }
+  // No per-region override — fall back to global strategy
+  return extra_state->strategy;
+}
+
+void extra_state_set_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id,
+    FrameExecStrategy strategy) {
+  if (isolate_recompiles_id < 0) {
+    extra_state->strategy = strategy;
+  } else {
+    extra_state->region_strategy_map[isolate_recompiles_id] = strategy;
+  }
 }
 
 ExtraState* get_extra_state(PyCodeObject* code) {
@@ -222,6 +248,7 @@ void lookup(
   // to the isolated bucket.
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  std::list<CacheEntry>* found_list = nullptr;
 
   for (int i = 0; i < num_ids && found == nullptr; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
@@ -236,12 +263,15 @@ void lookup(
       if (guard_error) {
         return;
       }
+      if (found) {
+        found_list = &it->second;
+      }
     }
   }
 
   if (found) {
     if (use_lru) {
-      extra_state->move_to_front(found);
+      extra_state->move_to_front(found, *found_list);
     }
     *maybe_cached_code = found->code.ptr();
     *trace_annotation = found->trace_annotation.c_str();
@@ -320,6 +350,18 @@ py::list _get_cache_entries_for_region(
     }
   }
   return result;
+}
+
+size_t _get_total_cache_entry_count(const py::handle& code_obj) {
+  TORCH_CHECK(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    return 0;
+  }
+  return extra->total_cache_entry_count;
 }
 
 PrecompileEntry::PrecompileEntry(py::object gm, py::object c)

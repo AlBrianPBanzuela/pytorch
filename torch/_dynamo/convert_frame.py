@@ -102,9 +102,11 @@ from .cache_size import (
 from .code_context import code_context
 from .eval_frame import (
     _get_cache_entries_for_region,
+    _get_total_cache_entry_count,
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    get_eval_frame_isolate_recompiles_id,
     innermost_backend,
     innermost_fn,
     skip_code,
@@ -579,9 +581,6 @@ def get_compile_id(
     )
 
 
-_next_isolate_recompiles_id = itertools.count()
-
-
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -603,12 +602,9 @@ class ConvertFrameAssert:
         self._package = package
         self._recompile_limit = recompile_limit
         self._isolate_recompiles = isolate_recompiles
-        if isolate_recompiles_id is not None:
-            self._isolate_recompiles_id = isolate_recompiles_id
-        elif isolate_recompiles:
-            self._isolate_recompiles_id = next(_next_isolate_recompiles_id)
-        else:
-            self._isolate_recompiles_id = -1
+        self._isolate_recompiles_id = (
+            isolate_recompiles_id if isolate_recompiles_id is not None else -1
+        )
         self._box = ConvertFrameBox()
 
     @property
@@ -637,9 +633,10 @@ class ConvertFrameAssert:
         increment_frame()
         code = frame.f_code
 
-        cache_entries = _get_cache_entries_for_region(code, self._isolate_recompiles_id)
-        cache_size = compute_cache_size(frame, cache_entries)
-        cache_size.isolate_recompiles = self._isolate_recompiles
+        isolate_recompiles_id = get_eval_frame_isolate_recompiles_id()
+        cache_entries = _get_cache_entries_for_region(code, isolate_recompiles_id)
+        total_count = _get_total_cache_entry_count(code)
+        cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
             return ConvertFrameReturn()
@@ -2329,10 +2326,6 @@ class ConvertFrame:
             ):
                 return ConvertFrameReturn(
                     frame_exec_strategy=e.frame_exec_strategy,
-                    # Don't apply strategy to the code object when
-                    # isolate_recompiles is set — other compile calls sharing
-                    # this code object should still be able to compile.
-                    apply_to_code=not self._isolate_recompiles,
                 )
 
         return ConvertFrameReturn()

@@ -51,6 +51,12 @@ static void set_current_isolate_recompiles_id(int64_t id) {
   current_isolate_recompiles_id = id;
 }
 
+static PyObject* get_eval_frame_isolate_recompiles_id_py(
+    PyObject* dummy,
+    PyObject* args) {
+  return PyLong_FromLongLong(get_current_isolate_recompiles_id());
+}
+
 static PyObject* set_eval_frame_isolate_recompiles_id_py(
     PyObject* dummy,
     PyObject* arg) {
@@ -816,6 +822,7 @@ static PyMethodDef _methods[] = {
      METH_O,
      NULL},
     {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
+    {"get_eval_frame_isolate_recompiles_id", get_eval_frame_isolate_recompiles_id_py, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
