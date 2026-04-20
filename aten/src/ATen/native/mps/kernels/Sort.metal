@@ -23,10 +23,12 @@ using namespace metal;
 template <typename T>
 inline bool sort_lt(T a, T b) {
   if constexpr (is_floating_point_v<T>) {
-    // NaN sorts last in ascending order
-    if (metal::isnan(a))
+    // NaN sorts last in ascending order. Uses self-inequality instead of
+    // metal::isnan because the latter produced wrong results at TPTG=1024 on
+    // some GPUs (e.g. M2), where a != a does not.
+    if (a != a)
       return false;
-    if (metal::isnan(b))
+    if (b != b)
       return true;
   }
   return a < b;
