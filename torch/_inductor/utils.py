@@ -3790,7 +3790,10 @@ def device_supports_fp64() -> bool:
     """Check if the current target device supports float64."""
     from torch._inductor.virtualized import V
 
-    device = V.graph.get_current_device_or_throw()
+    try:
+        device = V.graph.get_current_device_or_throw()
+    except RuntimeError:
+        return True
     if device.type == "xpu":
         return torch.xpu.get_device_properties(device).has_fp64
     return True
