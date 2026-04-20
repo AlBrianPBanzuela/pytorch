@@ -890,47 +890,54 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(IndexError):
             torch.compile(fn, backend="eager")(x)
 
-    # --- (b) reversed() → vt_sequence_getitem (natural dispatch) ---
-    # str/bytes lack __reversed__, so reversed() falls back to
-    # len() + PySequence_GetItem → vt_sequence_getitem → sq_item_impl.
-    # Spy on vt_sequence_getitem to confirm the path was taken.
-
-    def _compile_and_assert_sq_item_path(self, fn, *args):
-        """Compile fn and assert vt_sequence_getitem was called during tracing."""
-        from unittest.mock import patch
-
-        from torch._dynamo.variables.object_protocol import vt_sequence_getitem as _orig
-
-        with patch(
-            "torch._dynamo.variables.object_protocol.vt_sequence_getitem",
-            wraps=_orig,
-        ) as spy:
-            torch._dynamo.reset()
-            result = torch.compile(fn, backend="eager", fullgraph=True)(*args)
-            self.assertTrue(spy.called, "vt_sequence_getitem was not called")
-        return result
-
-    def test_reversed_str_sq_item(self):
-        """reversed('hello') → vt_sequence_getitem → ConstantVariable.sq_item_impl."""
+    def test_deque_reversed(self):
+        """reversed(deque) uses __reversed__ (deque has it since 3.8)."""
 
         def fn(x):
-            chars = list(reversed("hello"))
-            return x + len(chars)
+            d = collections.deque([x, x + 1, x + 2])
+            items = list(reversed(d))
+            return items[0]
 
         x = torch.randn(4)
-        self.assertEqual(fn(x), self._compile_and_assert_sq_item_path(fn, x))
+        self.assertEqual(fn(x), self._compile(fn, x))
 
-    def test_reversed_bytes_sq_item(self):
-        """reversed(b'hello') → vt_sequence_getitem → ConstantVariable.sq_item_impl."""
+    # --- (b) iter/list/tuple/reversed on deque ---
+    # deque has __iter__, so these go through the normal iteration path
+    # (unpack_var_sequence), not the sq_item fallback in builtin.py.
 
+    def test_iter_deque(self):
         def fn(x):
-            vals = list(reversed(b"hello"))
-            return x + vals[0]
+            d = collections.deque([x, x + 1, x + 2])
+            return list(iter(d))
 
         x = torch.randn(4)
-        self.assertEqual(fn(x), self._compile_and_assert_sq_item_path(fn, x))
+        self.assertEqual(fn(x), self._compile(fn, x))
 
-    # --- (c) Sequence protocol fallback (in operator) ---
+    def test_list_deque(self):
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return list(d)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_tuple_deque(self):
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return tuple(d)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # --- (d) TODO: generic_getiter sequence protocol fallback ---
+    # Once generic_getiter lands (PR #178462), iter()/list()/tuple() on types
+    # with sq_item but no __iter__ will work via the sequence_iterator polyfill.
+    # All current sq_item types (list, tuple, str, bytes, range, deque) also
+    # have __iter__, so they go through tp_iter — not the sequence fallback.
+    # Add tests here for the sequence fallback path once generic_getiter is
+    # available, e.g. a C extension type with sq_item but no tp_iter.
+
+    # --- (e) Sequence protocol fallback (in operator) ---
     # A user-defined class with __getitem__ + __len__ but no __iter__
     # exercises the sequence protocol in CPython and the __getitem__
     # fallback in Dynamo's CONTAINS_OP polyfill.

@@ -161,6 +161,32 @@ def maybe_get_python_type(obj: VariableTracker) -> type:
         )
 
 
+def validate_sequence_index(
+    tx: "InstructionTranslator",
+    key: VariableTracker,
+    container_name: str,
+) -> VariableTracker:
+    """_PyIndex_Check → nb_index path used by list/tuple/range/str/bytes subscript.
+
+    CPython's list_subscript, tuple_subscript, range_subscript, unicode_subscript,
+    and bytes_subscript all perform this check internally before accessing the
+    underlying data.  Centralizing it here ensures that any caller of
+    getitem_const gets the same validation, not just mp_subscript_impl.
+    """
+    key_type = maybe_get_python_type(key)
+    if key_type not in (int, bool, slice):
+        if not type_implements_nb_index(key_type):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
+                ],
+            )
+        key = key.nb_index_impl(tx)
+    return key
+
+
 def vt_mapping_size(
     tx: "InstructionTranslator", obj: "VariableTracker"
 ) -> "VariableTracker":

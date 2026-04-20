@@ -111,10 +111,10 @@ class BaseListVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        # TODO(follow-up): this assumes the caller (mp_subscript_impl) has already
-        # run _PyIndex_Check → nb_index_impl. Direct callers bypassing
-        # mp_subscript_impl will skip that validation.
+        from .object_protocol import validate_sequence_index
         from .tensor import SymNodeVariable
+
+        arg = validate_sequence_index(tx, arg, self.python_type_name())
 
         if isinstance(arg, SymNodeVariable):
             index = arg.sym_num
@@ -245,23 +245,6 @@ class BaseListVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # list_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L3689-L3710
-        # _PyIndex_Check: https://github.com/python/cpython/blob/62a6e898e01/Include/internal/pycore_abstract.h#L13-L17
-        try:
-            key_type = key.python_type()
-        except NotImplementedError:
-            key_type = None
-        if key_type not in (int, bool, slice):
-            if key_type is not None and not type_implements_nb_index(key_type):
-                container_name = self.python_type_name()
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
-                    ],
-                )
-            key = key.nb_index_impl(tx)
-
         return self.getitem_const(tx, key)
 
     def sq_item_impl(
@@ -604,9 +587,9 @@ class RangeVariable(BaseListVariable):
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         # range_subscript: https://github.com/python/cpython/blob/main/Objects/rangeobject.c
-        # TODO(follow-up): this assumes the caller (mp_subscript_impl) has already
-        # run _PyIndex_Check → nb_index_impl. Direct callers bypassing
-        # mp_subscript_impl will skip that validation.
+        from .object_protocol import validate_sequence_index
+
+        arg = validate_sequence_index(tx, arg, "range")
         index = arg.as_python_constant()
 
         if isinstance(index, slice):
@@ -687,20 +670,6 @@ class RangeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
-        try:
-            key_type = key.python_type()
-        except NotImplementedError:
-            key_type = None
-        if key_type not in (int, bool, slice):
-            if key_type is not None and not type_implements_nb_index(key_type):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"range indices must be integers or slices, not {key.python_type_name()}"
-                    ],
-                )
-            key = key.nb_index_impl(tx)
         return self.getitem_const(tx, key)
 
     def sq_item_impl(
