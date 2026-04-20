@@ -121,9 +121,10 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        tf32_precision=0.005,
-        # ROCM: skipping tf32 test on gfx94 archs due to tolerance issue.
-        test_cuda=not (TEST_WITH_ROCM and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName),
+        # AMD XF32 at K=10 sits right at the 0.005 envelope (ideal 5.2e-3;
+        # ideal NV-TF32 2.3e-3). ROCm tolerance relaxed to cover the
+        # seed-dependent realization; see https://github.com/jeffdaily/tf32_analysis.
+        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(

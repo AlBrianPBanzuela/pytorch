@@ -6098,6 +6098,35 @@ def recover_orig_fp32_precision(fn):
 
     return recover()(fn)
 
+
+def with_highest_f32_precision(f):
+    """Run the wrapped test under torch.set_float32_matmul_precision("highest"),
+    forcing full IEEE FP32 for matmul on both CUDA (TF32 off) and CPU
+    (mkldnn bf32/tf32 off). Save/restore across the call.
+
+    Use for tests whose intent is FP32 numerical correctness of an
+    algorithm (e.g. a factorization) and should not be contaminated by
+    reduced-precision matmul noise injected by an ambient
+    allow_tf32/fp32_precision setting elsewhere in the process.
+
+    Note: this affects matmul only, not convolution. Tests that also
+    need reduced-precision conv disabled should additionally disable
+    the relevant cudnn/mkldnn conv.fp32_precision knobs.
+    """
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        old_cuda_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+        old_cuda_fp32 = torch.backends.cuda.matmul.fp32_precision
+        old_mkldnn_fp32 = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        try:
+            torch.set_float32_matmul_precision("highest")
+            return f(*args, **kwargs)
+        finally:
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_fp32  # type: ignore[attr-defined]
+            torch.backends.cuda.matmul.fp32_precision = old_cuda_fp32
+            torch.backends.cuda.matmul.allow_tf32 = old_cuda_allow_tf32
+    return wrapped
+
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info
 

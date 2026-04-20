@@ -458,7 +458,11 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @skipIfRocmArch(MI300_ARCH)
+    # Test asserts fastpath == slowpath, both running under the current
+    # precision — so the @tf32_on_and_off tolerance applies to the mutual
+    # agreement of two TF32-rounded outputs, not to TF32-vs-FP32. Measured
+    # worst case on MI300 at d_model=12/seqlen<=1040 is ~1e-3, well under
+    # 0.002. See https://github.com/jeffdaily/tf32_analysis.
     @tf32_on_and_off(0.002)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
