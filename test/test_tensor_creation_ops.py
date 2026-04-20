@@ -4174,7 +4174,7 @@ class TestBufferProtocol(TestCase):
 #   The implementation itself is based on the Python Array API:
 #   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
 def get_another_device(device):
-    return "cuda" if torch.device(device).type == "cpu" else "cpu"
+    return device_type if torch.device(device).type == "cpu" else "cpu"
 
 def get_another_xpu_device(device):
     return "xpu" if torch.device(device).type == "cpu" else "cpu"
@@ -4364,18 +4364,11 @@ class TestAsArray(TestCase):
     def test_unsupported_alias(self, device, dtype):
         original = make_tensor((5, 5), dtype=dtype, device=device)
 
-        if torch.cuda.is_available():
+        if torch.accelerator.is_available():
             other_device = get_another_device(device)
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
                 torch.asarray(original, device=other_device, copy=False)
-
-        if torch.xpu.is_available():
-            other_device = get_another_xpu_device(device)
-            with self.assertRaisesRegex(ValueError,
-                                        f"from device '{device}' to '{other_device}'"):
-                torch.asarray(original, device=other_device, copy=False)
-
 
         with self.assertRaisesRegex(ValueError,
                                     "with dtype '.*' into dtype '.*'"):
