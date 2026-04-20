@@ -20,6 +20,7 @@ from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     find_free_port,
     IS_WINDOWS,
     munge_exc,
@@ -48,9 +49,7 @@ requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE or "cpu"
 
 
 def munge_shape_guards(s: str) -> str:
