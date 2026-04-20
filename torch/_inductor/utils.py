@@ -3786,6 +3786,19 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
+def device_supports_fp64() -> bool:
+    """Check if the current target device supports float64."""
+    from torch._inductor.virtualized import V
+
+    try:
+        device = V.graph.get_current_device_or_throw()
+    except RuntimeError:
+        return True
+    if device.type == "xpu":
+        return torch.xpu.get_device_properties(device).has_fp64
+    return True
+
+
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     """Maybe upcast [b]float16 to float32"""
     if (
