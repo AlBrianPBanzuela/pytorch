@@ -3031,6 +3031,8 @@ def _handle_combo_kernel_per_subkernel_blocks(
             inductor_meta_i["tma_min_block_sizes"] = combo_meta[
                 f"tma_min_block_sizes_{i}"
             ]
+        if combo_meta.get(f"add_persistent_rblock_{i}"):
+            inductor_meta_i["add_persistent_rblock"] = True
 
         if subkernel_heuristic == "pointwise":
             cfgs = pointwise(
