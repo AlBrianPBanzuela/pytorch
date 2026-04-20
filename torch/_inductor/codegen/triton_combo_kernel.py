@@ -1225,6 +1225,8 @@ class ComboKernel(Kernel):
                 meta[f"num_reduction_{num}"] = sub_kernel.num_reduction
                 meta[f"autotune_hints_{num}"] = list(sub_kernel.autotune_hints)
                 meta[f"atomic_add_found_{num}"] = sub_kernel.atomic_add_found
+                if sub_kernel.add_persistent_rblock:
+                    meta[f"add_persistent_rblock_{num}"] = True
                 if (
                     config.deterministic
                     or config.test_configs.force_filter_reduction_configs

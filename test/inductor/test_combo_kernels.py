@@ -1694,6 +1694,34 @@ class ComboKernelMetadataTests(TestCase):
         self.assertNotIn("'kernel_flop'", code)
 
     @requires_gpu_and_triton
+    def test_combo_rms_norm_forwards_add_persistent_rblock(self):
+        """rms_norm at (2048, 4096) triggers the large-rblock persistent
+        optimization for standalone kernels (set by triton.py:5820). Two
+        parallel rms_norms forming a combo kernel must forward
+        add_persistent_rblock per sub-kernel so _reduction_configs can emit
+        the same specialized large-RBLOCK config."""
+
+        def rms_norm(x, w, eps=1e-6):
+            v = x.pow(2).mean(-1, keepdim=True)
+            return w * x * torch.rsqrt(v + eps)
+
+        def fn(a, wa, b, wb):
+            return rms_norm(a, wa), rms_norm(b, wb)
+
+        a = torch.rand(2048, 4096, device=GPU_TYPE)
+        b = torch.rand(2048, 4096, device=GPU_TYPE)
+        wa = torch.rand(4096, device=GPU_TYPE)
+        wb = torch.rand(4096, device=GPU_TYPE)
+        code = self._combo_code(fn, [a, wa, b, wb])
+
+        for num in range(2):
+            self.assertIn(
+                f"'add_persistent_rblock_{num}': True",
+                code,
+                f"combo_grid_meta missing add_persistent_rblock_{num}",
+            )
+
+    @requires_gpu_and_triton
     @torch._inductor.config.patch({"benchmark_combo_kernel": True})
     def test_benchmark_combo_kernel_emits_real_num_gb(self):
         def fn(a, b):
