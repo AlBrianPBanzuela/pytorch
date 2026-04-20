@@ -1021,6 +1021,15 @@ combo_kernel_per_subkernel_blocks = True
 combo_kernel_autotune_grouping = False
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# Memory-aware combo kernel creation. When either threshold > 0, each
+# candidate group is simulated before creation and rejected (or greedily
+# shrunk) if its peak delta exceeds BOTH thresholds that are set:
+#   - combo_kernel_peak_memory_threshold: absolute bytes cap on delta
+#   - combo_kernel_peak_memory_pct_threshold: fraction of baseline peak
+# Setting both lets a user express "≤ 1 MB AND ≤ 2%". Either can be 0
+# to disable that dimension. If both are 0, the memory check is disabled.
+combo_kernel_peak_memory_threshold: int = 1 * 1024 * 1024
+combo_kernel_peak_memory_pct_threshold: float = 0.0
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
