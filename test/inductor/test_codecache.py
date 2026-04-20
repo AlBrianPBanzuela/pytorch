@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 from contextlib import contextmanager
+from typing import Any, cast
 from typing_extensions import override
 from unittest import mock
 
@@ -25,6 +26,7 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CUDACodeCache,
+    FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     PyCodeCache,
@@ -2554,10 +2556,34 @@ class TestFxGraphCacheHashing(TestCase):
             {"mkldnn_weight": torch.randn(2, 2).to_mkldnn()}, graph
         )
 
-        with self.assertRaisesRegex(
-            BypassFxGraphCache, "mkldnn tensors unpickleable"
-        ):
+        with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
             CacheabilityValidator(gm, require_shape_env=False).validate()
+
+    def test_check_can_cache_checks_backward_state_example_inputs(self):
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "Reduce unsupported"):
+            FxGraphCache._check_can_cache(
+                gm,
+                [torch.fx.experimental._backward_state.BackwardState()],
+                require_shape_env=False,
+            )
+
+    def test_check_can_cache_checks_nested_fx_kwargs_tensor(self):
+        if not torch.backends.mkldnn.is_available():
+            raise unittest.SkipTest("requires MKLDNN")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        fx_kwargs = cast(
+            Any, {"nested": {"mkldnn_weight": torch.randn(2, 2).to_mkldnn()}}
+        )
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
+            FxGraphCache._check_can_cache(
+                gm,
+                fx_kwargs=fx_kwargs,
+                require_shape_env=False,
+            )
 
     def test_parameter_constants(self):
         """
