@@ -195,7 +195,11 @@ inline void bitonic_substage(
       IdxT ip = sort_shuffle_xor(ii, LANE_OFFSET);
       int global_p = int(lane) * TN + i;
       bool ascending = (global_p & K) == 0;
-      bool vi_first = sort_compare(vi, vp, desc);
+      // Tie-break by lane so the two lanes agree on which keeps which element.
+      // without this, equal values make both lanes grab the same one (duplicate
+      // indices)
+      bool vi_first = sort_compare(vi, vp, desc) ||
+          (!sort_compare(vp, vi, desc) && i_am_low);
       bool should_take = vi_first != (ascending == i_am_low);
       v[i] = should_take ? vp : vi;
       idx[i] = should_take ? ip : ii;
