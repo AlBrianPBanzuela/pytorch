@@ -1,4 +1,4 @@
-# Owner(s): ["module: spmd_types"]
+# Owner(s): ["module: dtensor"]
 
 import torch
 import torch.distributed as dist
@@ -17,7 +17,6 @@ from torch.spmd_types import (
     P,
     PartitionSpec,
     R,
-    redistribute,
     reduce_scatter,
     reinterpret,
     S,
@@ -68,9 +67,7 @@ def _setup_fake_dist(world_size=WORLD_SIZE):
         dist.destroy_process_group()
     _reset()
     store = FakeStore()
-    dist.init_process_group(
-        backend="fake", rank=0, world_size=world_size, store=store
-    )
+    dist.init_process_group(backend="fake", rank=0, world_size=world_size, store=store)
     return dist.distributed_c10d._get_default_group()
 
 
