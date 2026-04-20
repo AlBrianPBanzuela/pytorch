@@ -982,6 +982,59 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_b(torch.randn(12))
         self.assertEqual(len(_get_cache_entries_for_region(f, id_b)), 2)
 
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_isolate_recompiles_lru_move_to_front(self):
+        """On a cache hit, the matched entry moves to the front of its
+        region's list (LRU). Verify by inspecting compile_id ordering
+        before and after the hit. Also verify cross-region independence."""
+
+        def f(x):
+            return x.sin()
+
+        opt_a = torch.compile(
+            f, backend="eager", dynamic=False, isolate_recompiles=True
+        )
+        opt_b = torch.compile(
+            f, backend="eager", dynamic=False, isolate_recompiles=True
+        )
+        id_a = opt_a._isolate_recompiles_id
+        id_b = opt_b._isolate_recompiles_id
+
+        # Region A: compile shapes 3, 4, 5.
+        # Insertion order (newest at front): [5, 4, 3]
+        opt_a(torch.randn(3))
+        opt_a(torch.randn(4))
+        opt_a(torch.randn(5))
+
+        entries_a = _get_cache_entries_for_region(f, id_a)
+        self.assertEqual(len(entries_a), 3)
+        ids_before = [e.compile_id for e in entries_a]
+
+        # Region B: compile shapes 6, 7.
+        opt_b(torch.randn(6))
+        opt_b(torch.randn(7))
+        entries_b = _get_cache_entries_for_region(f, id_b)
+
+        # Hit region A with shape 3 (oldest entry, at back) — LRU moves to front
+        opt_a(torch.randn(3))
+        entries_a_after = _get_cache_entries_for_region(f, id_a)
+        ids_after = [e.compile_id for e in entries_a_after]
+
+        # shape-3 entry was last, now first
+        self.assertEqual(ids_after[0], ids_before[-1])
+        self.assertEqual(ids_after[1], ids_before[0])
+        self.assertEqual(ids_after[2], ids_before[1])
+
+        # No new entries — cache hit, not recompilation
+        self.assertEqual(len(entries_a_after), 3)
+
+        # Region B order unchanged — LRU on A doesn't affect B
+        entries_b_after = _get_cache_entries_for_region(f, id_b)
+        self.assertEqual(
+            [e.compile_id for e in entries_b_after],
+            [e.compile_id for e in entries_b],
+        )
+
     def test_non_isolated_entries_visible_to_isolated(self):
         """Non-isolated entries (bucket -1) are visible to isolated regions
         via read-only fallback when the backend matches. BC friendly —
