@@ -1639,9 +1639,7 @@ class ComboKernelMetadataTests(TestCase):
             return torch.relu(a), torch.sigmoid(b)
 
         inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        with torch._inductor.config.patch(
-            {"eager_numerics.disable_ftz": disable_ftz}
-        ):
+        with torch._inductor.config.patch({"eager_numerics.disable_ftz": disable_ftz}):
             code = self._combo_code(fn, inps)
         self.assertIn(f"'disable_ftz': {disable_ftz}", code)
 
