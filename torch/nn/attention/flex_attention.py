@@ -893,7 +893,17 @@ class BlockMask:
             BLOCK_SIZE=BLOCK_SIZE,
             mask_mod=mask_mod,
         )
-        instance._blocks_are_contiguous = _are_blocks_contiguous(instance)
+        # Detect contiguous block patterns to enable kernel pointer arithmetic
+        # optimizations. Skipped during Dynamo/export tracing (is_compiling)
+        # because _are_blocks_contiguous materializes a bool from tensor data
+        # via .all(), which is impossible on FakeTensors. The RuntimeError
+        # fallback handles bare FakeTensorMode usage outside of torch.compile.
+        # In both cases __init__ already defaulted the flag to False (safe).
+        if not torch.compiler.is_compiling():
+            try:
+                instance._blocks_are_contiguous = _are_blocks_contiguous(instance)
+            except RuntimeError:
+                pass
         return instance
 
     @overload
@@ -1220,7 +1230,9 @@ class BlockMask:
             lambda x: x.to(device),
             self.as_tuple(flatten=False),
         )
-        return BlockMask(*mapped_attributes)
+        result = BlockMask(*mapped_attributes)
+        result._blocks_are_contiguous = self._blocks_are_contiguous
+        return result
 
     @staticmethod
     def _wrap_context_value(attr: str, value: Any) -> Any:
