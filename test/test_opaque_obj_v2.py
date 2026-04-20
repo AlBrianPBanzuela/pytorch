@@ -1033,7 +1033,7 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, x_1, cfg_1):
     process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(x_1, ValueConfig(mode='square'));  x_1 = None
     return process_with_config
-    """,  # noqa: B950
+    """,
         )
 
     def test_subclass_opaque_output_reuses_input_proxy(self):
