@@ -2916,27 +2916,27 @@ def _get_config(numels: dict[str, int]) -> dict[str, int]:
     return {prefix.upper() + "BLOCK": numel for prefix, numel in numels.items()}
 
 
-def _combo_tiling_signature(
-    tiling_scores: dict[str, Any] | None,
-) -> tuple[tuple[str, float], ...] | None:
+def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...]:
+    """Per-sub-kernel heuristic inputs as a hashable tuple. Identical
+    fingerprints imply identical heuristic output.
     """
-    Build a grouping signature from tiling scores.
-
-    Normalize scores so proportional patterns (e.g. {x: 8, y: 1} vs {x: 16, y: 2})
-    end up in the same group, while kernels with different coalescing preference do not.
-    """
-    if not tiling_scores:
-        return None
-
-    total = sum(float(score) for score in tiling_scores.values())
-    if total == 0:
-        return tuple(sorted((dim, 0.0) for dim in tiling_scores))
-
-    return tuple(
-        sorted(
-            (dim, round(float(score) / total, 2))
-            for dim, score in tiling_scores.items()
-        )
+    tma = combo_meta.get(f"tma_min_block_sizes_{i}") or {}
+    tiling_scores = combo_meta.get(f"tiling_scores_{i}") or {}
+    return (
+        combo_meta[f"heuristic_{i}"],
+        tuple(sorted(combo_meta[f"size_hints_{i}"].items())),
+        combo_meta[f"num_load_{i}"],
+        combo_meta[f"num_store_{i}"],
+        combo_meta[f"num_reduction_{i}"],
+        tuple(sorted(combo_meta[f"autotune_hints_{i}"], key=str)),
+        combo_meta[f"atomic_add_found_{i}"],
+        combo_meta[f"no_x_dim_{i}"],
+        combo_meta.get(f"reduction_hint_{i}"),
+        combo_meta.get(f"tile_hint_{i}"),
+        combo_meta.get(f"add_persistent_rblock_{i}", False),
+        combo_meta.get(f"has_loadstore_with_contiguous_rdim_{i}"),
+        tuple(sorted(tma.items())),
+        tuple(sorted(tiling_scores.items())),
     )
 
 
@@ -3008,6 +3008,31 @@ def _handle_combo_kernel_per_subkernel_blocks(
         inductor_meta_i = dict(inductor_meta_clean)
         if tiling_scores_i is not None:
             inductor_meta_i["tiling_scores"] = tiling_scores_i
+        # Per-sub-kernel metadata stored by combo_grid_meta(): forward into
+        # inductor_meta_i so pointwise()/_reduction_configs()/_persistent_reduction_configs()
+        # pick configs based on the actual sub-kernel, not heuristic defaults.
+        if f"num_load_{i}" in combo_meta:
+            inductor_meta_i["num_load"] = combo_meta[f"num_load_{i}"]
+        if f"num_store_{i}" in combo_meta:
+            inductor_meta_i["num_store"] = combo_meta[f"num_store_{i}"]
+        if f"num_reduction_{i}" in combo_meta:
+            inductor_meta_i["num_reduction"] = combo_meta[f"num_reduction_{i}"]
+        if f"autotune_hints_{i}" in combo_meta:
+            inductor_meta_i["autotune_hints"] = OrderedSet(
+                combo_meta[f"autotune_hints_{i}"]
+            )
+        if f"atomic_add_found_{i}" in combo_meta:
+            inductor_meta_i["atomic_add_found"] = combo_meta[f"atomic_add_found_{i}"]
+        if f"has_loadstore_with_contiguous_rdim_{i}" in combo_meta:
+            inductor_meta_i["has_loadstore_with_contiguous_rdim"] = combo_meta[
+                f"has_loadstore_with_contiguous_rdim_{i}"
+            ]
+        if f"tma_min_block_sizes_{i}" in combo_meta:
+            inductor_meta_i["tma_min_block_sizes"] = combo_meta[
+                f"tma_min_block_sizes_{i}"
+            ]
+        if combo_meta.get(f"add_persistent_rblock_{i}"):
+            inductor_meta_i["add_persistent_rblock"] = True
 
         if subkernel_heuristic == "pointwise":
             cfgs = pointwise(
@@ -3069,14 +3094,8 @@ def _handle_combo_kernel_per_subkernel_blocks(
         for c in cfgs:
             unique_warp_stage_pairs.add((c.num_warps, c.num_stages))
 
-        cfg_key = tuple(item for c in cfgs for item in sorted(c.kwargs.items()))
         group_key = (
-            (
-                subkernel_heuristic,
-                skip_rblock,
-                cfg_key,
-                _combo_tiling_signature(tiling_scores_i),
-            )
+            _subkernel_fingerprint(combo_meta, i)
             if torch._inductor.config.combo_kernel_autotune_grouping
             else (i,)
         )
