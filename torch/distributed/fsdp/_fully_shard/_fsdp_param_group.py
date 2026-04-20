@@ -123,11 +123,6 @@ class ReduceScatterState(NamedTuple):
     event: torch.Event | None  # reduce-scatter event
 
 
-class AllReduceState(NamedTuple):
-    all_reduce_input: torch.Tensor
-    event: torch.Event | None  # all-reduce event
-
-
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
@@ -219,9 +214,11 @@ class FSDPParamGroup:
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
         self._all_gather_result: AllGatherResult | None = None
-        # Holds the reduce-scatter/all-reduce view-out CUDA event that marks the end of
-        # the group's post-backward (e.g. reduce-scatter, all-reduce and div), which
-        # should be waited on at the end of backward
+        # Marks completion of the post-reduce pipeline (postdivide + dtype cast
+        # + view-out writes into sharded_param.grad). Guards the sharded grad's
+        # visibility to the default-stream optimizer: default stream waits on
+        # this event before reading sharded_param.grad. Recorded on the RS
+        # stream (1D) or AR stream (HSDP+AR) after the view-out loop completes.
         self._post_reduce_event: torch.Event | None = None
         # Holds the reshard-after-forward CUDA event when resharding to a
         # different world size, which should be waited on in the next unshard
@@ -230,11 +227,6 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
-        # Holds the all-reduce input and all-reduce event to keep it alive
-        # until the end of backward (critical when doing bf16 reduction with
-        # fp32 parameters since the all-reduce input is allocated in the RS
-        # stream and will have no refs to it after being upcast to fp32)
-        self._all_reduce_state: AllReduceState | None = None
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -585,8 +577,6 @@ class FSDPParamGroup:
                 reduce_scatter_input,
                 reduce_scatter_event,
                 self._post_reduce_event,
-                all_reduce_input,
-                all_reduce_event,
                 self._partial_reduce_output,
             ) = foreach_reduce(
                 fsdp_params_with_grad,
@@ -618,15 +608,6 @@ class FSDPParamGroup:
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
             )
-            if all_reduce_input is not None:
-                if self.device.type != "cpu":
-                    if all_reduce_event is None:
-                        raise AssertionError(
-                            "Expected all_reduce_event to be set for non-CPU device"
-                        )
-                self._all_reduce_state = AllReduceState(
-                    all_reduce_input, all_reduce_event
-                )
 
     def finalize_backward(self):
         self._wait_for_post_backward()
@@ -646,15 +627,17 @@ class FSDPParamGroup:
         self._post_forward_indices.clear()
 
     def _wait_for_post_backward(self):
+        # _post_reduce_event guards sharded_param.grad: fires when view-out
+        # writes into the new (fp32) reduce_output are complete, so the
+        # default-stream optimizer can safely read the sharded grad.
+        #
+        # For HSDP+AR, the AR buffer (bf16 when reduce_dtype != orig_dtype) is
+        # released inside foreach_reduce via the dtype cast's rebind (see
+        # _fsdp_collectives.py around the `_to_dtype_if_needed` call); no
+        # separate event/ref tracking is needed here.
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if (
-            self._all_reduce_state is not None
-            and self._all_reduce_state.event is not None
-        ):
-            self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
-        self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:
