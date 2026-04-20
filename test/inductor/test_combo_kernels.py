@@ -1643,6 +1643,24 @@ class ComboKernelMetadataTests(TestCase):
             code = self._combo_code(fn, inps)
         self.assertIn(f"'disable_ftz': {disable_ftz}", code)
 
+    @requires_gpu_and_triton
+    def test_combo_inductor_meta_has_optimize_mem(self):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
+        code = self._combo_code(fn, inps)
+        self.assertIn("'optimize_mem': True", code)
+
+    @requires_gpu_and_triton
+    def test_combo_inductor_meta_optimize_mem_false_in_training_forward(self):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE, requires_grad=True) for _ in range(2)]
+        code = self._combo_code(fn, inps)
+        self.assertIn("'optimize_mem': False", code)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
