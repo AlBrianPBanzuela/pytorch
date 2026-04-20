@@ -388,6 +388,22 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             got = opt_fn(model, states, x)
             self.assertEqual(expected, got)
 
+    def test_ordered_dict_no_reconstruct_without_mutation(self):
+        """Sourced OrderedDict should not emit BUILD_MAP when not mutated."""
+
+        def hook(instructions: list[dis.Instruction]):
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
+            self.assertEqual(len(build_map), 0)
+
+        def fn(od, x):
+            return x + od["a"]
+
+        od = collections.OrderedDict(a=1, b=2)
+        with self.register_bytecode_hook(hook):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            got = opt_fn(od, torch.tensor(1.0))
+            self.assertEqual(got, torch.tensor(2.0))
+
     def test_graph_break_in_wrapped_user_function(self):
         def fn(x):
             x = x + 1
@@ -641,6 +657,61 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(AssertionError, "found list stored as tmp"):
                 opt_gn = torch.compile(gn, backend="eager", fullgraph=True)
                 opt_gn(torch.ones(3))
+
+    def test_opaque_reference_as_python_constant(self):
+        """TSOV.as_python_constant must succeed for reference-type opaque
+        objects. Without this, __eq__ between two opaque objects graph breaks.
+        """
+        import torch._library.opaque_object
+        import torch._opaque_base
+
+        class Config(torch._opaque_base.OpaqueBase):
+            def __init__(self, v):
+                self.v = v
+
+            def __bool__(self):
+                return True
+
+            def __eq__(self, other):
+                return isinstance(other, Config) and self.v == other.v
+
+            def __hash__(self):
+                return hash(self.v)
+
+        torch._library.opaque_object.register_opaque_type(Config, typ="reference")
+
+        cfg = Config(42)
+
+        def fn(x, cfg):
+            if cfg:
+                return x + 1
+            return x
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt(torch.ones(4), cfg)
+        self.assertEqual(result, torch.ones(4) + 1)
+
+    def test_call_once_guard_allows_super_delegation(self):
+        """_add_call_once_guard must key on (id(self), id(original_method))
+        so that super().as_python_constant() between VT subclasses is not
+        mistaken for a self-referential call.
+        """
+        from torch._dynamo.variables.base import VariableTracker
+
+        class _Parent(VariableTracker):
+            def as_python_constant(self):
+                return 42
+
+        class _Child(_Parent):
+            def as_python_constant(self):
+                return super().as_python_constant()
+
+        child = _Child()
+        # With name-based keying, _Child and _Parent share the same key
+        # (id(self), "as_python_constant"), causing a false
+        # AsPythonConstantNotImplementedError("self-referential").
+        self.assertEqual(child.as_python_constant(), 42)
+        self.assertTrue(child.is_python_constant())
 
 
 if __name__ == "__main__":
