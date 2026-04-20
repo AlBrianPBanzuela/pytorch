@@ -1542,6 +1542,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
         )
 
 
+@instantiate_parametrized_tests
 class ComboKernelMetadataTests(TestCase):
     """Per-sub-kernel autotune selection metadata must be forwarded through
     combo_grid_meta so that _handle_combo_kernel_per_subkernel_blocks() can
@@ -1630,6 +1631,17 @@ class ComboKernelMetadataTests(TestCase):
                 code,
                 f"combo_grid_meta missing {key} under deterministic mode",
             )
+
+    @requires_gpu_and_triton
+    @parametrize("disable_ftz", [False, True])
+    def test_combo_triton_meta_has_disable_ftz(self, disable_ftz):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
+        with torch._inductor.config.patch({"eager_numerics.disable_ftz": disable_ftz}):
+            code = self._combo_code(fn, inps)
+        self.assertIn(f"'disable_ftz': {disable_ftz}", code)
 
 
 if __name__ == "__main__":
