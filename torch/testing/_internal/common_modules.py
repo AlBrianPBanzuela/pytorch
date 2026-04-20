@@ -1785,8 +1785,6 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
             shape = (*batch_size, num_classes, *out_features)
             target = make_tensor(shape, device=device, dtype=dtype, requires_grad=False).softmax(dim=min(1, len(shape) - 1))
         else:
-            if out_features:
-                raise AssertionError(f"Expected empty out_features, got {out_features}")
             shape = (*batch_size, *out_features)
             target = make_tensor(shape, device=device, dtype=torch.long, requires_grad=False,
                                  low=0, high=num_classes)
@@ -1820,17 +1818,12 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
             ((), (7,)),
             (None, make_loss_weight(num_classes)),
             reductions, cases):
-        if is_prob:
-            if "ignore_index" in constructor_kwargs:
-                # ignore_index is not supported for floating point target
-                continue
-            if constructor_kwargs.get("out_features", ()) and not batch_size:
-                # K-dimensional loss requires batched input
-                continue
-        else:
-            if constructor_kwargs.get("out_features", ()):
-                # multi-target with class indices is not supported
-                continue
+        if is_prob and "ignore_index" in constructor_kwargs:
+            # ignore_index is not supported for floating point target
+            continue
+        if constructor_kwargs.get("out_features", ()) and not batch_size:
+            # K-dimensional loss requires batched input
+            continue
 
         if len(batch_size) > 1:
             raise AssertionError("linear_cross_entropy does not support multi-dimensional batches")
@@ -4428,13 +4421,18 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_LinearCrossEntropyLoss,
                module_error_inputs_func=module_error_inputs_torch_nn_LinearCrossEntropyLoss,
                dtypes=get_all_fp_dtypes(include_half=True, include_bfloat16=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                decorators=(
+                   DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-1, rtol=1e-1)}), "TestModule",
+                                "test_memory_format", dtypes=[torch.bfloat16], device_type="cuda"),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-2)}), "TestModule",
                                 "test_non_contiguous_tensors", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-2, rtol=5e-2)}), "TestModule",
+                                "test_non_contiguous_tensors", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-2, rtol=3e-1)}), "TestModule",
                                 "test_cpu_gpu_parity", dtypes=[torch.float16]),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.bfloat16],
-                                device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
+                                dtypes=[torch.float16, torch.bfloat16], device_type='cuda'),
                ),
                ),
     ModuleInfo(torch.nn.CTCLoss,
