@@ -630,6 +630,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
 
+AOTI_TORCH_EXPORT const char* aoti_torch_get_last_error();
+
 AOTI_TORCH_EXPORT void aoti_torch_check(
     bool cond,
     const char* func,

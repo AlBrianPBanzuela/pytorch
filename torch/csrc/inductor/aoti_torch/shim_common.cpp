@@ -63,6 +63,12 @@
 
 using namespace torch::aot_inductor;
 
+thread_local std::string aoti_last_error_msg;
+
+const char* aoti_torch_get_last_error() {
+  return aoti_last_error_msg.empty() ? nullptr : aoti_last_error_msg.c_str();
+}
+
 namespace {
 static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   if (device_type == aoti_torch_device_type_cpu()) {

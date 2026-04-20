@@ -147,14 +147,21 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
       get_num_outputs_func_(container_handle_, &num_outputs));
   std::vector<AtenTensorHandle> output_handles(num_outputs);
 
-  AOTI_RUNTIME_ERROR_CODE_CHECK(run_func_(
+  auto run_result = run_func_(
       container_handle_,
       input_handles.data(),
       input_handles.size(),
       output_handles.data(),
       output_handles.size(),
       reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
-      proxy_executor_handle_));
+      proxy_executor_handle_);
+  if (run_result != AOTI_RUNTIME_SUCCESS) {
+    const char* err = aoti_torch_get_last_error();
+    if (err) {
+      throw std::runtime_error(err);
+    }
+    throw std::runtime_error("AOTInductorModelContainerRun failed");
+  }
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
