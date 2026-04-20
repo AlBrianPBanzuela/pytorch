@@ -13,7 +13,7 @@ internally!
 In this post, we will go over the internal design of Dynamo from the
 ground up. We will discuss the functionality it provides, and how it is
 implemented. By the end of this post, you will have a better
-understanding of what went wrong when you `torch.compile` a PyTorch
+understanding of what went wrong when you `torch.compile`d a PyTorch
 program and the compilation errored out, or succeeded but the speed-up
 was not what you expected.
 
