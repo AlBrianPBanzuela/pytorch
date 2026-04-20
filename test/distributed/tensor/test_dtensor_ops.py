@@ -338,11 +338,6 @@ dtensor_compiled_fails = {
     xfail("scatter"),
     xfail("scatter_add"),
     xfail("take_along_dim"),
-    # batch_norm variants decompose through squeeze.dims → as_strided under
-    # compilation, and DTensor has no as_strided strategy.
-    xfail("_native_batch_norm_legit"),
-    xfail("native_batch_norm"),
-    xfail("nn.functional.batch_norm"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
@@ -773,6 +768,7 @@ class TestLocalDTensorOps(TestDTensorOps):
 ops_unbacked_dtensor_dde = {
     xfail("__getitem__"),
     xfail("__rmatmul__"),
+    xfail("_batch_norm_with_update"),
     xfail("_segment_reduce", "lengths"),
     xfail("_segment_reduce", "offsets"),
     xfail("_native_batch_norm_legit"),
