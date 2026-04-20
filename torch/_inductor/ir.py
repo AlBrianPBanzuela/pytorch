@@ -2806,7 +2806,15 @@ def is_contiguous_storage_and_layout(x: IRNode) -> bool:
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
-            layout.pad_strides()
+            assert isinstance(layout, FlexibleLayout), type(layout)
+            layout = FixedLayout(
+                layout.device,
+                layout.dtype,
+                layout.size,
+                layout._pad_strides(layout.stride, layout.size, layout.dtype),
+                layout.offset,
+                layout.is_pinned,
+            )
         return layout.is_contiguous()
     except NotImplementedError:
         return False
