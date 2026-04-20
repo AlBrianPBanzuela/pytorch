@@ -3,8 +3,7 @@
 using namespace metal;
 
 // =============================================================================
-// Sort kernels for MPS. This file contains two sort paths built on the same
-// block-merge-sort primitive:
+// Sort kernels for MPS. 2 Paths are currently supported:
 //   Path 1 - single-block: one threadgroup per row, used when the segment
 //            fits in threadgroup memory.
 //   Path 2 - multi-block:  segment split into ELEMS_PER_TG-sized blocks,
