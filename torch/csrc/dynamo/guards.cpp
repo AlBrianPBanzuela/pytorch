@@ -2798,10 +2798,9 @@ class DIMENSION_DYNAMIC_MARKING_GUARD : public LeafGuard {
       PyObject* result = PyObject_CallMethodObjArgs(
           actual, _issubset_str, expected.ptr(), nullptr);
       Py_DECREF(actual);
-      if (result == nullptr) {
-        PyErr_Clear();
-        return false;
-      }
+      TORCH_INTERNAL_ASSERT(
+          result != nullptr,
+          "issubset call failed unexpectedly in EXPLICIT_DYNAMIC_GUARD");
       bool is_subset = PyObject_IsTrue(result);
       Py_DECREF(result);
       if (!is_subset)
@@ -2873,13 +2872,11 @@ class DIMENSION_DYNAMIC_MARKING_GUARD : public LeafGuard {
       // Runtime markings must be a subset of compiled markings.
       PyObject* result = PyObject_CallMethodObjArgs(
           actual, _issubset_str, expected.ptr(), nullptr);
-      bool is_subset = false;
-      if (result != nullptr) {
-        is_subset = PyObject_IsTrue(result);
-        Py_DECREF(result);
-      } else {
-        PyErr_Clear();
-      }
+      TORCH_INTERNAL_ASSERT(
+          result != nullptr,
+          "issubset call failed unexpectedly in EXPLICIT_DYNAMIC_GUARD");
+      bool is_subset = PyObject_IsTrue(result);
+      Py_DECREF(result);
       if (!is_subset) {
         std::string attr_name = PyUnicode_AsUTF8(attr_str);
         std::string actual_str =
