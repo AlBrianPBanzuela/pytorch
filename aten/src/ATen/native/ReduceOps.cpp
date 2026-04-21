@@ -1491,7 +1491,10 @@ Tensor& nanmean_out(
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
-  at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
+  at::nansum_out(result, self, dim, keepdim).div_(factor);
+  if (opt_dtype.has_value()) {
+    result = result.to(opt_dtype.value());
+  }
   return result;
 }
 
@@ -1506,7 +1509,11 @@ Tensor nanmean(
       self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
-  return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
+  auto result = at::nansum(self, dim, keepdim).div(factor);
+  if (opt_dtype.has_value()) {
+    result = result.to(opt_dtype.value());
+  }
+  return result;
 }
 
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
