@@ -4028,10 +4028,7 @@ def _persistent_reduction_configs(
     # a different (XBLOCK, num_warps) for bs=N vs bs=N/2. Different picks
     # change the bf16 reduction order and break batch invariance in
     # persistent reductions like LayerNorm.
-    if inductor_meta and (
-        inductor_meta.get("deterministic")
-        or inductor_meta.get("are_deterministic_algorithms_enabled")
-    ):
+    if inductor_meta and inductor_meta.get("batch_invariant"):
         size_hints = dict(size_hints)
         if "x" in size_hints:
             size_hints["x"] = max(size_hints["x"], 4096)
