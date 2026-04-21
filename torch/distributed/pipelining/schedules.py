@@ -97,6 +97,7 @@ _TARGET_CHUNK_SPEC = TensorChunkSpec(0)
 def _split_target(target: torch.Tensor, n_microbatches: int) -> list[torch.Tensor]:
     return list(_split_tensor(target, _TARGET_CHUNK_SPEC, n_microbatches))
 
+
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
 I = BACKWARD_INPUT

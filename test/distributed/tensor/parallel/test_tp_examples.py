@@ -793,9 +793,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         # (Shard(1), Replicate()) are inherited directly.
         y_none = F.cross_entropy(x, target, reduction="none")
         with loss_parallel():
-            dist_x_none = distribute_tensor(
-                x, mesh_2d, [Shard(2), Shard(channel_dim)]
-            )
+            dist_x_none = distribute_tensor(x, mesh_2d, [Shard(2), Shard(channel_dim)])
             dist_y_none = F.cross_entropy(dist_x_none, dist_target, reduction="none")
             self.assertTrue(dist_y_none.placements[0].is_shard(1))
             self.assertTrue(dist_y_none.placements[1].is_replicate())
