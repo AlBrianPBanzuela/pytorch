@@ -140,59 +140,6 @@ else
   build_docs html-stable || exit $?
 fi
 
-# Generate llms-full.txt from built HTML (nightly/release only).
-# This is done as a separate step because converting ~2800 HTML pages
-# to markdown is too slow to run inside the Sphinx build itself.
-if [[ "${WITH_PUSH:-}" == true ]]; then
-  echo "Generating llms-full.txt from built HTML pages..."
-  python -c "
-import sys
-sys.path.insert(0, '$(python -c "import pytorch_sphinx_theme2; import os; print(os.path.dirname(pytorch_sphinx_theme2.__file__))")')
-from llm_generation import _html_to_markdown
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import os
-
-outdir = Path('build/html')
-html_files = sorted(outdir.rglob('*.html'))
-total = len(html_files)
-print(f'Converting {total} HTML files to markdown...')
-
-def convert(html_path):
-    try:
-        content = html_path.read_text(encoding='utf-8')
-        md = _html_to_markdown(content)
-        if md.strip():
-            md_path = html_path.with_suffix('.md')
-            md_path.write_text(md, encoding='utf-8')
-            return (html_path.stem, md)
-    except Exception as e:
-        print(f'Warning: {html_path}: {e}')
-    return (html_path.stem, None)
-
-results = {}
-max_workers = min(os.cpu_count() or 4, 8)
-with ProcessPoolExecutor(max_workers=max_workers) as executor:
-    futures = {executor.submit(convert, p): p for p in html_files}
-    done = 0
-    interval = max(1, total // 10)
-    for f in as_completed(futures):
-        name, md = f.result()
-        if md:
-            results[name] = md
-        done += 1
-        if done % interval == 0 or done == total:
-            print(f'  {done}/{total} files processed')
-
-sections = ['# PyTorch\n\n> PyTorch documentation.\n']
-for name, md in sorted(results.items()):
-    sections.append(f'\n---\n\n{md}')
-full_path = outdir / 'llms-full.txt'
-full_path.write_text('\n'.join(sections), encoding='utf-8')
-print(f'Generated llms-full.txt ({len(results)} pages) at: {full_path}')
-"
-fi
-
 # Move them into the docs repo
 popd
 popd
