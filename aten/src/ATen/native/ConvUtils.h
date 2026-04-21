@@ -471,9 +471,14 @@ inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor
     return false;
   }
 
+  // A tensor whose strides merely *look* like channels-last (e.g. a
+  // channel-slice of a channels-last tensor) is not necessarily contiguous in
+  // that layout; the MPS backend reads raw buffers assuming packed NHWC data,
+  // so require actual channels-last contiguity here.
+  // See https://github.com/pytorch/pytorch/issues/180984
   auto is_channel_last = [](const at::Tensor& t) {
-    auto fmt = t.suggest_memory_format();
-    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+    return t.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+           t.is_contiguous(at::MemoryFormat::ChannelsLast3d);
   };
   return is_channel_last(input) || is_channel_last(weight);
 }

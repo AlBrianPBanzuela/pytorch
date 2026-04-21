@@ -9354,6 +9354,16 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
+    def test_conv2d_channels_last_channel_slice(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180984
+        # A channel-slice view of a channels_last tensor has channels-last-like
+        # strides but is not packed NHWC in memory.
+        shared = torch.randn(1, 2, 1, 2, device="mps").contiguous(memory_format=torch.channels_last)
+        weight = torch.randn(1, 1, 1, 1, device="mps")
+        mps_out = F.conv2d(shared[:, :1], weight)
+        cpu_out = F.conv2d(shared[:, :1].cpu(), weight.cpu())
+        self.assertEqual(cpu_out, mps_out.cpu())
+
     # Regression test for https://github.com/pytorch/pytorch/issues/141471
     def test_conv3d_channels_last_3d(self):
         m_cpu = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0), device="cpu")

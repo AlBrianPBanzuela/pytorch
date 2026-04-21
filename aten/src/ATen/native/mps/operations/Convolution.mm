@@ -114,8 +114,13 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   const bool is_macos_15_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   const bool is3DConv = input_t.dim() == 5;
-  const auto memory_format = input_t.suggest_memory_format();
-  const auto input_suggested_layout = memory_format == kChannelsLast && is_macos_15_plus ? kChannelsLast : kContiguous;
+  // getMPSNDArray reads the raw MTLBuffer as packed NHWC when using the
+  // channels-last path, so we must ensure the input is actually contiguous in
+  // that layout -- a channel-slice of a channels-last tensor has
+  // channels-last-like strides but is not packed.
+  // See https://github.com/pytorch/pytorch/issues/180984
+  const auto input_suggested_layout =
+      input_t.is_contiguous(kChannelsLast) && is_macos_15_plus ? kChannelsLast : kContiguous;
   const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t) && !is3DConv;
   const bool bias_defined = bias_opt ? bias_opt->defined() : false;
 
