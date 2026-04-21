@@ -3071,7 +3071,6 @@ class _AOTDispatchAutogradFunctionFactory:
             _bw_epilogue_wrap_fn = _codegen_bw_wrap_fn
             _bw_prologue_unwrap_fn = _codegen_bw_unwrap_fn
             boxed_grads_call = True
-            _transform_raw_returns_fn = _codegen_transform_raw_returns
 
             @staticmethod
             def _compiled_autograd_key(ctx: Any) -> tuple[Any, ...]:
