@@ -2974,6 +2974,12 @@ class PythonWrapperCodegen(CodeGen):
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
 
+        # Kernel names starting with __ trigger Python name mangling when called
+        # from within a class method. Fix by escaping __ -> _U.
+        # See https://github.com/pytorch/pytorch/issues/170398
+        name = name.replace("__", "_U")
+        original_name = original_name.replace("__", "_U")
+
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
             compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
