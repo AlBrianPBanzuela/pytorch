@@ -1015,6 +1015,12 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo):
         res = type(self).__new__(type(self))
         memo[id(self)] = res
+        # Torchbind objects (e.g. ProcessGroup) are by-reference singletons that
+        # wrap live resources and have no meaningful deepcopy. Pre-seed memo so
+        # copy.deepcopy hands them back unchanged instead of trying to serialize.
+        for v in self.__dict__.values():
+            if isinstance(v, torch.ScriptObject):
+                memo.setdefault(id(v), v)
         fake_mod = _CodeOnlyModule(copy.deepcopy(self.__dict__, memo))
         self._deepcopy_init()(res, fake_mod, fake_mod.__dict__["_graph"])
         # hooks are lost during `GraphModule.__init__`, so we need to copy over
