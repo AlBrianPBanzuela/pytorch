@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for mp_subscript_impl: unified __getitem__ dispatch via generic_getitem in Dynamo.
+"""Tests for mp_subscript_impl: unified __getitem__ dispatch via vt_getitem in Dynamo.
 
-Tests exercise the generic_getitem → mp_subscript_impl path via operator.getitem(),
+Tests exercise the vt_getitem → mp_subscript_impl path via operator.getitem(),
 and the call_method("__getitem__") → mp_subscript_impl path via obj.__getitem__().
 
 See TODO(follow-up) comments on each mp_subscript_impl override for remaining
@@ -755,7 +755,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     # Explicit __getitem__ dunder call path tests
     # Exercises: obj.__getitem__(key) → LOAD_ATTR + CALL, which may
     # route through call_method → mp_subscript_impl rather than
-    # generic_getitem → mp_subscript_impl.
+    # vt_getitem → mp_subscript_impl.
     # ===================================================================
 
     def test_list_dunder_getitem(self):
