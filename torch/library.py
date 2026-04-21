@@ -114,7 +114,7 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"(got {len(mutable_args)} mutable args but {len(returns)} returns). "
             f"Got: {schema}"
         )
-    for i, (ret, arg) in enumerate(zip(returns, mutable_args)):
+    for i, (ret, arg) in enumerate(zip(returns, mutable_args, strict=True)):
         if ret.alias_info is None or arg.alias_info is None:
             raise ValueError(
                 f"Return {i} of schema tagged with torch.Tag.out must alias mutable arg '{arg.name}'. "
