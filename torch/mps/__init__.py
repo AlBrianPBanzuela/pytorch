@@ -239,31 +239,6 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
     return torch._C._mps_host_alias_storage(storage)
 
 
-def _host_alias_tensor(tensor: Tensor) -> Tensor:
-    r"""Returns a CPU-device tensor that aliases the host-visible contents of
-    ``tensor``'s MPS storage, preserving dtype, shape, strides, and
-    storage offset.
-
-    Writes to the returned tensor land directly in the source MTLBuffer.
-    The returned tensor retains a reference to the source MPS storage, so
-    its memory remains valid even after ``tensor`` itself is freed.
-
-    Raises the same exceptions as :func:`_host_alias_storage` if ``tensor``
-    is not backed by a shared-storage MPS allocation.
-
-    .. warning::
-        Use with caution — this bypasses PyTorch's usual cache-coherence
-        guarantees and is not autograd-traceable. **Always** call
-        :func:`torch.mps.synchronize` both before and after accessing the
-        alias from the host. See :func:`_host_alias_storage` for the full
-        contract.
-    """
-    host_storage = _host_alias_storage(tensor.untyped_storage())
-    return torch.empty(0, dtype=tensor.dtype).set_(
-        host_storage, tensor.storage_offset(), tensor.shape, tensor.stride()
-    )
-
-
 from . import profiler
 from .event import Event
 

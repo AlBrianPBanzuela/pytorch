@@ -8068,9 +8068,11 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(host.device.type, "cpu")
         self.assertEqual(host.nbytes(), nbytes)
 
-        # _host_alias_tensor wraps the aliased storage in a CPU tensor
-        # preserving dtype/shape/strides
-        host_tensor = torch.mps._host_alias_tensor(x)
+        # Callers turn the aliased storage into a CPU tensor view of the
+        # same shape/stride as the source MPS tensor via set_().
+        host_tensor = torch.empty(0, dtype=dtype).set_(
+            host, x.storage_offset(), x.shape, x.stride()
+        )
         self.assertEqual(host_tensor.device.type, "cpu")
         self.assertEqual(host_tensor.dtype, dtype)
         self.assertEqual(host_tensor.shape, x.shape)
