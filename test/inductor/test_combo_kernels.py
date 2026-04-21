@@ -44,13 +44,6 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
-if torch.version.hip:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest(
-        "PR180277 will fix the combo-kernel hip config issue on ROCm"
-    )
-
 
 @instantiate_parametrized_tests
 class ComboKernelTests(TestCase):
@@ -168,19 +161,54 @@ class ComboKernelTests(TestCase):
             c2 = torch.add(a2, b2)
             return c0, c1, c2
 
-        self.check_model_gpu(
-            fn,
-            (
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(40, 30, device=GPU_TYPE),
-                torch.rand(36, 40, device=GPU_TYPE),
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(30, 40, device=GPU_TYPE).t(),
-                torch.rand(40, 36, device=GPU_TYPE).t(),
-            ),
+        inps = (
+            torch.rand(30, 20, device=GPU_TYPE),
+            torch.rand(40, 30, device=GPU_TYPE),
+            torch.rand(36, 40, device=GPU_TYPE),
+            torch.rand(30, 20, device=GPU_TYPE),
+            torch.rand(30, 40, device=GPU_TYPE).t(),
+            torch.rand(40, 36, device=GPU_TYPE).t(),
         )
-
+        self.check_model_gpu(fn, inps)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+        # Verify the cpp_wrapper grid computation uses per-subkernel block sizes.
+        # Without per-subkernel block support, generate_lazy only provides shared
+        # meta keys (XBLOCK, YBLOCK) but SequentialFlattenComboKernelGrid looks
+        # up XBLOCK_0, XBLOCK_1 etc. — dict.get returns None, and ceildiv treats
+        # None as block=1, hardcoding the grid to xnumel*ynumel per subkernel.
+        if (
+            torch._inductor.config.cpp_wrapper
+            and self.combo_kernel_per_subkernel_blocks
+        ):
+            from torch.profiler import ProfilerActivity
+
+            fn_c = torch.compile(fn)
+            expected = fn(*inps)
+            activity = getattr(ProfilerActivity, GPU_TYPE.upper())
+            with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
+                with torch.profiler.profile(activities=[activity]) as prof:
+                    actual = fn_c(*inps)
+                    actual = fn_c(*inps)
+                self.assertEqual(expected, actual)
+
+                prof.export_chrome_trace(trace_file.name)
+                with open(trace_file.name) as f:
+                    trace_json = json.load(f)
+
+            combo_events = [
+                e
+                for e in trace_json["traceEvents"]
+                if "triton_poi_fused_1" in e.get("name", "")
+            ]
+            self.assertTrue(len(combo_events) > 0)
+            # With proper block sizes (>=16), the grid should be much smaller
+            # than the degenerate 30*40 + 40*36 = 2640 (block=1).
+            degenerate_grid = 30 * 40 + 40 * 36
+            for e in combo_events:
+                grid = e.get("args", {}).get("grid")
+                if grid:
+                    self.assertLess(grid[0], degenerate_grid)
 
     @requires_gpu_and_triton
     def test_persistent_reduction_size_hint(self):
@@ -487,14 +515,10 @@ class ComboKernelTests(TestCase):
                 for event in trace_json["traceEvents"]
                 if "triton_poi_fused_0" in event["name"]
             ]
-            # ROCTracer does not report grid metadata for Triton kernels
-            # launched via hipModuleLaunchKernel, so grid may be absent.
-            grid = triton_events[0].get("args", {}).get("grid")
-            if grid is not None:
-                if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-                    self.assertEqual([3795, 1, 1], grid)
-                else:
-                    self.assertEqual([791, 4096, 1], grid)
+            if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+                self.assertEqual([3795, 1, 1], triton_events[0]["args"]["grid"])
+            else:
+                self.assertEqual([791, 4096, 1], triton_events[0]["args"]["grid"])
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -534,10 +558,7 @@ class ComboKernelTests(TestCase):
                     for e in trace_json["traceEvents"]
                     if "triton_poi_fused" in e["name"]
                 ]
-                # ROCTracer does not report grid metadata for Triton kernels
-                # launched via hipModuleLaunchKernel, so grid may be absent.
-                grid = triton_events[0].get("args", {}).get("grid")
-                return grid, out
+                return triton_events[0]["args"]["grid"], out
 
         x1 = torch.randn(1024, 512, device=GPU_TYPE)
         y1 = torch.randn(2048, 256, device=GPU_TYPE)
@@ -549,14 +570,13 @@ class ComboKernelTests(TestCase):
         grid2, out2 = get_grid(x2, y2)
         eager_out2 = fn(x2, y2)
 
+        self.assertNotEqual(grid1[0], grid2[0])
         self.assertEqual(out1, eager_out1)
         self.assertEqual(out2, eager_out2)
 
-        if grid1 is not None and grid2 is not None:
-            self.assertNotEqual(grid1[0], grid2[0])
-            if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-                self.assertEqual(grid1[1], 1)
-                self.assertEqual(grid2[1], 1)
+        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            self.assertEqual(grid1[1], 1)
+            self.assertEqual(grid2[1], 1)
 
     @requires_gpu_and_triton
     @parametrize("pointwise_only,expected_kernel_count", [(False, 2), (True, 3)])
@@ -625,6 +645,32 @@ class ComboKernelTests(TestCase):
                 torch._inductor.metrics.generated_kernel_count, expected_kernel_count
             )
 
+    # waves_per_eu, matrix_instr_nonkdim, and kpack are HIP-only Triton
+    # compile options, so only ROCm exercises this combo-kernel rewrite path.
+    @unittest.skipIf(not torch.version.hip, "ROCm only")
+    @requires_gpu_and_triton
+    @parametrize("max_autotune", [False, True])
+    def test_combo_kernel_amd_special_config_args(self, max_autotune):
+        if not torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            self.skipTest("requires combo_kernel_per_subkernel_blocks")
+
+        def fn(a, b):
+            return a * 2.0, b + 1.0
+
+        inps = [
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+
+        torch._inductor.metrics.reset()
+        with torch._inductor.config.patch("max_autotune", max_autotune):
+            fn_c = torch.compile(fn)
+            out_compiled, _ = run_and_get_code(fn_c, *inps)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
@@ -669,14 +715,11 @@ class ComboKernelTests(TestCase):
                 for event in trace_json["traceEvents"]
                 if "triton_poi_fused_0" in event["name"]
             ]
-            # ROCTracer does not report grid metadata for Triton kernels
-            # launched via hipModuleLaunchKernel, so grid may be absent.
-            grid = triton_events[0].get("args", {}).get("grid")
-            if grid is not None:
-                if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-                    self.assertEqual([83660, 1, 1], grid)
-                else:
-                    self.assertEqual([4, 45260, 2], grid)
+
+            if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+                self.assertEqual([83660, 1, 1], triton_events[0]["args"]["grid"])
+            else:
+                self.assertEqual([4, 45260, 2], triton_events[0]["args"]["grid"])
 
         self.assertEqual(out_eager, out_compiled)
 
@@ -1473,6 +1516,65 @@ class ComboKernelTestsMaxAutotune(TestCase):
         groups = inductor_meta["combo_tuning_groups"]
         self.assertEqual(len(groups), 2)
         self.assertEqual([[0], [1]], [g["member_indices"] for g in groups])
+
+    @requires_gpu_and_triton
+    def test_combo_kernel_coordesc_tunes_largest_subkernel_first(self):
+        def fn(a, b, c):
+            return (
+                torch.nn.functional.relu(a),
+                torch.nn.functional.sigmoid(b),
+                torch.nn.functional.tanh(c),
+            )
+
+        inps = [
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(256, 256, device=GPU_TYPE),
+            torch.rand(16, 128, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+
+        def parse_block_cfg(msg: str) -> dict[str, int]:
+            return {
+                m.group(1): int(m.group(2))
+                for m in re.finditer(r"(\w+BLOCK_\d+): (\d+)", msg)
+            }
+
+        logger = logging.getLogger("torch._inductor.runtime.coordinate_descent_tuner")
+        with torch._inductor.config.patch(coordinate_descent_tuning=True):
+            with self.assertLogs(logger, level=logging.DEBUG) as cm:
+                out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+
+        baseline_log = next(
+            msg for msg in cm.output if "Baseline Config" in msg and "XBLOCK_" in msg
+        )
+        baseline_cfg = parse_block_cfg(baseline_log)
+        try_logs = [
+            msg for msg in cm.output if "Try config" in msg and "XBLOCK_" in msg
+        ]
+        self.assertGreater(
+            len(try_logs), 0, "Coordinate descent did not try combo fields"
+        )
+        distinct_block_cfgs = {
+            tuple(sorted(parse_block_cfg(msg).items())) for msg in try_logs
+        }
+        self.assertGreater(
+            len(distinct_block_cfgs),
+            1,
+            "Coordinate descent did not explore different suffixed block sizes.",
+        )
+
+        first_cfg = parse_block_cfg(try_logs[0])
+        changed_fields = {
+            key for key, value in first_cfg.items() if baseline_cfg.get(key) != value
+        }
+        self.assertEqual(
+            changed_fields,
+            {"XBLOCK_1"},
+            f"Expected the first combo coordesc step to tune the largest subkernel first, got {changed_fields}",
+        )
 
 
 if __name__ == "__main__":
