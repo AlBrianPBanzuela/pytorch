@@ -724,16 +724,15 @@ def _do_auto_functionalize_v2_for_out_operator(
             **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
-    # The HOP returns (op_output, *created_out_tensors).
+    # For out= ops, the functional HOP returns exactly the out tensors.
     # n_mutable is guaranteed > 0 by _validate_out_schema.
     n_mutable = len(mutable_args_names)
-    unwrapped_actual_out = unwrapped_outs[:-n_mutable]
-    unwrapped_mutable_out = unwrapped_outs[-n_mutable:]
-
-    if len(schema.returns) == 1:
-        unwrapped_actual_out = unwrapped_actual_out[0]
-    elif len(schema.returns) == 0:
-        unwrapped_actual_out = None
+    unwrapped_mutable_out = (
+        (unwrapped_outs,) if n_mutable == 1 else tuple(unwrapped_outs)
+    )
+    unwrapped_actual_out = (
+        unwrapped_mutable_out[0] if n_mutable == 1 else unwrapped_mutable_out
+    )
 
     # Sync the created out tensors back to the original FunctionalTensors
     for orig_arg, result in zip(out_arg_originals, unwrapped_mutable_out):
@@ -1016,6 +1015,9 @@ def auto_functionalized_v2_dense(
         op_kwargs_new,
     )
 
+    if _is_out:
+        return out  # type: ignore[return-value]
+
     if isinstance(out, tuple):
         return (*out, *all_bases_new)  # type: ignore[return-value]
     else:
@@ -1030,9 +1032,6 @@ def _generate_new_op_kwargs_from_bases(
     if _is_out:
         # For out= ops, _all_bases is empty. Create empty tensors from the
         # metadata that was encoded by _do_auto_functionalize_v2_for_out_operator.
-        # We return these as the second element so auto_functionalized_v2_dense
-        # appends them to the HOP output tuple (maintaining the getitem indices
-        # that the graph expects).
         new_kwargs = dict(**kwargs)
         created_out_tensors = []
         for arg_name in mutable_args_names:

@@ -1,6 +1,7 @@
 # Owner(s): ["module: custom-operators"]
 import torch
 from torch import Tensor
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._library._out_variant import check_out_variant, to_out_variant
 from torch._library.utils import is_out
 from torch.testing._internal.common_utils import (
@@ -9,7 +10,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.testing._internal.logging_utils import logs_to_string
 
 
 _test_lib = torch.library.Library("_TestOutVariant", "DEF")  # noqa: TOR901
@@ -341,31 +341,27 @@ class TestOutVariant(TestCase):
         self.assertEqual(out, x + y)
 
     def test_compile_out_functionalized_graph(self):
-        from torch._functorch.aot_autograd import aot_function
-
         def fn(x, y, out):
             return torch.ops._TestOutVariant.add.out(x, y, out=out)
-
-        graphs = []
-
-        def fw_compiler(gm, example_inputs):
-            graphs.append(gm)
-            return gm.forward
 
         x = torch.randn(3, 4)
         y = torch.randn(3, 4)
         out = torch.empty(3, 4)
 
-        aot_fn = aot_function(fn, fw_compiler=fw_compiler)
-        aot_fn(x, y, out)
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result = compiled_fn(x, y, out)
+
+        self.assertEqual(result, x + y)
+        self.assertEqual(out, x + y)
 
         self.assertExpectedInline(
-            graphs[0].code.strip(),
+            backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOutVariant.add.out, x = arg0_1, y = arg1_1, _out_size = (3, 4), _out_stride = (4, 1), _out_dtype = torch.float32, _out_device = device(type='cpu'), _all_bases = []);  arg0_1 = arg1_1 = None
-    getitem_1 = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-    return (getitem_1, getitem_1)""",  # noqa: B950
+    copy_ = torch.ops.aten.copy_.default(arg2_1, auto_functionalized_v2);  arg2_1 = copy_ = None
+    return (auto_functionalized_v2,)""",  # noqa: B950
         )
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
@@ -377,18 +373,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         y = torch.randn(3, 4)
         out = torch.empty(3, 4)
 
-        log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
-        )
-        with ctx():
-            result = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, out)
-
-        graph = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        backend = AotEagerAndRecordGraphs()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, y, out)
 
         self.assertEqual(result, x + y)
         self.assertEqual(out, x + y)
-        self.assertIn("auto_functionalized_v2", graph)
-        self.assertNotIn("torch.ops.higher_order.auto_functionalized(", graph)
+        self.assertIn("auto_functionalized_v2", backend.fw_graphs[0].code)
+        self.assertNotIn(
+            "torch.ops.higher_order.auto_functionalized(",
+            backend.fw_graphs[0].code,
+        )
 
     @parametrize("backend", ("aot_eager", "inductor"))
     def test_compile_multi_out(self, backend):
