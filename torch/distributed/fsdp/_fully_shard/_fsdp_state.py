@@ -350,7 +350,6 @@ class FSDPState(_State):
                 output,
             )
 
-    @_dynamo_disable
     def _force_complete_incomplete_states(self, output: Any) -> Any:
         # Complete post-forward for any state whose group forward did not
         # run all modules (e.g. chunked loss where model.forward skips
@@ -436,7 +435,6 @@ class FSDPState(_State):
             self._root_post_backward_final_callback
         )
 
-    @_dynamo_disable
     def _reset_iter_state(self) -> None:
         # Iteration-wide recovery after a mid-forward or mid-backward
         # exception. Waits on in-flight collectives, reshards every param

@@ -19,7 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_common import FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -372,6 +372,7 @@ class FSDPModule:
         handle.wait()
         return None
 
+    @_dynamo_disable
     def reset_iter_state(self) -> None:
         """
         Resets FSDP's per-iteration state after an exception aborted a
@@ -391,9 +392,10 @@ class FSDPModule:
         accumulation should treat the microbatch sequence as invalidated
         and restart it.
 
-        Must be called on the root FSDP module (the module passed to the
-        top-level ``fully_shard`` call that drives ``forward``). Calling
-        on a non-root module raises ``RuntimeError``.
+        Must be called on the root FSDP module — i.e. the module the
+        top-level ``fully_shard`` was applied to, equivalently the
+        module first forwarded. Calling on a non-root module raises
+        ``RuntimeError``.
         """
         state = self._get_fsdp_state()
         state._reset_iter_state()
