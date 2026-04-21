@@ -1,19 +1,37 @@
-"""
-Dynamic shape specification types for torch.compile and torch.export.
+"""Dynamic shape specification types for ``torch.compile`` and ``torch.export``.
 
-Provides IntSpec for fine-grained control over whether an integer dimension
-is dynamic (backed), static, or unbacked.
+Provides :class:`IntSpec` for fine-grained control over whether an integer
+(dimension size or scalar argument) is treated as static, backed, or unbacked
+during compilation.
 
-Usage::
+Backed vs. unbacked
+-------------------
+``torch.compile`` provides two kinds of dynamic shapes: ``backed`` and
+``unbacked``. ``torch.compile`` guards on ``backed`` dynamic shapes and does
+not provide a guarantee that no guards will be added to them. User code,
+dynamo, inductor, and autograd all can add guards when tracing through
+branching, e.g. ``if x.size() > 10``. Moreover, for 0/1 specializations,
+backed symbols are specialized unconditionally to ``0``, ``1``, or ``>=2``
+even without encountering a branching on those ranges.
 
-    # Direct construction
-    IntSpec("batch", type=IntSpecType.BACKED, min=1, max=64)
-    IntSpec("heads", type=IntSpecType.STATIC, value=8)
+On the contrary, ``unbacked`` dynamic shapes are guaranteed not to be guarded
+on and are not 0/1 specialized. However, there is a possibility of throwing a
+data-dependent error when a branch that requires their value is encountered
+and no explicit unbacked handling is defined. The framework is converging to
+a state where it won't throw DDE but rather pick general paths. One downside
+of using unbacked is missed optimization opportunities due to either perf
+bugs or picking general paths, or using a fixed non-example input-based hint.
+An example of picking general paths is assuming input not contiguous in
+functions called ``contiguous()`` and ``reshape()`` when it cannot be
+symbolically proven, with a change of introducing a clone.
 
-    # Fluent API
-    IntSpec("batch").backed(min=1, max=64)
-    IntSpec().static(10)
-    IntSpec("seq_len").unbacked(min=1, max=2048)
+For more info see
+https://dev-discuss.pytorch.org/t/backed-to-unbacked-from-guardable-to-guardless-shapes-in-pytorch/3333.
+
+.. TODO::
+
+    Expand this documentation once ``TensorSpec`` and ``ModelSpec`` land, with
+    end-to-end examples covering per-tensor and per-model specifications.
 """
 
 import enum
@@ -24,13 +42,17 @@ __all__ = ["IntSpecType", "IntSpec"]
 
 
 class IntSpecType(enum.Enum):
-    """How an integer dimension should be treated during compilation.
+    """How an integer should be treated during compilation.
 
-    STATIC  -- Treat as a compile-time constant. Recompiles if the value changes.
-    BACKED  -- Symbolic with a backing hint. Specialization (including full) is
-               permitted; no constraints are enforced at runtime.
-    UNBACKED -- Fully symbolic with no backing value. Runtime assertions enforce
-                min/max bounds. Cannot be specialized.
+    STATIC
+        Treat as a compile-time constant. Recompiles if the value changes.
+    BACKED
+        Symbolic with a backing hint. Guards and 0/1 specialization are
+        permitted; user code or the compiler may install constraints.
+    UNBACKED
+        Symbolic with no backing value. Guaranteed not to be guarded on and
+        not 0/1 specialized; branching on the value may raise a
+        data-dependent error.
     """
 
     STATIC = "static"
@@ -41,60 +63,56 @@ class IntSpecType(enum.Enum):
 class IntSpec:
     """Shape specification for a single integer (dimension size or scalar arg).
 
-    Constructed directly or via the fluent API::
+    Constructed via one of the three mode-specific classmethod factories —
+    :meth:`static`, :meth:`backed`, :meth:`unbacked`. The mode is required at
+    construction time and cannot be changed afterwards.
 
-        IntSpec("batch", type=IntSpecType.BACKED, min=1, max=64)
-        IntSpec("batch").backed(min=1, max=64)
-        IntSpec().static(10)
+    Example::
 
-    Parameter validity by type:
+        IntSpec.static("x", value=10)
+        IntSpec.backed("batch", min=1, max=64, guarding_hint=32)
+        IntSpec.unbacked("seq", min=1, max=2048, optimization_hint=512)
 
-    ============  =========  =========  ========  ================  ===========
-    Parameter     STATIC     BACKED     UNBACKED
-    ============  =========  =========  ========  ================  ===========
-    value         yes        NO         NO
-    min / max     NO         yes        yes
-    backed_hint   NO         yes        NO
-    optimization_hint  NO    NO         yes
-    ============  =========  =========  ========  ================  ===========
+    The ``__init__`` constructor is used by the factories and by callers that
+    need to round-trip a spec via its fields; external users should prefer
+    the factories.
     """
 
     def __init__(
         self,
         name: str | None = None,
         *,
-        type: IntSpecType | None = None,
+        type: IntSpecType,
         min: int | None = None,
         max: int | None = None,
         value: int | None = None,
+        guarding_hint: int | None = None,
         optimization_hint: int | None = None,
-        backed_hint: int | None = None,
     ) -> None:
+        if not isinstance(type, IntSpecType):
+            raise TypeError(f"IntSpec.type must be an IntSpecType, got {type!r}")
         self.name = name
         self._type = type
         self._min = min
         self._max = max
         self._value = value
+        self._guarding_hint = guarding_hint
         self._optimization_hint = optimization_hint
-        self._backed_hint = backed_hint
-        if type is not None:
-            self._validate()
+        self._validate()
 
     # -- validation --------------------------------------------------------
 
     def _validate(self) -> None:
-        if self._type is None:
-            return
-        if self._type == IntSpecType.STATIC:
+        if self._type is IntSpecType.STATIC:
             if self._min is not None or self._max is not None:
                 raise ValueError(
                     "min/max are only valid for BACKED/UNBACKED IntSpec, not STATIC"
                 )
+            if self._guarding_hint is not None:
+                raise ValueError("guarding_hint is only valid for BACKED IntSpec")
             if self._optimization_hint is not None:
                 raise ValueError("optimization_hint is only valid for UNBACKED IntSpec")
-            if self._backed_hint is not None:
-                raise ValueError("backed_hint is only valid for BACKED IntSpec")
-        elif self._type == IntSpecType.BACKED:
+        elif self._type is IntSpecType.BACKED:
             if self._value is not None:
                 raise ValueError("value is only valid for STATIC IntSpec")
             if self._optimization_hint is not None:
@@ -107,11 +125,11 @@ class IntSpec:
                 raise ValueError(
                     f"min must be <= max, got min={self._min}, max={self._max}"
                 )
-        elif self._type == IntSpecType.UNBACKED:
+        elif self._type is IntSpecType.UNBACKED:
             if self._value is not None:
                 raise ValueError("value is only valid for STATIC IntSpec")
-            if self._backed_hint is not None:
-                raise ValueError("backed_hint is only valid for BACKED IntSpec")
+            if self._guarding_hint is not None:
+                raise ValueError("guarding_hint is only valid for BACKED IntSpec")
             if (
                 self._min is not None
                 and self._max is not None
@@ -120,11 +138,67 @@ class IntSpec:
                 raise ValueError(
                     f"min must be <= max, got min={self._min}, max={self._max}"
                 )
+
+    # -- factories ---------------------------------------------------------
+
+    @classmethod
+    def static(cls, name: str | None = None, *, value: int | None = None) -> "IntSpec":
+        """Construct a STATIC :class:`IntSpec`.
+
+        ``value`` pins a concrete size; if ``None`` the value is taken from
+        the example input at compile time.
+        """
+        return cls(name, type=IntSpecType.STATIC, value=value)
+
+    @classmethod
+    def backed(
+        cls,
+        name: str | None = None,
+        *,
+        min: int | None = None,
+        max: int | None = None,
+        guarding_hint: int | None = None,
+    ) -> "IntSpec":
+        """Construct a BACKED :class:`IntSpec`.
+
+        ``guarding_hint`` is the concrete value the symbolic shape
+        environment substitutes when a hint is needed for reasoning or
+        codegen.
+        """
+        return cls(
+            name,
+            type=IntSpecType.BACKED,
+            min=min,
+            max=max,
+            guarding_hint=guarding_hint,
+        )
+
+    @classmethod
+    def unbacked(
+        cls,
+        name: str | None = None,
+        *,
+        min: int | None = None,
+        max: int | None = None,
+        optimization_hint: int | None = None,
+    ) -> "IntSpec":
+        """Construct an UNBACKED :class:`IntSpec`.
+
+        ``optimization_hint`` is used by downstream codegen (e.g. inductor
+        autotuning) only; it never participates in symbolic reasoning.
+        """
+        return cls(
+            name,
+            type=IntSpecType.UNBACKED,
+            min=min,
+            max=max,
+            optimization_hint=optimization_hint,
+        )
 
     # -- read-only properties ----------------------------------------------
 
     @property
-    def type(self) -> IntSpecType | None:
+    def type(self) -> IntSpecType:
         return self._type
 
     @property
@@ -137,93 +211,27 @@ class IntSpec:
 
     @property
     def value(self) -> int | None:
+        if self._type is not IntSpecType.STATIC:
+            raise AttributeError(
+                f"value is only defined for STATIC IntSpec, got {self._type.value}"
+            )
         return self._value
 
     @property
-    def optimization_hint(self) -> int | None:
-        return self._optimization_hint
+    def guarding_hint(self) -> int | None:
+        if self._type is not IntSpecType.BACKED:
+            raise AttributeError(
+                f"guarding_hint is only defined for BACKED IntSpec, got {self._type.value}"
+            )
+        return self._guarding_hint
 
     @property
-    def backed_hint(self) -> int | None:
-        return self._backed_hint
-
-    # -- fluent API --------------------------------------------------------
-
-    def static(self, value: int | None = None) -> "IntSpec":
-        """Configure as STATIC.  *value* pins the concrete size; if ``None`` the
-        value is taken from the example input at compile time."""
-        self._type = IntSpecType.STATIC
-        self._value = value
-        self._min = None
-        self._max = None
-        self._optimization_hint = None
-        self._backed_hint = None
-        return self
-
-    def backed(
-        self,
-        *,
-        min: int | None = None,
-        max: int | None = None,
-        hint: int | None = None,
-    ) -> "IntSpec":
-        """Configure as BACKED (symbolic with backing hint).
-        Specialization is permitted; *min*/*max* are assumptions, not hard
-        constraints."""
-        self._type = IntSpecType.BACKED
-        self._min = min
-        self._max = max
-        self._backed_hint = hint
-        self._value = None
-        self._optimization_hint = None
-        self._validate()
-        return self
-
-    def unbacked(
-        self,
-        *,
-        min: int | None = None,
-        max: int | None = None,
-        hint: int | None = None,
-    ) -> "IntSpec":
-        """Configure as UNBACKED (fully symbolic).
-        *min*/*max* become runtime assertions.  *hint* is an optimization hint
-        only (e.g. for inductor autotuning)."""
-        self._type = IntSpecType.UNBACKED
-        self._min = min
-        self._max = max
-        self._optimization_hint = hint
-        self._value = None
-        self._backed_hint = None
-        self._validate()
-        return self
-
-    # -- lowering to existing Dim infrastructure ---------------------------
-
-    def _to_dim(self) -> Any:
-        """Convert to the existing ``Dim`` / ``_DimHint`` representation
-        understood by ``_process_dynamic_shapes``."""
-        from torch.export.dynamic_shapes import Dim
-
-        if self._type == IntSpecType.STATIC:
-            if self._value is not None:
-                return self._value  # _process_dynamic_shapes treats int as _StaticDim
-            return Dim.STATIC
-        elif self._type == IntSpecType.BACKED:
-            # Backed ≈ Dim.AUTO (allows specialization).
-            # If min/max are given, create a named Dim with bounds.
-            if self._min is not None or self._max is not None:
-                dim_name = self.name or "_"
-                kwargs: dict[str, int] = {}
-                if self._min is not None:
-                    kwargs["min"] = self._min
-                if self._max is not None:
-                    kwargs["max"] = self._max
-                return Dim(dim_name, **kwargs)
-            return Dim.AUTO
-        elif self._type == IntSpecType.UNBACKED:
-            return Dim.DYNAMIC
-        return None
+    def optimization_hint(self) -> int | None:
+        if self._type is not IntSpecType.UNBACKED:
+            raise AttributeError(
+                f"optimization_hint is only defined for UNBACKED IntSpec, got {self._type.value}"
+            )
+        return self._optimization_hint
 
     # -- dunder ------------------------------------------------------------
 
@@ -231,18 +239,17 @@ class IntSpec:
         parts: list[str] = []
         if self.name is not None:
             parts.append(f"name={self.name!r}")
-        if self._type is not None:
-            parts.append(f"type={self._type.value}")
+        parts.append(f"type={self._type.value}")
         if self._value is not None:
             parts.append(f"value={self._value}")
         if self._min is not None:
             parts.append(f"min={self._min}")
         if self._max is not None:
             parts.append(f"max={self._max}")
+        if self._guarding_hint is not None:
+            parts.append(f"guarding_hint={self._guarding_hint}")
         if self._optimization_hint is not None:
             parts.append(f"optimization_hint={self._optimization_hint}")
-        if self._backed_hint is not None:
-            parts.append(f"backed_hint={self._backed_hint}")
         return f"IntSpec({', '.join(parts)})"
 
     def __eq__(self, other: object) -> bool:
@@ -254,8 +261,8 @@ class IntSpec:
             and self._min == other._min
             and self._max == other._max
             and self._value == other._value
+            and self._guarding_hint == other._guarding_hint
             and self._optimization_hint == other._optimization_hint
-            and self._backed_hint == other._backed_hint
         )
 
     def __hash__(self) -> int:
@@ -266,18 +273,25 @@ class IntSpec:
                 self._min,
                 self._max,
                 self._value,
+                self._guarding_hint,
                 self._optimization_hint,
-                self._backed_hint,
             )
         )
 
 
+# TODO: temporary scaffolding. laithsakka flagged (PR review) that translating
+# specs into tensor properties via mark_*:
+#   - does not work for scalar int inputs (a primary IntSpec use case),
+#   - silently installs guards that haven't been decided on.
+# Replace with proper plumbing through the compile context in the follow-up
+# integration PR, then delete _apply_intspec_to_tensor and
+# _apply_dynamic_shapes.
 def _apply_intspec_to_tensor(tensor: Any, shape_spec: Any) -> None:
-    """Apply per-dimension IntSpec entries to a tensor via mark_static/mark_dynamic/mark_unbacked."""
+    """Apply per-dimension IntSpec entries to a tensor via ``mark_*``."""
     from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dynamic
 
     if isinstance(shape_spec, dict):
-        items = shape_spec.items()
+        items: Any = shape_spec.items()
     elif isinstance(shape_spec, (list, tuple)):
         items = enumerate(shape_spec)
     else:
@@ -290,23 +304,21 @@ def _apply_intspec_to_tensor(tensor: Any, shape_spec: Any) -> None:
             raise TypeError(
                 f"Expected IntSpec or None in dynamic_shapes, got {type(spec).__name__}"
             )
-        if spec.type is None:
-            raise ValueError(f"IntSpec type must be set for dim {idx}")
-        if spec.type == IntSpecType.STATIC:
+        if spec.type is IntSpecType.STATIC:
             mark_static(tensor, idx)
-        elif spec.type == IntSpecType.BACKED:
+        elif spec.type is IntSpecType.BACKED:
             maybe_mark_dynamic(tensor, idx)
-        elif spec.type == IntSpecType.UNBACKED:
+        elif spec.type is IntSpecType.UNBACKED:
             mark_unbacked(tensor, idx)
 
 
 def _apply_dynamic_shapes(
     compiled: Any, original: Any, dynamic_shapes: dict[str, Any]
 ) -> Any:
-    """Wrap a compiled callable to apply dynamic_shapes IntSpec on each call.
+    """Wrap a compiled callable to apply ``dynamic_shapes`` IntSpec on each call.
 
-    The wrapper is decorated with ``torch._dynamo.disable`` so that dynamo
-    does not attempt to trace the tensor-marking logic.  The inner
+    The wrapper is decorated with :func:`torch._dynamo.disable` so that dynamo
+    does not attempt to trace the tensor-marking logic. The inner
     ``compiled()`` call re-enters dynamo normally.
     """
     import functools
@@ -319,9 +331,6 @@ def _apply_dynamic_shapes(
         original.forward if isinstance(original, torch.nn.Module) else original
     )
 
-    # torch._dynamo.disable prevents dynamo from tracing the wrapper itself.
-    # When the wrapper calls compiled(), the compiled function re-enables
-    # dynamo's frame evaluation for actual tracing.
     @torch._dynamo.disable
     @functools.wraps(
         compiled if not isinstance(compiled, torch.nn.Module) else compiled.forward
