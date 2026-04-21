@@ -2043,20 +2043,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
-    def call_iter(
-        self,
-        tx: "InstructionTranslator",
-        obj: VariableTracker,
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        if len(args) == 0:
-            return generic_getiter(tx, obj)
-        else:
-            return variables.UserFunctionVariable(
-                polyfills.builtins.callable_iterator
-            ).call_function(tx, [obj, *args], kwargs)
-
     call_tuple = _call_tuple_list
 
     def call_callable(
