@@ -1,14 +1,9 @@
 name: s390x-periodic
 
-# TEMPORARILY DISABLED: the s390x runner fleet is serving a stale actions-runner
-# image that doesn't play well with the setup-linux composite action — setup-linux
-# runs `docker system prune -af`, which deletes the preloaded manylinuxs390x-builder
-# image (it is only baked into the runner; it was never published to Docker Hub).
-# See meta-pytorch/pytorch-gha-infra#1107 and PR #181002 for the root cause and fix.
-# The scheduled and ciflow/periodic triggers are removed so this workflow stops
-# failing on every periodic run. Manual dispatch and the ciflow/s390 tag remain
-# available so the IBM s390x maintainer can re-enable testing once the runner
-# image is rebuilt and redeployed.
+# DISABLED: this workflow has been failing for months and not providing a useful
+# signal. 
+# Details in the PR description for https://github.com/pytorch/pytorch/pull/181005
+# Re-enable once workflow has been fully fixed and someone is willing to maintain it.
 on:
   push:
     tags:
