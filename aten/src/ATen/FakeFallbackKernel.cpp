@@ -107,7 +107,8 @@ static std::shared_ptr<c10::FakeTensorMode> get_fake_tensor_mode(
       const auto& t = ivalue.toTensor();
       if (t.defined() && t.is_fake()) {
         auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
-        if (mode) return mode;
+        if (mode)
+          return mode;
       }
     }
   }
@@ -158,7 +159,7 @@ static void transmute_to_fake(
     const at::Tensor& t,
     c10::Device fake_device,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
-  t.unsafeGetTensorImpl()->set_fake_device(fake_device);
+  t.unsafeGetTensorImpl()->set_and_normalize_fake_device(fake_device);
   if (mode) {
     t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
   }
@@ -194,9 +195,10 @@ void fakeFallback(
         c10::DispatchKeySet(c10::DispatchKey::Python) |
         c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
     c10::impl::IncludeDispatchKeyGuard meta_guard(c10::DispatchKey::Meta);
-    auto ks = dispatchKeySet.remove(c10::DispatchKey::Fake) |
-        c10::DispatchKeySet(c10::DispatchKey::Meta);
-    op.redispatchBoxed(ks, stack);
+    // auto ks = dispatchKeySet.remove(c10::DispatchKey::Fake) |
+    //     c10::DispatchKeySet(c10::DispatchKey::Meta);
+    // op.redispatchBoxed(ks, stack);
+    op.callBoxed(ks, stack);
   }
 
   // Stamp meta tensor outputs with the fake device.

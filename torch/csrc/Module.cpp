@@ -2935,7 +2935,7 @@ Call this whenever a new thread is created in order to propagate values from
                 converter.ptr(), getPyInterpreter()));
 
         auto device = real.device();
-        meta_tensor.unsafeGetTensorImpl()->set_fake_device(device);
+        meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
         meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(
             std::move(mode));
 
