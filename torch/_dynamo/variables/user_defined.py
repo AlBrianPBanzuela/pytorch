@@ -1364,7 +1364,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def as_python_constant(self) -> object:
         if isinstance(
             self.value,
-            (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
+            (
+                enum.Enum,
+                torch.DispatchKey,
+                torch._C._functorch.TransformType,
+                torch._C._ScalingType,
+                torch._C._SwizzleType,
+            ),
         ):
             return self.value
 

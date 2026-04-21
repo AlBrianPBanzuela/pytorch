@@ -980,7 +980,13 @@ class VariableBuilder:
             return FrozensetVariable(items, source=self.source)
         elif isinstance(
             value,
-            (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
+            (
+                enum.Enum,
+                torch.DispatchKey,
+                torch._C._functorch.TransformType,
+                torch._C._ScalingType,
+                torch._C._SwizzleType,
+            ),
         ):
             self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedObjectVariable(value, source=self.source)
@@ -4306,7 +4312,13 @@ class SourcelessBuilder:
             return trace_rules.lookup(value)(value)
         elif isinstance(
             value,
-            (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
+            (
+                enum.Enum,
+                torch.DispatchKey,
+                torch._C._functorch.TransformType,
+                torch._C._ScalingType,
+                torch._C._SwizzleType,
+            ),
         ):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
