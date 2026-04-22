@@ -1707,6 +1707,14 @@
   "GB2512": [
     {
       "Gb_type": "HOP: Unsafe non-constant attribute side effect",
+      "Context": "Attempted to mutate {item}.{name} with non-constant value",
+      "Explanation": "Mutating attributes with non-constant values from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "HOP: Unsafe non-constant attribute side effect",
       "Context": "Attempted to mutate {item}.{name}",
       "Explanation": "Mutating attributes with non-constant values from outside the scope of this HOP is not supported.",
       "Hints": [
