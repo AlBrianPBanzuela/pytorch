@@ -115,21 +115,24 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"Got: {schema}"
         )
     for i, (ret, arg) in enumerate(zip(returns, mutable_args, strict=True)):
-        if ret.alias_info is None:
+        arg_alias = arg.alias_info
+        ret_alias = ret.alias_info
+        if ret_alias is None:
             raise ValueError(
                 f"Return {i} of schema tagged with torch.Tag.out must alias mutable arg '{arg.name}'. "
                 f"Got: {schema}"
             )
-        if not ret.alias_info.is_write:
+        if not ret_alias.is_write:
             raise ValueError(
                 f"Return {i} of schema tagged with torch.Tag.out must be a mutable alias "
                 f"(e.g., Tensor(a!), not Tensor(a)) of arg '{arg.name}'. "
                 f"Got: {schema}"
             )
-        if ret.alias_info.before_set != arg.alias_info.before_set:
+        # arg_alias is guaranteed non-None by the mutable_args filter above
+        if ret_alias.before_set != arg_alias.before_set:  # type: ignore[union-attr]
             raise ValueError(
                 f"Return {i} of schema tagged with torch.Tag.out must alias mutable arg '{arg.name}' "
-                f"(return aliases {ret.alias_info.before_set} but arg aliases {arg.alias_info.before_set}). "
+                f"(return aliases {ret_alias.before_set} but arg aliases {arg_alias.before_set}). "  # type: ignore[union-attr]
                 f"Got: {schema}"
             )
 
