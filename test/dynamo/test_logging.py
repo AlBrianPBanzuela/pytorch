@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import functools
+import inspect
 import logging
 import os
 import re
@@ -223,16 +224,20 @@ class LoggingTests(LoggingTestCase):
             "[file_path]",
             "\n".join(r.getMessage() for r in records),
         )
+        line_outmost = inspect.getsourcelines(outmost_fn)[1] + 1
+        line_outer = inspect.getsourcelines(outer_fn)[1] + 1
+        line_fn = inspect.getsourcelines(fn)[1] + 1
+        line_inner = inspect.getsourcelines(inner)[1] + 1
         self.assertIn(
-            """\
+            f"""\
     - User stack trace:
-    -   File [file_path], line 201, in outmost_fn
+    -   File [file_path], line {line_outmost}, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 204, in outer_fn
+    -   File [file_path], line {line_outer}, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 207, in fn
+    -   File [file_path], line {line_fn}, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 210, in inner
+    -   File [file_path], line {line_inner}, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
